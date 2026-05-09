@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fatfinger6000.korlogos.com/schemas/rulepack-v1.json",
+  "title": "FatFinger6000 Rule Pack",
+  "description": "A versioned, declarative collection of attribution rules and lead-score formulas. Rule packs are data, not code. The engine consumes rule packs and applies them deterministically. Public rule packs ship in the FatFinger6000 examples; client-specific rule packs live in private repos.",
+  "type": "object",
+  "required": ["pack_id", "pack_version", "pack_format_version", "attribution_rules", "lead_score_formula"],
+  "additionalProperties": false,
+  "properties": {
+    "pack_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
+      "description": "Stable identifier for this rule pack (e.g., 'korlogos-default', 'aws-public-cloud', 'enterprise-baseline')."
+    },
+    "pack_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Semantic version of this pack."
+    },
+    "pack_format_version": {
+      "type": "string",
+      "const": "v1"
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of the rule pack's purpose and scope."
+    },
+    "depends_on": {
+      "type": "array",
+      "description": "Other rule packs this pack extends. Resolution is operator-controlled; the engine does not fetch packs.",
+      "items": {
+        "type": "object",
+        "required": ["pack_id", "pack_version_constraint"],
+        "properties": {
+          "pack_id": { "type": "string" },
+          "pack_version_constraint": { "type": "string", "description": "Semver constraint, e.g., '^1.4.0'." }
+        }
+      }
+    },
+    "attribution_rules": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/AttributionRule" }
+    },
+    "lead_score_formula": { "$ref": "#/$defs/LeadScoreFormula" },
+    "tier_thresholds": {
+      "type": "object",
+      "description": "Confidence thresholds for promoting numeric confidence to tier labels.",
+      "required": ["confirmed", "high", "medium"],
+      "properties": {
+        "confirmed": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.95 },
+        "high": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.75 },
+        "medium": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.5 }
+      }
+    }
+  },
+  "$defs": {
+    "AttributionRule": {
+      "type": "object",
+      "required": ["rule_id", "rule_version", "description", "when", "then"],
+      "additionalProperties": false,
+      "properties": {
+        "rule_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$"
+        },
+        "rule_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "description": { "type": "string" },
+        "category": {
+          "type": "string",
+          "enum": ["high_confidence_join", "registrant_pivot", "infrastructure_correlation", "naming_heuristic", "cloud_authoritative", "rejection_rule"]
+        },
+        "when": {
+          "$ref": "#/$defs/Condition",
+          "description": "Boolean condition tree evaluated against the candidate target's graph context."
+        },
+        "then": {
+          "$ref": "#/$defs/Action",
+          "description": "Outcome to apply when the condition matches."
+        },
+        "priority": {
+          "type": "integer",
+          "default": 100,
+          "description": "Evaluation priority. Lower numbers evaluate first. Used for ordering when multiple rules could apply."
+        },
+        "enabled": { "type": "boolean", "default": true }
+      }
+    },
+    "Condition": {
+      "oneOf": [
+        { "$ref": "#/$defs/AndCondition" },
+        { "$ref": "#/$defs/OrCondition" },
+        { "$ref": "#/$defs/NotCondition" },
+        { "$ref": "#/$defs/PredicateCondition" }
+      ]
+    },
+    "AndCondition": {
+      "type": "object",
+      "required": ["all_of"],
+      "properties": {
+        "all_of": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Condition" },
+          "minItems": 1
+        }
+      }
+    },
+    "OrCondition": {
+      "type": "object",
+      "required": ["any_of"],
+      "properties": {
+        "any_of": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Condition" },
+          "minItems": 1
+        }
+      }
+    },
+    "NotCondition": {
+      "type": "object",
+      "required": ["not"],
+      "properties": {
+        "not": { "$ref": "#/$defs/Condition" }
+      }
+    },
+    "PredicateCondition": {
+      "type": "object",
+      "required": ["predicate"],
+      "additionalProperties": false,
+      "properties": {
+        "predicate": {
+          "type": "string",
+          "enum": [
+            "target_has_certificate_with_san_in_scope",
+            "target_ip_in_authorized_cloud_account_range",
+            "target_registrant_matches_authorized_pattern",
+            "target_shares_cert_chain_with_attributed_target",
+            "target_nameserver_matches_authorized_pattern",
+            "target_asn_in_authorized_list",
+            "target_subdomain_of_authorized_apex",
+            "target_in_explicit_authorization_scope",
+            "target_observed_by_collectors_count_gte",
+            "target_first_observed_within_days",
+            "target_has_exposure_indicator",
+            "target_responds_with_authorized_naming_convention"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "description": "Predicate-specific parameters. Schema depends on which predicate is used."
+        }
+      }
+    },
+    "Action": {
+      "type": "object",
+      "required": ["outcome"],
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": ["promote", "demote", "neutral", "reject"]
+        },
+        "confidence_delta": {
+          "type": "number",
+          "minimum": -1.0,
+          "maximum": 1.0,
+          "description": "Signed value to add to the target's overall confidence. Required when outcome is 'promote' or 'demote'."
+        },
+        "review_flag": {
+          "type": "boolean",
+          "description": "When true, sets requires_analyst_review on the target regardless of final tier."
+        },
+        "review_reason": {
+          "type": "string",
+          "description": "Reason code for review_flag, must match the Target.review_reasons enum."
+        }
+      }
+    },
+    "LeadScoreFormula": {
+      "type": "object",
+      "required": ["formula_version", "weights", "modifiers"],
+      "additionalProperties": false,
+      "properties": {
+        "formula_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "weights": {
+          "type": "object",
+          "description": "Weights for each input dimension. Score is computed as a weighted sum, clamped to 0-100.",
+          "properties": {
+            "attribution_confidence": { "type": "number", "default": 20 },
+            "exposure_severity_max": { "type": "number", "default": 30 },
+            "tech_stack_risk": { "type": "number", "default": 25 },
+            "freshness": { "type": "number", "default": 10 },
+            "cloud_provider_factor": { "type": "number", "default": 15 }
+          }
+        },
+        "modifiers": {
+          "type": "array",
+          "description": "Conditional modifiers applied after the base score is computed.",
+          "items": {
+            "type": "object",
+            "required": ["when", "then_multiply"],
+            "properties": {
+              "when": { "$ref": "#/$defs/Condition" },
+              "then_multiply": { "type": "number" },
+              "description": { "type": "string" }
+            }
+          }
+        },
+        "category_thresholds": {
+          "type": "object",
+          "properties": {
+            "critical_priority": { "type": "number", "default": 80 },
+            "high_priority": { "type": "number", "default": 60 },
+            "medium_priority": { "type": "number", "default": 40 },
+            "low_priority": { "type": "number", "default": 20 }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,162 @@
+{
+  "$schema": "https://fatfinger6000.korlogos.com/schemas/rulepack-v1.json",
+
+  "pack_id": "example-baseline",
+  "pack_version": "0.1.0",
+  "pack_format_version": "v1",
+  "description": "Minimal example rule pack demonstrating the FatFinger6000 attribution rule format. Suitable as a starting point for operators writing their own packs. Not intended for production use without review.",
+
+  "tier_thresholds": {
+    "confirmed": 0.95,
+    "high": 0.75,
+    "medium": 0.5
+  },
+
+  "attribution_rules": [
+    {
+      "rule_id": "cloud-account-authoritative",
+      "rule_version": "1.0.0",
+      "category": "cloud_authoritative",
+      "priority": 10,
+      "description": "If the target's IP falls within a cloud account/subscription/project ID listed in the tenant's authorization scope, this is ground truth ownership.",
+      "when": {
+        "predicate": "target_ip_in_authorized_cloud_account_range",
+        "params": {}
+      },
+      "then": {
+        "outcome": "promote",
+        "confidence_delta": 1.0
+      }
+    },
+    {
+      "rule_id": "explicit-scope-match",
+      "rule_version": "1.0.0",
+      "category": "high_confidence_join",
+      "priority": 20,
+      "description": "Target is a subdomain of an apex domain explicitly listed in the tenant's authorization scope.",
+      "when": {
+        "predicate": "target_subdomain_of_authorized_apex",
+        "params": {}
+      },
+      "then": {
+        "outcome": "promote",
+        "confidence_delta": 0.95
+      }
+    },
+    {
+      "rule_id": "shared-cert-chain",
+      "rule_version": "1.0.0",
+      "category": "infrastructure_correlation",
+      "priority": 50,
+      "description": "Target shares a TLS certificate chain with a target already attributed at high or confirmed tier.",
+      "when": {
+        "all_of": [
+          {
+            "predicate": "target_shares_cert_chain_with_attributed_target",
+            "params": { "minimum_tier": "high" }
+          },
+          {
+            "not": {
+              "predicate": "target_in_explicit_authorization_scope",
+              "params": { "rejection_only": true }
+            }
+          }
+        ]
+      },
+      "then": {
+        "outcome": "promote",
+        "confidence_delta": 0.4
+      }
+    },
+    {
+      "rule_id": "registrant-pivot",
+      "rule_version": "1.0.0",
+      "category": "registrant_pivot",
+      "priority": 60,
+      "description": "Target's registrant matches a pattern listed in tenant authorization scope (organization name, email pattern).",
+      "when": {
+        "predicate": "target_registrant_matches_authorized_pattern",
+        "params": {}
+      },
+      "then": {
+        "outcome": "promote",
+        "confidence_delta": 0.5
+      }
+    },
+    {
+      "rule_id": "thin-evidence-flag-for-review",
+      "rule_version": "1.0.0",
+      "category": "high_confidence_join",
+      "priority": 200,
+      "description": "Target observed by only one collector source. Insufficient to confidently attribute; flag for analyst review.",
+      "when": {
+        "all_of": [
+          {
+            "predicate": "target_observed_by_collectors_count_gte",
+            "params": { "count": 1 }
+          },
+          {
+            "not": {
+              "predicate": "target_observed_by_collectors_count_gte",
+              "params": { "count": 2 }
+            }
+          }
+        ]
+      },
+      "then": {
+        "outcome": "neutral",
+        "review_flag": true,
+        "review_reason": "high_value_target_low_confidence"
+      }
+    },
+    {
+      "rule_id": "explicit-rejection",
+      "rule_version": "1.0.0",
+      "category": "rejection_rule",
+      "priority": 5,
+      "description": "Target is explicitly listed as 'not yours' in tenant authorization scope. Reject regardless of other evidence.",
+      "when": {
+        "predicate": "target_in_explicit_authorization_scope",
+        "params": { "rejection_only": true }
+      },
+      "then": {
+        "outcome": "reject"
+      }
+    }
+  ],
+
+  "lead_score_formula": {
+    "formula_version": "0.1.0",
+    "weights": {
+      "attribution_confidence": 20,
+      "exposure_severity_max": 30,
+      "tech_stack_risk": 25,
+      "freshness": 10,
+      "cloud_provider_factor": 15
+    },
+    "modifiers": [
+      {
+        "description": "Newly discovered targets get a freshness boost for review prioritization.",
+        "when": {
+          "predicate": "target_first_observed_within_days",
+          "params": { "days": 7 }
+        },
+        "then_multiply": 1.2
+      },
+      {
+        "description": "Targets requiring analyst review are surfaced higher.",
+        "when": {
+          "predicate": "target_has_exposure_indicator",
+          "params": { "indicator": "admin_panel_exposed" }
+        },
+        "then_multiply": 1.5
+      }
+    ],
+    "category_thresholds": {
+      "critical_priority": 80,
+      "high_priority": 60,
+      "medium_priority": 40,
+      "low_priority": 20
+    }
+  }
+}

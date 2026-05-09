@@ -1,0 +1,729 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fatfinger6000.korlogos.com/schemas/canonical-artifact-v1.json",
+  "title": "FatFinger6000 Canonical Artifact",
+  "description": "The signed JSON artifact produced by a single FatFinger6000 pipeline run. This is the system's sole deliverable. Consumers ingest this file to drive CTEM workflows, red team lead review, and downstream LLM-driven analysis (Environment 2).",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run",
+    "tenant",
+    "targets",
+    "delta_from_previous_run",
+    "collector_health",
+    "manifest_ref"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "fatfinger6000/v1",
+      "description": "Schema namespace and major version. Backward-compatible changes within v1 are guaranteed; breaking changes are version bumps."
+    },
+    "run": {
+      "$ref": "#/$defs/Run"
+    },
+    "tenant": {
+      "$ref": "#/$defs/Tenant"
+    },
+    "targets": {
+      "type": "array",
+      "description": "Attributed external attack surface targets. Filtered by attribution tier; only assets with tier confirmed/high/medium/requires_review are included. Non-yours observations are retained in the graph for context but never reach the artifact.",
+      "items": { "$ref": "#/$defs/Target" }
+    },
+    "delta_from_previous_run": {
+      "$ref": "#/$defs/Delta"
+    },
+    "collector_health": {
+      "$ref": "#/$defs/CollectorHealth"
+    },
+    "manifest_ref": {
+      "type": "string",
+      "format": "uri-reference",
+      "description": "Pointer to the manifest.json file accompanying this artifact. Manifest contains run provenance and signing metadata. Format: relative path or URI."
+    },
+    "tenant_quota_warnings": {
+      "type": "array",
+      "description": "Quota events surfaced from the run (rate limits hit, budget ceiling reached, retention pruning triggered).",
+      "items": { "$ref": "#/$defs/QuotaWarning" }
+    },
+    "outside_authorized_scope_summary": {
+      "$ref": "#/$defs/OutsideAuthorizedScopeSummary",
+      "description": "Aggregated summary of attribution events that operated outside tenant authorization scope. Present when authorization scope is configured."
+    }
+  },
+
+  "$defs": {
+
+    "Run": {
+      "type": "object",
+      "required": ["run_id", "started_at", "completed_at", "pipeline_version"],
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "UUIDv7 for sortable identifiers."
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "completed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "pipeline_version": {
+          "type": "string",
+          "description": "Git commit hash of the FatFinger6000 codebase that produced this run.",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "rule_pack_version": {
+          "type": "string",
+          "description": "Identifier of the rule pack version used for attribution. Format: 'pack_name@version' (e.g., 'korlogos-default@1.4.2')."
+        },
+        "scope_version": {
+          "type": "string",
+          "description": "Version identifier of the tenant authorization scope in effect during the run."
+        },
+        "previous_run_id": {
+          "type": ["string", "null"],
+          "format": "uuid",
+          "description": "Run ID of the previous successful run, used as the comparison baseline for delta_from_previous_run. Null on the first run for a tenant."
+        }
+      }
+    },
+
+    "Tenant": {
+      "type": "object",
+      "required": ["tenant_id", "tenant_name"],
+      "additionalProperties": false,
+      "properties": {
+        "tenant_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "tenant_name": {
+          "type": "string",
+          "description": "Human-readable tenant identifier. Not guaranteed unique across deployments."
+        },
+        "deployment_id": {
+          "type": "string",
+          "description": "Identifier for the deployment this run executed in. Useful when artifacts cross deployment boundaries."
+        }
+      }
+    },
+
+    "Target": {
+      "type": "object",
+      "required": [
+        "target_id",
+        "primary_identifier",
+        "attribution",
+        "exposure",
+        "provenance",
+        "first_observed_at",
+        "last_observed_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "target_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Stable identifier for this target across runs. Generated deterministically from primary_identifier; same logical asset produces the same target_id across runs."
+        },
+        "primary_identifier": {
+          "$ref": "#/$defs/PrimaryIdentifier"
+        },
+        "secondary_identifiers": {
+          "type": "array",
+          "description": "Other identifiers this target is known by (additional DNS names, IPs the host has been observed on, certificate subjects).",
+          "items": { "$ref": "#/$defs/Identifier" }
+        },
+        "attribution": {
+          "$ref": "#/$defs/Attribution"
+        },
+        "exposure": {
+          "$ref": "#/$defs/Exposure"
+        },
+        "tech_stack": {
+          "$ref": "#/$defs/TechStack"
+        },
+        "cloud_resource": {
+          "$ref": "#/$defs/CloudResource"
+        },
+        "lead_score": {
+          "$ref": "#/$defs/LeadScore"
+        },
+        "llm_enrichment": {
+          "$ref": "#/$defs/LLMEnrichment",
+          "description": "Optional structured output from the LLM correlation pass. Present only for targets that went through LLM enrichment."
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "first_observed_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When this target was first observed by the pipeline (across all runs)."
+        },
+        "last_observed_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Most recent observation timestamp from any source."
+        },
+        "requires_analyst_review": {
+          "type": "boolean",
+          "description": "True when attribution rules and LLM enrichment could not produce a confident decision. Targets with this flag are the primary input for Environment 2 analyst workflows.",
+          "default": false
+        },
+        "review_reasons": {
+          "type": "array",
+          "description": "Structured reasons this target requires review. Present when requires_analyst_review is true.",
+          "items": { "type": "string", "enum": [
+            "ambiguous_attribution",
+            "novel_correlation_pattern",
+            "llm_low_self_confidence",
+            "rule_engine_llm_disagreement",
+            "outside_authorized_scope",
+            "unsanitizable_observation_content",
+            "high_value_target_low_confidence"
+          ]}
+        }
+      }
+    },
+
+    "PrimaryIdentifier": {
+      "type": "object",
+      "required": ["type", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["domain", "subdomain", "ip", "cidr", "cloud_resource_id", "url"],
+          "description": "Identifier type. The pipeline picks the most stable identifier as primary; others go in secondary_identifiers."
+        },
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+
+    "Identifier": {
+      "type": "object",
+      "required": ["type", "value", "first_observed_at"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["domain", "subdomain", "ip", "cidr", "cloud_resource_id", "url", "certificate_fingerprint", "asn"]
+        },
+        "value": { "type": "string" },
+        "first_observed_at": { "type": "string", "format": "date-time" },
+        "last_observed_at": { "type": "string", "format": "date-time" }
+      }
+    },
+
+    "Attribution": {
+      "type": "object",
+      "required": ["tier", "confidence", "reasoning", "decision_path"],
+      "additionalProperties": false,
+      "properties": {
+        "tier": {
+          "type": "string",
+          "enum": ["confirmed", "high", "medium", "requires_review"],
+          "description": "Attribution confidence tier. 'confirmed' is the highest (cloud-account-authoritative or operator-asserted); 'requires_review' is in the artifact but flagged for analyst attention. The rejected and not_yours tiers exist in the graph but never appear in the artifact."
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Numeric confidence (0.0-1.0) computed by the attribution engine. Tier is derived from confidence via configurable thresholds."
+        },
+        "reasoning": {
+          "type": "string",
+          "description": "Plain-language explanation of why this target was attributed to the tenant. Generated by the rule engine and optionally augmented by the LLM enrichment pass."
+        },
+        "decision_path": {
+          "type": "array",
+          "description": "Ordered list of attribution rules that fired during evaluation, in the order they were applied. Each entry references a rule by ID and includes the rule's contribution to the final tier.",
+          "items": { "$ref": "#/$defs/AttributionRuleApplication" }
+        },
+        "scope_match": {
+          "type": "object",
+          "description": "How this target matches the tenant's authorization scope.",
+          "required": ["in_scope"],
+          "properties": {
+            "in_scope": { "type": "boolean" },
+            "matched_scope_entries": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Identifiers of the authorization scope entries this target matched (e.g., apex domain, cloud account, registrant)."
+            },
+            "outside_scope_reason": {
+              "type": ["string", "null"],
+              "description": "Plain-language reason this target is outside scope. Null when in_scope is true."
+            }
+          }
+        }
+      }
+    },
+
+    "AttributionRuleApplication": {
+      "type": "object",
+      "required": ["rule_id", "rule_version", "outcome", "confidence_contribution"],
+      "additionalProperties": false,
+      "properties": {
+        "rule_id": {
+          "type": "string",
+          "description": "Stable identifier of the attribution rule (e.g., 'cloud-account-authoritative', 'shared-cert-chain', 'registrant-pivot')."
+        },
+        "rule_version": {
+          "type": "string",
+          "description": "Version of the rule at the time of evaluation."
+        },
+        "outcome": {
+          "type": "string",
+          "enum": ["matched_promote", "matched_demote", "matched_neutral", "no_match", "error"],
+          "description": "What happened when this rule evaluated against the target."
+        },
+        "confidence_contribution": {
+          "type": "number",
+          "description": "Signed value the rule contributed to the target's overall confidence. Positive promotes, negative demotes, zero is informational."
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Pointers to evidence records in the run's evidence store (content-addressed hashes). Allows analysts to retrieve the raw observation that triggered the rule."
+        }
+      }
+    },
+
+    "Exposure": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "open_ports": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/OpenPort" }
+        },
+        "tls_certificates": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/TLSCertificateSummary" }
+        },
+        "http_endpoints": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/HTTPEndpoint" }
+        },
+        "dns_records": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/DNSRecord" }
+        },
+        "exposure_indicators": {
+          "type": "array",
+          "description": "Categorical indicators that contribute to lead score (e.g., 'admin_panel_exposed', 'expired_certificate', 'self_signed_certificate', 'default_credentials_likely').",
+          "items": {
+            "type": "object",
+            "required": ["indicator", "severity"],
+            "properties": {
+              "indicator": { "type": "string" },
+              "severity": { "type": "string", "enum": ["info", "low", "medium", "high", "critical"] },
+              "evidence_ref": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    },
+
+    "OpenPort": {
+      "type": "object",
+      "required": ["port", "protocol", "first_observed_at", "last_observed_at"],
+      "additionalProperties": false,
+      "properties": {
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "protocol": { "type": "string", "enum": ["tcp", "udp"] },
+        "service_banner": {
+          "type": ["string", "null"],
+          "description": "Service banner from active probing, post-sanitization. Null when not available or when sanitization rejected the banner content."
+        },
+        "first_observed_at": { "type": "string", "format": "date-time" },
+        "last_observed_at": { "type": "string", "format": "date-time" }
+      }
+    },
+
+    "TLSCertificateSummary": {
+      "type": "object",
+      "required": ["fingerprint_sha256", "issuer", "subject", "not_before", "not_after"],
+      "additionalProperties": false,
+      "properties": {
+        "fingerprint_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "issuer": { "type": "string" },
+        "subject": { "type": "string" },
+        "subject_alt_names": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "not_before": { "type": "string", "format": "date-time" },
+        "not_after": { "type": "string", "format": "date-time" },
+        "is_expired": { "type": "boolean" },
+        "is_self_signed": { "type": "boolean" },
+        "ct_log_entries": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "CT log identifiers where this certificate was observed."
+        }
+      }
+    },
+
+    "HTTPEndpoint": {
+      "type": "object",
+      "required": ["url", "status_code", "first_observed_at", "last_observed_at"],
+      "additionalProperties": false,
+      "properties": {
+        "url": { "type": "string", "format": "uri" },
+        "status_code": { "type": "integer" },
+        "server_header": { "type": ["string", "null"] },
+        "title": { "type": ["string", "null"] },
+        "favicon_hash": { "type": ["string", "null"] },
+        "headers_hash": {
+          "type": ["string", "null"],
+          "description": "Stable hash of normalized response headers, useful for grouping similar endpoints."
+        },
+        "first_observed_at": { "type": "string", "format": "date-time" },
+        "last_observed_at": { "type": "string", "format": "date-time" }
+      }
+    },
+
+    "DNSRecord": {
+      "type": "object",
+      "required": ["record_type", "value", "first_observed_at", "last_observed_at"],
+      "additionalProperties": false,
+      "properties": {
+        "record_type": { "type": "string", "enum": ["A", "AAAA", "CNAME", "MX", "TXT", "NS", "SOA", "PTR", "CAA"] },
+        "value": { "type": "string" },
+        "ttl": { "type": ["integer", "null"] },
+        "first_observed_at": { "type": "string", "format": "date-time" },
+        "last_observed_at": { "type": "string", "format": "date-time" }
+      }
+    },
+
+    "TechStack": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "components": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/TechComponent" }
+        },
+        "fingerprint_method": {
+          "type": "string",
+          "enum": ["wappalyzer_rules", "ja3_match", "favicon_hash", "header_pattern", "llm_inference", "combined"],
+          "description": "Method used to derive the tech stack."
+        },
+        "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+      }
+    },
+
+    "TechComponent": {
+      "type": "object",
+      "required": ["name", "category", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "description": "Component name (e.g., 'nginx', 'WordPress', 'Apache Tomcat')." },
+        "version": { "type": ["string", "null"] },
+        "category": {
+          "type": "string",
+          "enum": ["web_server", "application_server", "framework", "cms", "language", "database", "load_balancer", "cdn", "waf", "auth_provider", "analytics", "other"]
+        },
+        "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "evidence_refs": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "CloudResource": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "string", "enum": ["aws", "azure", "gcp", "other", "unknown"] },
+        "service_category": {
+          "type": "string",
+          "enum": [
+            "compute", "load_balancer", "cdn", "object_storage", "function",
+            "container", "managed_database", "api_gateway", "dns", "other", "unknown"
+          ]
+        },
+        "region": { "type": ["string", "null"] },
+        "resource_identifier": {
+          "type": ["string", "null"],
+          "description": "Cloud-provider-specific identifier when known (ARN, resource ID). Often null when attribution is from public IP range data only."
+        },
+        "ip_range_match": {
+          "type": "object",
+          "description": "Match details from cloud provider IP range manifests.",
+          "properties": {
+            "manifest_source": { "type": "string" },
+            "matched_range": { "type": "string" },
+            "service_tag": { "type": ["string", "null"] }
+          }
+        }
+      }
+    },
+
+    "LeadScore": {
+      "type": "object",
+      "required": ["score", "formula_version", "inputs"],
+      "additionalProperties": false,
+      "properties": {
+        "score": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "description": "Numeric lead score for red team prioritization. Higher is more interesting."
+        },
+        "formula_version": {
+          "type": "string",
+          "description": "Identifier of the lead-score formula version. Same formula version applied to same inputs always produces the same score."
+        },
+        "inputs": {
+          "type": "object",
+          "description": "Inputs to the lead score formula, exposed for auditability.",
+          "properties": {
+            "attribution_confidence": { "type": "number" },
+            "exposure_severity_max": { "type": "string" },
+            "tech_stack_risk_indicators": { "type": "array", "items": { "type": "string" } },
+            "freshness_days": { "type": "integer" },
+            "cloud_provider_factor": { "type": "number" }
+          }
+        },
+        "category": {
+          "type": "string",
+          "enum": ["informational", "low_priority", "medium_priority", "high_priority", "critical_priority"]
+        }
+      }
+    },
+
+    "LLMEnrichment": {
+      "type": "object",
+      "required": ["provider", "model", "ran_at"],
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "string", "enum": ["ollama", "anthropic_direct", "openai", "gemini"] },
+        "model": { "type": "string", "description": "Provider-native model identifier including version." },
+        "ran_at": { "type": "string", "format": "date-time" },
+        "structured_output": {
+          "type": "object",
+          "description": "Validated structured output from the LLM. Schema is determined by the enrichment job (correlation, fingerprinting, noise triage). Always strictly schema-validated; outputs that fail validation are not stored here."
+        },
+        "self_reported_confidence": {
+          "type": ["number", "null"],
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Confidence the model assigned to its own output. Used as a tie-breaker escalation trigger."
+        },
+        "tie_breaker_called": {
+          "type": "boolean",
+          "default": false,
+          "description": "True when the local LLM's output was overridden by an external provider tie-breaker."
+        },
+        "tie_breaker_provider": { "type": ["string", "null"] }
+      }
+    },
+
+    "Provenance": {
+      "type": "object",
+      "required": ["sources", "evidence_refs"],
+      "additionalProperties": false,
+      "properties": {
+        "sources": {
+          "type": "array",
+          "description": "Collector sources that contributed observations to this target.",
+          "items": {
+            "type": "object",
+            "required": ["collector_id", "first_observed_at", "last_observed_at"],
+            "properties": {
+              "collector_id": { "type": "string" },
+              "collector_version": { "type": "string" },
+              "first_observed_at": { "type": "string", "format": "date-time" },
+              "last_observed_at": { "type": "string", "format": "date-time" },
+              "observation_count": { "type": "integer", "minimum": 1 }
+            }
+          }
+        },
+        "evidence_refs": {
+          "type": "array",
+          "description": "Content-addressed pointers to raw evidence (cert PEMs, raw HTTP responses, raw DNS responses) stored in the evidence object store. Format: 'sha256:<hex>'.",
+          "items": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+        }
+      }
+    },
+
+    "Delta": {
+      "type": "object",
+      "required": ["previous_run_id", "added", "removed", "changed"],
+      "additionalProperties": false,
+      "properties": {
+        "previous_run_id": {
+          "type": ["string", "null"],
+          "format": "uuid",
+          "description": "Run ID this delta is computed against. Null on the first run for a tenant."
+        },
+        "added": {
+          "type": "array",
+          "description": "Targets present in this run but not in the previous run.",
+          "items": { "$ref": "#/$defs/DeltaAdded" }
+        },
+        "removed": {
+          "type": "array",
+          "description": "Targets present in the previous run but not in this run. Each entry includes a reason that distinguishes 'no longer there' from 'we couldn't see it this time'.",
+          "items": { "$ref": "#/$defs/DeltaRemoved" }
+        },
+        "changed": {
+          "type": "array",
+          "description": "Targets present in both runs with material changes.",
+          "items": { "$ref": "#/$defs/DeltaChanged" }
+        }
+      }
+    },
+
+    "DeltaAdded": {
+      "type": "object",
+      "required": ["target_id", "primary_identifier", "discovery_path"],
+      "properties": {
+        "target_id": { "type": "string", "format": "uuid" },
+        "primary_identifier": { "$ref": "#/$defs/PrimaryIdentifier" },
+        "discovery_path": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Ordered sequence of collectors and rules that led to this target's discovery."
+        }
+      }
+    },
+
+    "DeltaRemoved": {
+      "type": "object",
+      "required": ["target_id", "primary_identifier", "reason"],
+      "properties": {
+        "target_id": { "type": "string", "format": "uuid" },
+        "primary_identifier": { "$ref": "#/$defs/PrimaryIdentifier" },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "no_longer_observed",
+            "attribution_downgraded_below_threshold",
+            "analyst_rejected",
+            "removal_uncertain_collector_failure",
+            "scope_changed_now_outside",
+            "tenant_data_subject_request"
+          ]
+        },
+        "removal_details": { "type": ["string", "null"] }
+      }
+    },
+
+    "DeltaChanged": {
+      "type": "object",
+      "required": ["target_id", "primary_identifier", "change_types"],
+      "properties": {
+        "target_id": { "type": "string", "format": "uuid" },
+        "primary_identifier": { "$ref": "#/$defs/PrimaryIdentifier" },
+        "change_types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "attribution_tier_promoted",
+              "attribution_tier_demoted",
+              "exposure_added",
+              "exposure_removed",
+              "tech_stack_changed",
+              "cloud_resource_attribution_changed",
+              "lead_score_significant_change",
+              "review_status_changed"
+            ]
+          }
+        },
+        "details": {
+          "type": "object",
+          "description": "Per-change-type details, structure depends on the change types present."
+        }
+      }
+    },
+
+    "CollectorHealth": {
+      "type": "object",
+      "required": ["collectors"],
+      "additionalProperties": false,
+      "properties": {
+        "collectors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["collector_id", "status", "started_at", "completed_at"],
+            "properties": {
+              "collector_id": { "type": "string" },
+              "collector_version": { "type": "string" },
+              "status": {
+                "type": "string",
+                "enum": ["success", "partial_success", "failure", "skipped", "rate_limited"]
+              },
+              "started_at": { "type": "string", "format": "date-time" },
+              "completed_at": { "type": "string", "format": "date-time" },
+              "observations_collected": { "type": "integer", "minimum": 0 },
+              "errors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "error_type": { "type": "string" },
+                    "message": { "type": "string" },
+                    "occurred_at": { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "QuotaWarning": {
+      "type": "object",
+      "required": ["quota_type", "severity"],
+      "properties": {
+        "quota_type": {
+          "type": "string",
+          "enum": [
+            "llm_token_budget",
+            "llm_dollar_budget",
+            "collector_api_rate_limit",
+            "collector_api_daily_quota",
+            "storage_bytes",
+            "candidate_count",
+            "concurrent_runs"
+          ]
+        },
+        "severity": { "type": "string", "enum": ["info", "warning", "limit_reached"] },
+        "details": { "type": "string" },
+        "occurred_at": { "type": "string", "format": "date-time" }
+      }
+    },
+
+    "OutsideAuthorizedScopeSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "total_outside_scope_observations": { "type": "integer", "minimum": 0 },
+        "outside_scope_targets_in_artifact": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Count of targets included in the artifact (because attribution rules promoted them) that fell outside the authorization scope. These targets carry attribution.scope_match.in_scope = false."
+        },
+        "scope_enforcement_mode": {
+          "type": "string",
+          "enum": ["soft", "medium", "hard"],
+          "description": "Which scope-enforcement mode was active during this run. 'soft' = log only, 'medium' = warn and flag in artifact (v1 default), 'hard' = block active probing outside scope."
+        }
+      }
+    }
+  }
+}

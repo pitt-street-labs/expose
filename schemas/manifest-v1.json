@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fatfinger6000.korlogos.com/schemas/manifest-v1.json",
+  "title": "FatFinger6000 Run Manifest",
+  "description": "Manifest accompanying each canonical artifact. Describes run provenance, signing metadata, and integrity hashes. Smaller than the canonical artifact and intended for quick inspection without parsing the full artifact.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "tenant_id",
+    "generated_at",
+    "pipeline_version",
+    "canonical_artifact_hash",
+    "signature_metadata"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "fatfinger6000-manifest/v1"
+    },
+    "run_id": { "type": "string", "format": "uuid" },
+    "tenant_id": { "type": "string", "format": "uuid" },
+    "tenant_name": { "type": "string" },
+    "deployment_id": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "pipeline_version": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$",
+      "description": "Git commit hash of the FatFinger6000 codebase that produced this run."
+    },
+    "canonical_artifact_hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$",
+      "description": "SHA-256 hash of canonical.json.gz. Tampering with the canonical file invalidates this hash."
+    },
+    "canonical_artifact_filename": {
+      "type": "string",
+      "default": "canonical.json.gz"
+    },
+    "target_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of targets in the canonical artifact."
+    },
+    "rule_pack": {
+      "type": "object",
+      "required": ["pack_id", "pack_version"],
+      "properties": {
+        "pack_id": { "type": "string" },
+        "pack_version": { "type": "string" },
+        "pack_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "properties": {
+        "scope_version": { "type": "string" },
+        "scope_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "enforcement_mode": { "type": "string", "enum": ["soft", "medium", "hard"] }
+      }
+    },
+    "llm_provider_used": {
+      "type": "object",
+      "description": "LLM provider and model details for any enrichment performed during this run.",
+      "properties": {
+        "primary_provider": { "type": "string", "enum": ["ollama", "anthropic_direct", "openai", "gemini", "none"] },
+        "primary_model": { "type": ["string", "null"] },
+        "tie_breaker_provider": { "type": ["string", "null"] },
+        "tie_breaker_model": { "type": ["string", "null"] },
+        "tie_breaker_invocations": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "collectors_enabled": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Identifiers of collectors enabled for this run."
+    },
+    "feature_flags": {
+      "type": "object",
+      "additionalProperties": { "type": "boolean" },
+      "description": "Feature flags in effect during this run."
+    },
+    "signature_metadata": {
+      "type": "object",
+      "required": ["signature_format", "signed_by"],
+      "properties": {
+        "signature_format": { "type": "string", "enum": ["cosign-keyless", "cosign-keypair", "unsigned"] },
+        "signed_by": {
+          "type": "string",
+          "description": "Identity that signed this artifact. For cosign-keyless via GitHub Actions OIDC, this is the workload identity. For unsigned (lab-only), this field describes the operator and is informational."
+        },
+        "signature_filename": {
+          "type": "string",
+          "default": "canonical.json.gz.sig",
+          "description": "Filename of the detached signature accompanying this manifest."
+        },
+        "transparency_log_entry": {
+          "type": ["string", "null"],
+          "description": "Reference to the Sigstore transparency log entry (Rekor UUID or URL). Null for unsigned or non-transparency-log signing modes."
+        }
+      }
+    },
+    "previous_run_id": { "type": ["string", "null"], "format": "uuid" },
+    "next_scheduled_run_at": { "type": ["string", "null"], "format": "date-time" }
+  }
+}

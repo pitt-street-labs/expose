@@ -1,0 +1,132 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# uv
+.uv/
+uv.lock.local
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Type checking
+.mypy_cache/
+.pyre/
+.pytype/
+.dmypy.json
+dmypy.json
+
+# Linting
+.ruff_cache/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Local development
+local/
+tmp/
+*.local.yaml
+tenant-config.yaml
+*.tenant-config.yaml
+
+# Secrets — never commit
+*.key
+*.pem
+*.crt
+*.p12
+.secrets/
+secrets.yaml
+*.secrets.yaml
+
+# Build artifacts
+*.tar.gz
+*.tgz
+*.zip
+
+# Container build cache
+.docker/
+
+# Helm
+deploy/helm-chart/charts/
+deploy/helm-chart/Chart.lock
+deploy/helm-chart/*.tgz
+
+# Generated documentation
+docs/_build/
+site/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Local artifacts
+artifacts/
+runs/
+
+# Evidence object store (local dev)
+evidence/
+
+# OS
+Thumbs.db
+desktop.ini
+
+# Editor swap files
+*.swn
+*.swo
+*.swp
+
+# Profiling
+*.prof
+.profile/
+
+# Backup files
+*.bak
+*.backup
+*.orig
