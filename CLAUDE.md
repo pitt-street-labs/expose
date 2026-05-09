@@ -36,7 +36,7 @@ This repository (`pitt-street-labs/ff6k` on internal Gitea) is **specification-o
 | Codename | `FF6K` (do not change) |
 | Gitea repo | `pitt-street-labs/ff6k` (private) |
 | Gitea URL | https://git.int.korlogos.com:8084/pitt-street-labs/ff6k |
-| Issue tracker | Gitea Issues at the repo above (34 issues filed across 4 milestones) |
+| Issue tracker | Gitea Issues at the repo above (37 issues filed across 4 milestones) |
 | License | Apache 2.0 (engine); separate proprietary modules per ADR-009 |
 | MITRE ATT&CK anchor | Reconnaissance (TA0043) only for Core; Resource Development (TA0042) is a commercial Threat Context module concern |
 | Two-environment model | E1 = this codebase (deterministic engine); E2 = downstream LLM analysis (out of scope, anticipates Mythos via Project Glasswing) |
@@ -55,13 +55,14 @@ This repository (`pitt-street-labs/ff6k` on internal Gitea) is **specification-o
 | Problem statement (scaffold) | `docs/problem-statement.md` |
 | JSON Schemas (Draft 2020-12) | `schemas/canonical-artifact-v1.json`, `manifest-v1.json`, `rulepack-v1.json` |
 | Working example rule pack | `examples/rulepacks/example-baseline.json` |
-| Original handoff briefing | `HANDOFF.md` (un-tracked; session artifact) |
-| Init script (already executed) | `init-and-push-to-gitea.sh` |
+| Original handoff briefing | `HANDOFF.md` (committed as genesis record) |
+| Init script (already executed) | `init-and-push-to-gitea.sh` (committed as genesis record; token redacted) |
+| Advisory strategy documents | `docs/strategy/` — non-locked analyses informing future sessions (e.g., `persona-analysis.md`) |
 
 ## Issue tracker conventions
 
-- 34 issues, 7 epics, 4 milestones (Phase 1, Phase 2, Phase 3, Ongoing). Issue 1 = Active scanner egress; issue 34 = ETHICS.md maintenance.
-- Labels follow `epic:<slug>`, `area:<slug>`, `priority:<level>`, `type:<kind>`, plus `v1` for v1 deliverables (4 issues).
+- 37 issues, 7 epics, 4 milestones (Phase 1, Phase 2, Phase 3, Ongoing). Issues #1-34 are the spec-phase backlog; #35 ETHICS quarterly review (due 2026-08-09); #36 orchestration framework selection (Phase 1 critical-path); #37 persona-analysis follow-ups (advisory umbrella).
+- Labels follow `epic:<slug>`, `area:<slug>`, `priority:<level>`, `type:<kind>`, plus `v1` for v1 deliverables (4 issues: #3, #28, #31, #34).
 - Reference issues by number in commits: `Closes #N` or `Refs #N`.
 - New work discovered during a session → file an issue immediately (Tier 3, pre-authorized) rather than letting it slip.
 
@@ -75,9 +76,11 @@ Following `~/CLAUDE.md` change control:
 
 ## Lessons / facts to preserve
 
-- The init script's default `ssh://...:8084/jcarlson/...` URL was wrong on two counts (port 8084 is Gitea HTTPS, not SSH; and the lab namespace is `pitt-street-labs/`, not `jcarlson/`). The committed script reflects the corrected HTTPS+token form.
+- The init script's default `ssh://...:8084/jcarlson/...` URL was wrong on two counts (port 8084 is Gitea HTTPS, not SSH; and the lab namespace is `pitt-street-labs/`, not `jcarlson/`). The committed script reflects the corrected HTTPS+token form, with the token redacted to `${GITEA_TOKEN:?...}` per the credential-sanitization pattern (see project memory).
 - Multi-arch image builds (issue #3) and Cloud object storage migration (#9) had their milestones patched after creation — the importer's title-match for milestone assignment didn't account for parenthetical title suffixes.
 - Default git identity for commits in this repo is `Enema Combatant <enema-combatant@users.noreply.github.com>` (lab convention across all PSL repos), even though the project lead's persona is "jcarlson" / Jeffro.
+- Advisory documents (e.g., `docs/strategy/persona-analysis.md`) carry an explicit "Advisory — not locked" status header to distinguish them from the foundation artifacts (SPEC.md, ADRs, positioning.md). New advisory work belongs under `docs/strategy/` to keep `docs/` root for the locked spec set.
+- README.md / SECURITY.md / CONTRIBUTING.md still reference `github.com/korlogos/fatfinger6000` URLs — intentional placeholders for the post-Session-H rename pass. Do not edit them piecemeal.
 
 ## Subsequent session order (recommended)
 
