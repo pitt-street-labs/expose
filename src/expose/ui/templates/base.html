@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="utf-8">
+    <title>{% block title %}EXPOSE{% endblock %} — Attack Surface Intelligence</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="EXPOSE — continuous, attributed external attack surface intelligence">
+    <meta name="color-scheme" content="dark">
+
+    <!-- HTMX for real-time partial updates -->
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"></script>
+
+    <!-- Alpine.js for reactive UI state -->
+    <script defer src="https://unpkg.com/alpinejs@3.14.8/dist/cdn.min.js"></script>
+
+    <!-- D3.js for the observation graph -->
+    <script src="https://unpkg.com/d3@7.9.0/dist/d3.min.js"></script>
+
+    <link rel="stylesheet" href="/static/css/expose.css">
+</head>
+<body class="bg-void text-gray-300 min-h-screen font-mono">
+    {% block content %}{% endblock %}
+    <script src="/static/js/expose.js"></script>
+</body>
+</html>

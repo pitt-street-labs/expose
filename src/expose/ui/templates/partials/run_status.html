@@ -1,0 +1,39 @@
+<div class="run-status-bar">
+    <div class="run-status-stages">
+        {% for stage in run.stages %}
+        <div class="stage stage-{{ stage.status }}">
+            <span class="stage-indicator">
+                {% if stage.status == "done" %}
+                    &#10003;
+                {% elif stage.status == "active" %}
+                    &#9679;
+                {% else %}
+                    &#9675;
+                {% endif %}
+            </span>
+            <span class="stage-label">{{ stage.label }}</span>
+        </div>
+        {% if not loop.last %}
+        <span class="stage-connector stage-connector-{{ stage.status }}"></span>
+        {% endif %}
+        {% endfor %}
+    </div>
+    <div class="run-status-metrics">
+        <span class="metric">
+            <span class="metric-value">{{ run.entities_discovered }}</span>
+            <span class="metric-label">discovered</span>
+        </span>
+        <span class="status-separator">|</span>
+        <span class="metric">
+            <span class="metric-value">{{ run.entities_attributed }}</span>
+            <span class="metric-label">attributed</span>
+        </span>
+        <span class="status-separator">|</span>
+        <span class="metric">
+            <span class="metric-value">{{ run.elapsed_seconds }}s</span>
+            <span class="metric-label">elapsed</span>
+        </span>
+        <span class="status-separator">|</span>
+        <span class="run-id-label">Run {{ run.id[:8] }}...</span>
+    </div>
+</div>

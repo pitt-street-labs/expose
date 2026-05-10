@@ -1,0 +1,40 @@
+{% if entities %}
+<table class="entity-table" role="grid" aria-label="Discovered entities">
+    <thead>
+        <tr>
+            <th scope="col" class="col-type">Type</th>
+            <th scope="col" class="col-identifier">Identifier</th>
+            <th scope="col" class="col-attribution">Attribution</th>
+            <th scope="col" class="col-observed">Last Observed</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for entity in entities %}
+        <tr class="entity-row" data-entity-id="{{ entity.id }}">
+            <td class="col-type">
+                <span class="entity-type-badge entity-type-{{ entity.entity_type }}">
+                    {{ entity.entity_type }}
+                </span>
+            </td>
+            <td class="col-identifier">
+                <span class="identifier-text">{{ entity.canonical_identifier }}</span>
+            </td>
+            <td class="col-attribution">
+                <span class="attribution-badge attribution-{{ entity.attribution_status }}">
+                    {{ entity.attribution_status | replace("_", " ") }}
+                </span>
+            </td>
+            <td class="col-observed">
+                <time datetime="{{ entity.last_observed_at }}">
+                    {{ entity.last_observed_at }}
+                </time>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty-state empty-state-compact">
+    <p class="empty-state-body">No entities discovered for this tenant yet.</p>
+</div>
+{% endif %}

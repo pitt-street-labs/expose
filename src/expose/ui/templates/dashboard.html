@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title | default("Dashboard") }}{% endblock %}
+
+{% block content %}
+<div x-data="exposeApp()" class="dashboard-layout">
+
+    <!-- ===== Top bar ===== -->
+    <header class="top-bar">
+        <div class="top-bar-left">
+            <div class="logo">
+                <span class="logo-mark">&#9670;</span>
+                <span class="logo-text">EXPOSE</span>
+                <span class="logo-tagline">Attack Surface Intelligence</span>
+            </div>
+        </div>
+        <div class="top-bar-center">
+            <div class="tenant-selector">
+                <label for="tenant-select" class="sr-only">Tenant</label>
+                <select id="tenant-select"
+                        x-model="selectedTenantId"
+                        @change="onTenantChange()"
+                        class="selector-input">
+                    <option value="">Select tenant...</option>
+                    <!-- Populated dynamically; placeholder for noscript -->
+                    <option value="00000000-0000-0000-0000-000000000001">default</option>
+                </select>
+            </div>
+        </div>
+        <div class="top-bar-right">
+            <div class="run-indicator"
+                 x-show="activeRunId"
+                 x-cloak>
+                <span class="run-indicator-dot"></span>
+                <span class="run-indicator-label">Run active</span>
+            </div>
+            <noscript>
+                <span class="noscript-badge">JS disabled — static view</span>
+            </noscript>
+        </div>
+    </header>
+
+    <!-- ===== Split pane ===== -->
+    <main class="split-pane">
+
+        <!-- Left pane: observation graph -->
+        <section class="pane pane-left" aria-label="Observation graph">
+            <div class="pane-header">
+                <h2 class="pane-title">Observation Graph</h2>
+                <div class="pane-actions">
+                    <button class="btn btn-ghost"
+                            @click="graphLayout = graphLayout === 'force' ? 'radial' : 'force'"
+                            x-text="graphLayout === 'force' ? 'Radial' : 'Force'">
+                        Force
+                    </button>
+                </div>
+            </div>
+            <div id="observation-graph" class="graph-container">
+                <!-- D3 renders here -->
+                <noscript>
+                    <div class="empty-state">
+                        <p>Enable JavaScript to view the observation graph.</p>
+                    </div>
+                </noscript>
+                <div class="graph-placeholder" x-show="!selectedTenantId" x-cloak>
+                    <div class="empty-state">
+                        <div class="empty-state-icon">&#9670;</div>
+                        <p class="empty-state-title">No tenant selected</p>
+                        <p class="empty-state-body">
+                            Select a tenant above to begin mapping the attack surface.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <!-- Graph legend -->
+            <div class="graph-legend" x-show="selectedTenantId" x-cloak>
+                <span class="legend-item">
+                    <span class="legend-dot" style="background: var(--seed)"></span>Seed
+                </span>
+                <span class="legend-item">
+                    <span class="legend-dot" style="background: var(--discovered)"></span>Discovered
+                </span>
+                <span class="legend-item">
+                    <span class="legend-dot" style="background: var(--corroborated)"></span>Corroborated
+                </span>
+                <span class="legend-item">
+                    <span class="legend-dot" style="background: var(--high)"></span>High
+                </span>
+                <span class="legend-item">
+                    <span class="legend-dot legend-dot-glow" style="background: var(--confirmed)"></span>Confirmed
+                </span>
+                <span class="legend-item">
+                    <span class="legend-dot legend-dot-pulse" style="background: var(--review)"></span>Review
+                </span>
+            </div>
+        </section>
+
+        <!-- Right pane: entity table -->
+        <section class="pane pane-right" aria-label="Entity table">
+            <div class="pane-header">
+                <h2 class="pane-title">
+                    Entities
+                    <span class="entity-count" x-show="entityCount > 0" x-text="entityCount" x-cloak></span>
+                </h2>
+                <div class="pane-actions">
+                    <input type="search"
+                           class="filter-input"
+                           placeholder="Filter..."
+                           x-model="entityFilter"
+                           aria-label="Filter entities">
+                </div>
+            </div>
+
+            <div id="entity-list"
+                 class="entity-list-container"
+                 x-show="selectedTenantId"
+                 x-cloak
+                 hx-get="/partials/entities"
+                 hx-vals='js:{"tenant_id": document.getElementById("tenant-select")?.value || ""}'
+                 hx-trigger="load, every 5s"
+                 hx-swap="innerHTML"
+                 hx-indicator="#entity-spinner">
+                <!-- HTMX fills this -->
+            </div>
+
+            <div class="empty-state" x-show="!selectedTenantId">
+                <div class="empty-state-icon">&#9881;</div>
+                <p class="empty-state-title">Waiting for data</p>
+                <p class="empty-state-body">
+                    Entities will appear here as the pipeline discovers
+                    and attributes assets on your external surface.
+                </p>
+            </div>
+
+            <div id="entity-spinner" class="htmx-indicator spinner">
+                <span class="spinner-dot"></span>
+                <span class="spinner-dot"></span>
+                <span class="spinner-dot"></span>
+            </div>
+        </section>
+    </main>
+
+    <!-- ===== Bottom status bar ===== -->
+    <footer class="status-bar"
+            {% if active_run_id is defined and active_run_id %}
+            hx-get="/partials/run-status/{{ active_run_id }}"
+            hx-trigger="load, every 2s"
+            hx-swap="innerHTML"
+            {% endif %}>
+        <div class="status-bar-inner">
+            {% if active_run_id is defined and active_run_id %}
+                <!-- HTMX fills from run-status partial -->
+                <span class="status-stage-text">Loading run status...</span>
+            {% else %}
+                <div class="status-idle">
+                    <span class="status-stage-text">No active run</span>
+                    <span class="status-separator">|</span>
+                    <span class="status-version">EXPOSE v0.1.0-dev</span>
+                </div>
+            {% endif %}
+        </div>
+    </footer>
+
+</div>
+{% endblock %}
