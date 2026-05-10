@@ -50,6 +50,8 @@ dependencies = [
     "pyyaml>=6.0,<7",
     # CLI surface (placeholder; will land in Sprint 3+)
     "click>=8.1,<9",
+    # Pipeline orchestration — NATS JetStream per closed issue #36 (sprint-3-4-plan §3)
+    "nats-py>=2.6,<3",
 ]
 
 [project.optional-dependencies]
@@ -83,8 +85,8 @@ dev = [
     "pytest-cov>=6.0,<7",
     # HTTP mocking
     "respx>=0.21,<1",
-    # Real Postgres for integration tests (testcontainers per CONTRIBUTING.md)
-    "testcontainers[postgres]>=4.8,<5",
+    # Real Postgres + NATS for integration tests (testcontainers per CONTRIBUTING.md)
+    "testcontainers[postgres,nats]>=4.8,<5",
     # Type checking — mypy in strict mode per ADR-001
     "mypy>=1.13,<2",
     "types-pyyaml>=6.0,<7",
