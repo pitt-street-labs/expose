@@ -1,5 +1,7 @@
 # Security Policy
 
+This policy governs vulnerability reporting and response for the EXPOSE engine. It is aligned with [`ETHICS.md`](ETHICS.md), which defines intended use, non-goals, and scope posture: security disclosures whose remediation changes what is collected, retained, or how authorization scope is enforced trigger an ad-hoc ETHICS review (see `ETHICS.md` § Trigger events for ad-hoc review).
+
 ## Reporting a vulnerability
 
 If you discover a security vulnerability in EXPOSE, please report it privately. Do not file public GitHub issues for security vulnerabilities.

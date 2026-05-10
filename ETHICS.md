@@ -100,6 +100,18 @@ We reserve the right to decline contributions that conflict with the project's i
 
 This document is reviewed quarterly. Changes are tracked in git history. Material updates are noted in release notes.
 
+### Trigger events for ad-hoc review
+
+In addition to the quarterly cadence, an ad-hoc review of this document is initiated when any of the following occurs:
+
+- **Material capability additions.** New collectors, new enrichment modes, new artifact fields, or expansion of active-collection scope (e.g., new probe types, new providers) that change what EXPOSE can observe or infer about a target.
+- **External guidance changes.** Updates to NIST CSF, NIST AI RMF, FedRAMP control baselines, the MITRE ATT&CK Reconnaissance (TA0043) tactic (new techniques, sub-techniques, or technique deprecations), or other authoritative frameworks EXPOSE aligns to.
+- **Security disclosures.** Any vulnerability report (per `SECURITY.md`) whose remediation involves changing what data is collected, retained, or how authorization scope is enforced.
+- **User-reported misuse patterns.** Reports received via `conduct@korlogos.com` or issue tracker that surface new misuse vectors not anticipated by the current document.
+- **ADR-008 scope-model changes.** Any modification to the authorization-scope model (default mode, scope schema, enforcement semantics) defined in ADR-008.
+
+For each trigger event: an ad-hoc ETHICS review is initiated; the outcome (no change, clarification, or substantive amendment) is documented in the next release notes; substantive amendments to intent, non-goals, or scope posture also receive a corresponding ADR amendment so the architectural rationale is preserved alongside this document.
+
 If you believe EXPOSE is being used in ways that conflict with this document, you can:
 
 - Open a GitHub issue (for general concerns or policy discussions).
