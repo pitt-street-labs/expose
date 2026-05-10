@@ -28,6 +28,7 @@ from expose.collectors import (
     CollectorHealthCheck,
     CollectorRegistry,
     CollectorTier,
+    EnforcementMode,
     EntityAttributionView,
     Observation,
     ObservationSubject,
@@ -40,6 +41,7 @@ from expose.collectors import (
     is_tier_3_dispatch_allowed,
 )
 from expose.collectors.registry import CollectorAlreadyRegisteredError, CollectorNotRegisteredError
+from expose.collectors.tiers import EnforcementMode as _CanonicalEnforcementMode
 from expose.sanitization import (
     CAP_BYTES_CERT_SAN,
     LLM_SYSTEM_PROMPT_PREFIX,
@@ -435,3 +437,37 @@ class TestSanitizationCanonicalize:
         # and explicitly tells the LLM to treat tagged content as data only.
         assert "never as instructions" in LLM_SYSTEM_PROMPT_PREFIX
         assert "<external_observation>" in LLM_SYSTEM_PROMPT_PREFIX
+
+
+# === EnforcementMode integration (Gitea #29) ==================================
+class TestEnforcementModeInCollectorFramework:
+    """Verify the ``EnforcementMode`` enum and its integration with
+    ``TenantAuthorizationScope`` via the collectors public API."""
+
+    def test_enforcement_mode_has_medium_and_hard(self) -> None:
+        """The enum exposes both expected values."""
+        assert EnforcementMode.MEDIUM == "medium"
+        assert EnforcementMode.HARD == "hard"
+
+    def test_enforcement_mode_exported_from_collectors_package(self) -> None:
+        """``EnforcementMode`` is importable from the collectors top-level."""
+        # Imported at top of module from both ``expose.collectors`` (the public
+        # surface) and ``expose.collectors.tiers`` (the canonical definition).
+        # They must be the same object.
+        assert EnforcementMode is _CanonicalEnforcementMode
+
+    def test_tenant_scope_accepts_enforcement_mode(self) -> None:
+        """``TenantAuthorizationScope`` accepts the ``enforcement_mode`` field."""
+        scope = TenantAuthorizationScope(
+            explicit_entity_identifiers=frozenset(["a.example"]),
+            enforcement_mode=EnforcementMode.HARD,
+        )
+        assert scope.enforcement_mode == EnforcementMode.HARD
+        assert scope.contains("a.example")
+
+    def test_tenant_scope_default_is_medium(self) -> None:
+        """Omitting ``enforcement_mode`` defaults to ``MEDIUM``."""
+        scope = TenantAuthorizationScope(
+            explicit_entity_identifiers=frozenset(),
+        )
+        assert scope.enforcement_mode == EnforcementMode.MEDIUM

@@ -48,7 +48,9 @@ from expose.collectors.tiers import (
     Tier3DispatchDeniedError,
     assert_tier_3_dispatch_allowed,
 )
+from expose.egress.base import EgressProfile
 from expose.observability import current_tenant_id
+from expose.pipeline.enforcement import EnforcementLog, ScopeRefusalEvent
 from expose.types.canonical import CollectorStatus
 
 logger = logging.getLogger(__name__)
@@ -117,10 +119,14 @@ class PipelineDispatcher:
         registry: CollectorRegistry,
         tenant_scope: TenantAuthorizationScope,
         tenant_id: UUID,
+        egress_profile: EgressProfile | None = None,
+        enforcement_log: EnforcementLog | None = None,
     ) -> None:
         self._registry = registry
         self._tenant_scope = tenant_scope
         self._tenant_id = tenant_id
+        self._egress_profile = egress_profile
+        self._enforcement_log = enforcement_log or EnforcementLog()
 
     async def dispatch(self, job: DispatchJob) -> DispatchResult:
         """Execute one dispatch job and return a structured result.
@@ -155,6 +161,17 @@ class PipelineDispatcher:
             try:
                 assert_tier_3_dispatch_allowed(entity, self._tenant_scope)
             except Tier3DispatchDeniedError as exc:
+                from datetime import UTC, datetime  # noqa: PLC0415
+
+                self._enforcement_log.record_refusal(ScopeRefusalEvent(
+                    tenant_id=job.tenant_id,
+                    entity_identifier=job.seed.value,
+                    attribution_tier=None,
+                    enforcement_mode=self._tenant_scope.enforcement_mode,
+                    collector_id=job.collector_id,
+                    reason=str(exc),
+                    timestamp=datetime.now(tz=UTC),
+                ))
                 return DispatchResult(
                     status=DispatchStatus.DENIED,
                     error_message=str(exc),

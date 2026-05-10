@@ -45,6 +45,7 @@ from expose.collectors.registry import (
 )
 from expose.collectors.tiers import (
     CollectorTier,
+    EnforcementMode,
     EntityAttributionView,
     TenantAuthorizationScope,
     Tier3DispatchDeniedError,
@@ -66,6 +67,7 @@ __all__ = [
     "CollectorRegistry",
     "CollectorSourceUnreachableError",
     "CollectorTier",
+    "EnforcementMode",
     "EntityAttributionView",
     "Observation",
     "ObservationSubject",

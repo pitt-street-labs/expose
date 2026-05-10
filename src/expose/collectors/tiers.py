@@ -13,9 +13,20 @@ Per ADR-008 (authorized use), Tier-3 dispatch is enforced *at the collector
 dispatch layer*. Attempting to dispatch a Tier-3 job for an unattributed entity
 must raise ``Tier3DispatchDeniedError`` so callers fail loud rather than silently
 probing third-party assets.
+
+Enforcement mode (per Gitea issue #29) controls how the dispatcher responds when
+Tier-3 dispatch is denied:
+
+- ``medium`` (default): The gating function returns ``False``; the caller may
+  treat this as a warning and proceed at its discretion.
+- ``hard``: The gating function returns ``False``; the caller MUST treat this as
+  an absolute refusal. The ``EnforcementLog`` (in ``expose.pipeline.enforcement``)
+  records a structured ``ScopeRefusalEvent`` for audit purposes.
 """
 
-from dataclasses import dataclass
+from __future__ import annotations
+
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from expose.types.canonical import AttributionTier
@@ -31,6 +42,22 @@ class CollectorTier(StrEnum):
     TIER_1 = "tier_1"
     TIER_2 = "tier_2"
     TIER_3 = "tier_3"
+
+
+class EnforcementMode(StrEnum):
+    """Controls how the dispatcher responds to Tier-3 dispatch denials.
+
+    Per Gitea issue #29:
+
+    - ``MEDIUM`` — denial is advisory; the caller may log a warning and proceed.
+    - ``HARD`` — denial is absolute; the caller MUST refuse and record a
+      structured refusal event via ``EnforcementLog``.
+
+    Passive collectors (Tier-1) remain unrestricted in all modes.
+    """
+
+    MEDIUM = "medium"
+    HARD = "hard"
 
 
 # Attribution tiers that satisfy Tier-3 dispatch on their own (SPEC §6.3).
@@ -62,9 +89,14 @@ class TenantAuthorizationScope:
     The full scope schema (apex domains, cloud accounts, registrant patterns,
     ASN ranges, exclusions) is consumed elsewhere; here we just need to ask
     "is this entity explicitly in the scope?".
+
+    The ``enforcement_mode`` field (default ``MEDIUM``) controls how the
+    dispatcher responds when Tier-3 dispatch is denied — see ``EnforcementMode``
+    for semantics.
     """
 
     explicit_entity_identifiers: frozenset[str]
+    enforcement_mode: EnforcementMode = field(default=EnforcementMode.MEDIUM)
 
     def contains(self, entity_identifier: str) -> bool:
         """Return True if ``entity_identifier`` is explicitly in scope.
@@ -132,6 +164,7 @@ def assert_tier_3_dispatch_allowed(
 
 __all__ = [
     "CollectorTier",
+    "EnforcementMode",
     "EntityAttributionView",
     "TenantAuthorizationScope",
     "Tier3DispatchDeniedError",
