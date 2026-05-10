@@ -1,22 +1,27 @@
-# FF6K — Project Working Notes for Claude
+# EXPOSE — Project Working Notes for Claude
 
 This file is loaded automatically when Claude is invoked in this directory. It captures working conventions for this repository so each session does not re-derive them.
 
 ## What this is
 
-**FF6K** (working codename, shortened from FatFinger6000) is an open-core External Attack Surface Intelligence (EASI) platform for Korlogos / Pitt Street Labs, with a federal-customer trajectory. Public name is deferred to **Session H**.
+**EXPOSE** (EXtended Perimeter Ontology Security Evaluation) is an open-core External Attack Surface Intelligence (EASI) platform for Korlogos / Pitt Street Labs, with a federal-customer trajectory. Public name was selected in Session H on 2026-05-10. The internal codename **FF6K** (shortened from FatFinger6000) is preserved for development artifacts, internal communications, and historical references.
 
-This repository (`pitt-street-labs/ff6k` on internal Gitea) is **specification-only** — no source code yet. Phase 1 implementation has not been authorized. The 33 artifacts here are the locked foundation produced from two design sessions on 2026-05-09.
+This repository (`pitt-street-labs/ff6k` on internal Gitea — repo path retains the internal codename for now) is **specification-only** — no source code yet. Phase 1 implementation has not been authorized. The artifacts here are the locked foundation produced from two design sessions on 2026-05-09 plus the Session H rename pass on 2026-05-10.
+
+**Naming convention going forward:**
+- Use **EXPOSE** in all public-facing and customer-facing artifacts (README, SPEC, ADRs, marketing materials)
+- Use **FF6K** in development artifacts, commit messages, internal communications, and historical references — including the Gitea repo path (`pitt-street-labs/ff6k`) and the memory directory (`~/.claude/projects/-home-jcarlson-projects-ff6k/`) until any explicit decision to rename them
+- Product surfaces all share the EXPOSE prefix per ADR-009: **EXPOSE Core**, **EXPOSE Threat Context**, **EXPOSE Identity Surface**, **EXPOSE Research**
 
 ## Hard rules (do not violate)
 
 1. **HARD CONSENT GATE — private until explicit per-action consent.** This repo stays private on internal Gitea (`git.int.korlogos.com:8084`). Do **NOT** push to GitHub.com, public registries, mirrors, or any third-party host. Each visibility-changing action requires explicit project-lead consent in the same conversation. Past consent does not extend to new actions. See `~/.claude/projects/-home-jcarlson-projects-ff6k/memory/ff6k-consent-gate.md`.
 
-2. **Do not modify locked artifacts** without an explicit session for that purpose. Locked: all 10 ADRs (`docs/adr/ADR-001..010`), `docs/SPEC.md`, `docs/positioning.md`, all 3 schemas (`schemas/`), `docs/issues-backlog.md`. These are the consensus output of the spec phase; silent edits destroy it.
+2. **Do not modify locked artifacts** without an explicit session for that purpose. Locked: all 10 ADRs (`docs/adr/ADR-001..010`), `docs/SPEC.md`, `docs/positioning.md`, all 3 schemas (`schemas/`), `docs/issues-backlog.md`. These are the consensus output of the spec phase; silent edits destroy it. Mechanical rename passes (Session H on 2026-05-10) and similar deliberate session-driven sweeps are the exception.
 
-3. **Do not begin Phase 1 implementation** (Python source, collectors, engine code) until the project lead authorizes. Sessions B-H come first.
+3. **Do not begin Phase 1 implementation** (Python source, collectors, engine code) until the project lead authorizes. Sessions B-G come first; H is complete.
 
-4. **Do not select a public name.** Session H is reserved for that. Continue using `FF6K` in all working artifacts. Do not invent.
+4. **Public name is now EXPOSE.** Session H closed on 2026-05-10. Use EXPOSE consistently in public-facing artifacts; FF6K continues as the internal codename. Do not invent variants.
 
 5. **Do not add dependencies, frameworks, or architectural choices** beyond what the ADRs specify. If you encounter a decision the ADRs don't cover, ask the project lead.
 
@@ -24,17 +29,18 @@ This repository (`pitt-street-labs/ff6k` on internal Gitea) is **specification-o
 
 ## Pending (do not pre-empt)
 
-- **Public name** — Session H
 - **`docs/problem-statement.md`** — currently a scaffold awaiting the project lead's researcher-journey framing
-- **Sessions B-G** — competitive analysis, module specs, AI-leverage roadmap, framework annotation, SDLP, Federal Customer Deployment Guide. The project lead drives these conversations with Claude in chat; resulting artifacts come here for integration.
-- **Mechanical rename pass** propagating the post-Session-H public name across all artifacts. Do not pre-empt — the README/SECURITY/CONTRIBUTING currently still reference `github.com/korlogos/fatfinger6000` URLs, which are wrong but intentionally left for the rename pass.
+- **Sessions B-G** — competitive analysis (B), module specs (C), AI-leverage roadmap (D), framework annotation (E), SDLP (F), Federal Customer Deployment Guide (G). Per project-lead split: the project lead drafts B/E/F/G v0.1 here in Claude Code; Sessions C and D are driven in claude.ai chat with project lead and integrated here.
+- **Formal trademark search** for EXPOSE in USPTO security classes (9, 38, 42) before any public publication. Preliminary EASM/security-tooling check was clean but not authoritative.
+- **Gitea repo rename** (`pitt-street-labs/ff6k` → `pitt-street-labs/expose`) — separate decision deferred to pre-publication review per consent gate.
 
 ## Project facts
 
 | Item | Value |
 |---|---|
-| Codename | `FF6K` (do not change) |
-| Gitea repo | `pitt-street-labs/ff6k` (private) |
+| Public name | `EXPOSE` (EXtended Perimeter Ontology Security Evaluation) — Session H, 2026-05-10 |
+| Internal codename | `FF6K` (use in dev artifacts, repo path, commit messages, internal references) |
+| Gitea repo | `pitt-street-labs/ff6k` (private, internal-codename path; rename deferred) |
 | Gitea URL | https://git.int.korlogos.com:8084/pitt-street-labs/ff6k |
 | Issue tracker | Gitea Issues at the repo above (37 issues filed across 4 milestones) |
 | License | Apache 2.0 (engine); separate proprietary modules per ADR-009 |
@@ -80,7 +86,7 @@ Following `~/CLAUDE.md` change control:
 - Multi-arch image builds (issue #3) and Cloud object storage migration (#9) had their milestones patched after creation — the importer's title-match for milestone assignment didn't account for parenthetical title suffixes.
 - Default git identity for commits in this repo is `Enema Combatant <enema-combatant@users.noreply.github.com>` (lab convention across all PSL repos), even though the project lead's persona is "jcarlson" / Jeffro.
 - Advisory documents (e.g., `docs/strategy/persona-analysis.md`) carry an explicit "Advisory — not locked" status header to distinguish them from the foundation artifacts (SPEC.md, ADRs, positioning.md). New advisory work belongs under `docs/strategy/` to keep `docs/` root for the locked spec set.
-- README.md / SECURITY.md / CONTRIBUTING.md still reference `github.com/korlogos/fatfinger6000` URLs — intentional placeholders for the post-Session-H rename pass. Do not edit them piecemeal.
+- After the Session H rename pass (2026-05-10), README.md / SECURITY.md / CONTRIBUTING.md reference `github.com/korlogos/expose` URLs. These are aspirational targets — the consent gate still bars any GitHub.com push. Do not edit them piecemeal; if a future decision changes the org/repo name, run a follow-up rename pass.
 
 ## Subsequent session order (recommended)
 

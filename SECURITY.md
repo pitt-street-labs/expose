@@ -2,9 +2,9 @@
 
 ## Reporting a vulnerability
 
-If you discover a security vulnerability in FatFinger6000, please report it privately. Do not file public GitHub issues for security vulnerabilities.
+If you discover a security vulnerability in EXPOSE, please report it privately. Do not file public GitHub issues for security vulnerabilities.
 
-**Preferred channel:** GitHub Security Advisory at https://github.com/korlogos/fatfinger6000/security/advisories/new (private).
+**Preferred channel:** GitHub Security Advisory at https://github.com/korlogos/expose/security/advisories/new (private).
 
 **Alternate channel:** email `security@korlogos.com` with PGP encryption preferred (PGP key fingerprint to be published when project goes public).
 
@@ -49,7 +49,7 @@ If a vulnerability is being actively exploited in the wild, we will accelerate d
 
 ## What's in scope
 
-- The FatFinger6000 engine source code in this repository.
+- The EXPOSE engine source code in this repository.
 - Container images published from this repository.
 - Helm charts published from this repository.
 - Schemas and example rule packs in this repository.
@@ -68,15 +68,15 @@ Production artifacts (container images, releases) are signed via cosign keyless.
 
 ```bash
 # Verify a container image
-cosign verify ghcr.io/korlogos/fatfinger6000:<tag> \
-    --certificate-identity-regexp '^https://github.com/korlogos/fatfinger6000/' \
+cosign verify ghcr.io/korlogos/expose:<tag> \
+    --certificate-identity-regexp '^https://github.com/korlogos/expose/' \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
 # Verify a canonical artifact
 cosign verify-blob \
     --signature canonical.json.gz.sig \
     canonical.json.gz \
-    --certificate-identity-regexp '^https://github.com/korlogos/fatfinger6000/' \
+    --certificate-identity-regexp '^https://github.com/korlogos/expose/' \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 

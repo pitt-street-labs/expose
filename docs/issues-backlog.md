@@ -1,4 +1,4 @@
-# FatFinger6000 — Issue backlog
+# EXPOSE — Issue backlog
 
 This document consolidates the deferred-issues backlog across all eight architectural decisions. Issues are organized by epic for project-board import. Each issue has the `epic:<name>` label specified for direct GitHub Issues import via `gh` CLI or scripted creation.
 
@@ -108,7 +108,7 @@ Sign all container images with cosign keyless via GitHub Actions OIDC. Generate 
 **Labels:** `epic:deployment-portability`, `area:operations`, `priority:medium`, `type:documentation`
 
 **Summary**
-FatFinger6000 cannot run fully air-gapped because the discovery stage requires internet egress to specific allowlisted API providers. The artifact itself can be transported to air-gapped environments, but the pipeline cannot run there. Document explicitly.
+EXPOSE cannot run fully air-gapped because the discovery stage requires internet egress to specific allowlisted API providers. The artifact itself can be transported to air-gapped environments, but the pipeline cannot run there. Document explicitly.
 
 **Acceptance criteria**
 - README and SECURITY.md explicitly state air-gap limitation.
@@ -122,11 +122,11 @@ FatFinger6000 cannot run fully air-gapped because the discovery stage requires i
 **Labels:** `epic:deployment-portability`, `area:observability`, `priority:low`, `type:feature`
 
 **Summary**
-Operators without existing observability infrastructure benefit from a bundled "everything included" deployment option. Optional subchart deploys Prometheus + Loki + Tempo + Grafana with FatFinger6000 dashboards pre-configured.
+Operators without existing observability infrastructure benefit from a bundled "everything included" deployment option. Optional subchart deploys Prometheus + Loki + Tempo + Grafana with EXPOSE dashboards pre-configured.
 
 **Acceptance criteria**
-- Optional Helm subchart (`fatfinger6000-observability`) bringing Prometheus + Loki + Tempo + Grafana.
-- Pre-built FatFinger6000 dashboards: per-tenant run health, attribution decision rates, LLM costs, collector success rate.
+- Optional Helm subchart (`expose-observability`) bringing Prometheus + Loki + Tempo + Grafana.
+- Pre-built EXPOSE dashboards: per-tenant run health, attribution decision rates, LLM costs, collector success rate.
 - Audit log dashboards distinguishing tenant operations.
 - Documented as optional convenience; production deployments should use existing observability infrastructure.
 
@@ -247,7 +247,7 @@ v1 lab uses RTX 2080 Super (8GB VRAM) for local Ollama. This caps usable models 
 
 **Acceptance criteria**
 - Documentation covers: 16GB VRAM (RTX 4060 Ti 16GB, A4000) unlocks 14B-class with Q4 quantization; 24GB VRAM (RTX 3090, RTX 4090, A5000) unlocks 32B with Q4 or 70B with Q3; 48GB+ unlocks 70B with Q4 or larger.
-- Performance benchmarks for FatFinger6000-style enrichment workloads at each tier.
+- Performance benchmarks for EXPOSE-style enrichment workloads at each tier.
 - Cost-benefit analysis: local hardware vs. frontier provider API costs at various tenant scales.
 
 **Estimated effort:** 1 day documentation effort, ongoing as hardware evolves.
@@ -299,7 +299,7 @@ LLM enrichment quality cannot be assessed without held-out datasets and an eval 
 **Acceptance criteria**
 - Eval datasets in four categories: `confirmed_yours` (target attribution should be confirmed/high), `confirmed_not_yours` (target attribution should be not_yours), `ambiguous_with_resolution` (rules give medium confidence; LLM should sanity-check), `adversarial_injection` (cert SAN, banner, TXT contain prompt-injection-style payloads).
 - Initial dataset size: a few dozen of each category. Grows over time from analyst-flagged real cases.
-- CLI: `fatfinger6000 eval run --provider <p> --model <m> --dataset <d>`.
+- CLI: `expose eval run --provider <p> --model <m> --dataset <d>`.
 - Metrics: attribution accuracy, schema validation rate, sanitization integrity rate, cost per case, latency per case.
 - Quarterly re-evaluation procedure documented.
 - CI gate: changes to LLM enrichment logic re-run a fast subset of evals.
@@ -317,7 +317,7 @@ Decision 5 deferred items related to repository operations and governance.
 **Labels:** `epic:repo-governance`, `area:legal`, `priority:low`, `type:legal`
 
 **Summary**
-"FatFinger6000" trademark not registered. Apache 2.0 does not grant trademark rights, so forks may use the name. Defer until project visibility justifies the legal work.
+"EXPOSE" trademark not registered. Apache 2.0 does not grant trademark rights, so forks may use the name. Defer until project visibility justifies the legal work.
 
 **Acceptance criteria**
 - Trademark search before registration.
@@ -326,7 +326,7 @@ Decision 5 deferred items related to repository operations and governance.
 
 **Estimated effort:** 1-2 weeks legal work + filing fees, when triggered.
 
-**Triggers:** External adoption produces forks with the FatFinger6000 name; commercial competitors use the name.
+**Triggers:** External adoption produces forks with the EXPOSE name; commercial competitors use the name.
 
 ### CLA vs. DCO contributor model
 
@@ -521,8 +521,8 @@ v1 scope is flat lists. Future scope schema needs time bounds, asset-type restri
 **Acceptance criteria**
 - Schema evolution: time bounds (`valid_from`, `valid_until` per scope entry), asset-type restrictions, exclusions, scope inheritance from parent tenants.
 - Schema versioned and audit-logged.
-- Validation tooling: `fatfinger6000 scope validate <file>`.
-- Visualization: `fatfinger6000 scope show --tenant <id>`.
+- Validation tooling: `expose scope validate <file>`.
+- Visualization: `expose scope show --tenant <id>`.
 - Backward-compatible evolution from v1 flat-list form.
 
 **Estimated effort:** 1-2 sprints.

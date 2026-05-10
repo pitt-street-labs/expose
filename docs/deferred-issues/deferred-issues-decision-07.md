@@ -75,8 +75,8 @@ asset-type-specific scope, or scope inheritance across affiliated tenants.
   - Exclusions (explicit "this is not in scope even if rules would attribute it")
 - Scope changes are versioned and audit-logged
 - Each artifact records which scope version was in effect during the run
-- Validation tooling: `fatfinger6000 scope validate <file>` checks consistency
-- Visualization: `fatfinger6000 scope show --tenant <id>` emits a human-readable
+- Validation tooling: `expose scope validate <file>` checks consistency
+- Visualization: `expose scope show --tenant <id>` emits a human-readable
   summary
 - Rule pack integration: rule packs can declare which scope dimensions they
   rely on; scope mismatches produce loud warnings
@@ -160,7 +160,7 @@ Tenant data export and deletion (multi-tenancy epic).
 **Labels:** `epic:authorized-use`, `area:security`, `priority:low`, `type:design`
 
 **Summary**
-Public Apache 2.0 release means anyone can run FatFinger6000. Some will
+Public Apache 2.0 release means anyone can run EXPOSE. Some will
 run it with intent the project's posture documents say is unintended.
 While the project cannot prevent misuse, the engine can include logging
 patterns and warnings that make obvious-misuse cases easier to detect by

@@ -6,7 +6,7 @@
 
 ## Context
 
-FatFinger6000 will be developed as a real GitHub project, not throwaway code. The licensing posture affects what contributions can be accepted, how the project is positioned in the security tooling community, and what commercial protection Korlogos has against forks.
+EXPOSE will be developed as a real GitHub project, not throwaway code. The licensing posture affects what contributions can be accepted, how the project is positioned in the security tooling community, and what commercial protection Korlogos has against forks.
 
 Specific considerations:
 
@@ -18,14 +18,14 @@ Specific considerations:
 
 ## Decision
 
-**Apache 2.0 license for the engine, in a public GitHub repository named `fatfinger6000`.**
+**Apache 2.0 license for the engine, in a public GitHub repository named `expose`.**
 
-**Separate private repository for client-specific rule packs**, named `fatfinger6000-rulepacks` (or per-client variants). Rule packs are consumed as deployment-time data, not built into the engine.
+**Separate private repository for client-specific rule packs**, named `expose-rulepacks` (or per-client variants). Rule packs are consumed as deployment-time data, not built into the engine.
 
 The split:
 
-- **`fatfinger6000`** (public, Apache 2.0): the engine, schemas, collector framework, attribution rule engine, LLM provider abstractions, JSON artifact format, infrastructure code, documentation. Includes example rule packs sufficient to demonstrate the engine end-to-end.
-- **`fatfinger6000-rulepacks`** (private, all rights reserved): client-specific seeds, attribution rules tuned for specific engagements, sensitive collector configurations, internal eval datasets that contain real client surface data.
+- **`expose`** (public, Apache 2.0): the engine, schemas, collector framework, attribution rule engine, LLM provider abstractions, JSON artifact format, infrastructure code, documentation. Includes example rule packs sufficient to demonstrate the engine end-to-end.
+- **`expose-rulepacks`** (private, all rights reserved): client-specific seeds, attribution rules tuned for specific engagements, sensitive collector configurations, internal eval datasets that contain real client surface data.
 
 Public repository governance:
 
@@ -49,9 +49,9 @@ Public repository governance:
 
 **Negative:**
 
-- Competitors can fork the engine. Acceptable risk because the value of FatFinger6000 is *applied* — operational competence, integration with red team operations, attribution rule tuning for specific clients. Forking the code does not transfer those.
+- Competitors can fork the engine. Acceptable risk because the value of EXPOSE is *applied* — operational competence, integration with red team operations, attribution rule tuning for specific clients. Forking the code does not transfer those.
 - External contribution management has ongoing cost (PR review, issue triage, community moderation).
-- Trademark protection is not granted by the license; "FatFinger6000" can be used by forks unless trademark is registered. Deferred concern.
+- Trademark protection is not granted by the license; "EXPOSE" can be used by forks unless trademark is registered. Deferred concern.
 - Sophisticated buyers in security reviews will scrutinize the public engine (supply chain, dependencies, build provenance). This is a reason to invest in image signing, SBOMs, and SLSA provenance from day one — already required by Decision 3.
 
 ## Alternatives considered
@@ -60,7 +60,7 @@ Public repository governance:
 - Not OSI-approved; security tooling community tends toward strict OSS preferences.
 - Community contribution dynamics are weaker ("why contribute if I can't use commercially").
 - BUSL has time-bound conversion to permissive license (typically 4 years), so the project becomes truly OSS eventually anyway.
-- For FatFinger6000's category, competitors can build similar tools without forking; the protection BUSL provides is modest.
+- For EXPOSE's category, competitors can build similar tools without forking; the protection BUSL provides is modest.
 
 Migration path preserved if commercial pressure changes — Apache 2.0 to BUSL is a license bump, but accepting future contributions under BUSL after they were submitted under Apache 2.0 requires CLA or contributor permission.
 
@@ -78,7 +78,7 @@ Migration path preserved if commercial pressure changes — Apache 2.0 to BUSL i
 
 Trigger conditions for license or governance change:
 
-- **Significant commercial competitive threat.** A well-funded vendor forks FatFinger6000 and ships a commercial product. Move to source-available is an option; cost is community goodwill.
+- **Significant commercial competitive threat.** A well-funded vendor forks EXPOSE and ships a commercial product. Move to source-available is an option; cost is community goodwill.
 - **A specific client requires a commercial license guarantee.** Apache 2.0 already permits commercial use; this is unlikely to trigger a change unless the client wants exclusive provisions.
 - **External adoption justifies trademark registration.** When the name has visible market presence, register the trademark.
 
@@ -88,4 +88,4 @@ The dual-repo structure is durable. Engine-public, rule-packs-private is the rig
 
 - Decision recorded in design conversation 2026-05-09.
 - Five deferred-issues in the repo-governance epic. See `docs/issues-backlog.md`.
-- Project name "FatFinger6000" chosen as deliberate counterpoint to Mythos — this codebase is the deterministic, dependable, boring substrate; Mythos-class capability lives in Environment 2.
+- Project name "EXPOSE" chosen as deliberate counterpoint to Mythos — this codebase is the deterministic, dependable, boring substrate; Mythos-class capability lives in Environment 2.

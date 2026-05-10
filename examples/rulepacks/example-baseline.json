@@ -1,10 +1,10 @@
 {
-  "$schema": "https://fatfinger6000.korlogos.com/schemas/rulepack-v1.json",
+  "$schema": "https://expose.korlogos.com/schemas/rulepack-v1.json",
 
   "pack_id": "example-baseline",
   "pack_version": "0.1.0",
   "pack_format_version": "v1",
-  "description": "Minimal example rule pack demonstrating the FatFinger6000 attribution rule format. Suitable as a starting point for operators writing their own packs. Not intended for production use without review.",
+  "description": "Minimal example rule pack demonstrating the EXPOSE attribution rule format. Suitable as a starting point for operators writing their own packs. Not intended for production use without review.",
 
   "tier_thresholds": {
     "confirmed": 0.95,

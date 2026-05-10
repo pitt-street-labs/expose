@@ -1,8 +1,9 @@
-# FF6K Repository — Artifact Inventory
+# EXPOSE Repository — Artifact Inventory
 
-**Working codename:** FF6K (public name TBD per Session H)
-**Internal Gitea:** `git.int.korlogos.com:8084` (target)
-**Generated:** 2026-05-09
+**Public name:** EXPOSE (EXtended Perimeter Ontology Security Evaluation) — selected 2026-05-10 in Session H
+**Internal codename:** FF6K (preserved for development artifacts and historical references per HISTORY.md)
+**Internal Gitea:** `git.int.korlogos.com:8084/pitt-street-labs/ff6k`
+**Generated:** 2026-05-09 (rename pass applied 2026-05-10)
 
 This document inventories every artifact produced across the specification phase. The repository structure is organized for clean import to internal Gitea and eventual public migration once the public name is selected.
 
@@ -94,7 +95,7 @@ This repository is the consolidated output of two design conversations on 2026-0
 
 **Strategic foundation session.** Two additional ADRs (commercial structure, FedRAMP-ready posture), positioning document, problem statement scaffold, HISTORY.md.
 
-The conversation thread title is "FF6K - Primary Dev Convo" per the project lead's working naming convention.
+The conversation thread title is "EXPOSE - Primary Dev Convo" per the project lead's working naming convention.
 
 ## Decisions and assumptions captured but not in artifacts
 
@@ -108,7 +109,7 @@ A few things we discussed that are not currently captured as separate artifacts 
 
 **Consent gate:** This repository is targeted for **internal Gitea on ARC** (`git.int.korlogos.com:8084`). It is **NOT** authorized for publication to GitHub.com or any public host. The public publication consent gate remains in force. Public publication requires explicit lead authorization and at minimum: public name selection (Session H), problem statement population, and a deliberate review pass.
 
-**Naming:** All artifacts use the working codename **FF6K** (shortened from FatFinger6000). Public name selection is deferred to Session H. A mechanical rename pass will propagate the public name across all artifacts before public publication.
+**Naming:** Public name **EXPOSE** (EXtended Perimeter Ontology Security Evaluation) was selected in Session H on 2026-05-10. The internal codename **FF6K** (shortened from the original conversational codename FatFinger6000) is preserved for development artifacts, internal communications, and historical references per HISTORY.md. The mechanical rename pass propagating EXPOSE across all public-facing and spec artifacts ran on 2026-05-10; HISTORY.md, HANDOFF.md, and `init-and-push-to-gitea.sh` are preserved verbatim as historical / genesis records.
 
 **Build state:** This is specification-only. No source code has been written. Phase 1 implementation (per SPEC.md §11.1) has not begun.
 

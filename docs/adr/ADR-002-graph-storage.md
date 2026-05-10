@@ -6,7 +6,7 @@
 
 ## Context
 
-The observation graph is the central data structure of FatFinger6000. Every collector writes into it; the attribution engine reads from it; the LLM enrichment layer queries it; the canonical artifact serializes from it.
+The observation graph is the central data structure of EXPOSE. Every collector writes into it; the attribution engine reads from it; the LLM enrichment layer queries it; the canonical artifact serializes from it.
 
 Workload characteristics:
 - Realistic graph size: 100k-500k nodes, 1M-5M edges per tenant. Large but not extreme.
@@ -77,7 +77,7 @@ Evidence (raw cert PEMs, raw HTTP responses, raw DNS responses) is stored in obj
 ## Alternatives considered
 
 **Apache AGE.** Postgres extension providing openCypher queries on top of standard SQL. Tempting because it preserves the single-Postgres ops simplicity while adding graph ergonomics. Rejected for v1 because:
-- Version compatibility with Postgres releases lags. Currently AGE supports Postgres 16 only; FatFinger6000 should not be locked to a specific Postgres version.
+- Version compatibility with Postgres releases lags. Currently AGE supports Postgres 16 only; EXPOSE should not be locked to a specific Postgres version.
 - The query optimizer for Cypher-on-Postgres is less mature than Neo4j's.
 - Operational tooling (backup verification, replication monitoring) is less mature for AGE than for plain Postgres.
 

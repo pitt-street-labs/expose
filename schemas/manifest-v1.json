@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://fatfinger6000.korlogos.com/schemas/manifest-v1.json",
-  "title": "FatFinger6000 Run Manifest",
+  "$id": "https://expose.korlogos.com/schemas/manifest-v1.json",
+  "title": "EXPOSE Run Manifest",
   "description": "Manifest accompanying each canonical artifact. Describes run provenance, signing metadata, and integrity hashes. Smaller than the canonical artifact and intended for quick inspection without parsing the full artifact.",
   "type": "object",
   "required": [
@@ -17,7 +17,7 @@
   "properties": {
     "schema_version": {
       "type": "string",
-      "const": "fatfinger6000-manifest/v1"
+      "const": "expose-manifest/v1"
     },
     "run_id": { "type": "string", "format": "uuid" },
     "tenant_id": { "type": "string", "format": "uuid" },
@@ -27,7 +27,7 @@
     "pipeline_version": {
       "type": "string",
       "pattern": "^[0-9a-f]{40}$",
-      "description": "Git commit hash of the FatFinger6000 codebase that produced this run."
+      "description": "Git commit hash of the EXPOSE codebase that produced this run."
     },
     "canonical_artifact_hash": {
       "type": "string",

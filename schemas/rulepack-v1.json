@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://fatfinger6000.korlogos.com/schemas/rulepack-v1.json",
-  "title": "FatFinger6000 Rule Pack",
-  "description": "A versioned, declarative collection of attribution rules and lead-score formulas. Rule packs are data, not code. The engine consumes rule packs and applies them deterministically. Public rule packs ship in the FatFinger6000 examples; client-specific rule packs live in private repos.",
+  "$id": "https://expose.korlogos.com/schemas/rulepack-v1.json",
+  "title": "EXPOSE Rule Pack",
+  "description": "A versioned, declarative collection of attribution rules and lead-score formulas. Rule packs are data, not code. The engine consumes rule packs and applies them deterministically. Public rule packs ship in the EXPOSE examples; client-specific rule packs live in private repos.",
   "type": "object",
   "required": ["pack_id", "pack_version", "pack_format_version", "attribution_rules", "lead_score_formula"],
   "additionalProperties": false,

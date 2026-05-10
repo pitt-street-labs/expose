@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://fatfinger6000.korlogos.com/schemas/canonical-artifact-v1.json",
-  "title": "FatFinger6000 Canonical Artifact",
-  "description": "The signed JSON artifact produced by a single FatFinger6000 pipeline run. This is the system's sole deliverable. Consumers ingest this file to drive CTEM workflows, red team lead review, and downstream LLM-driven analysis (Environment 2).",
+  "$id": "https://expose.korlogos.com/schemas/canonical-artifact-v1.json",
+  "title": "EXPOSE Canonical Artifact",
+  "description": "The signed JSON artifact produced by a single EXPOSE pipeline run. This is the system's sole deliverable. Consumers ingest this file to drive CTEM workflows, red team lead review, and downstream LLM-driven analysis (Environment 2).",
   "type": "object",
   "required": [
     "schema_version",
@@ -17,7 +17,7 @@
   "properties": {
     "schema_version": {
       "type": "string",
-      "const": "fatfinger6000/v1",
+      "const": "expose/v1",
       "description": "Schema namespace and major version. Backward-compatible changes within v1 are guaranteed; breaking changes are version bumps."
     },
     "run": {
@@ -75,7 +75,7 @@
         },
         "pipeline_version": {
           "type": "string",
-          "description": "Git commit hash of the FatFinger6000 codebase that produced this run.",
+          "description": "Git commit hash of the EXPOSE codebase that produced this run.",
           "pattern": "^[0-9a-f]{40}$"
         },
         "rule_pack_version": {

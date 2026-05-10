@@ -1,8 +1,14 @@
-# FF6K — Project History
+# EXPOSE — Project History
 
-This document captures the lineage and development history of the FF6K project, including the working codename and the strategic decisions that shaped its early specification.
+This document captures the lineage and development history of the EXPOSE project, including its codename history (FatFinger6000 → FF6K → EXPOSE) and the strategic decisions that shaped its early specification.
 
-## Codename: FF6K
+## Public name: EXPOSE (selected 2026-05-10)
+
+The public name **EXPOSE** (EXtended Perimeter Ontology Security Evaluation) was selected in Session H on 2026-05-10. Preliminary EASM/security-tooling conflict check found no major-product conflicts; formal trademark search in USPTO security classes (9, 38, 42) is deferred to pre-publication review per the consent gate. The mechanical rename pass propagated EXPOSE across all public-facing and spec artifacts on the same day; HISTORY.md, HANDOFF.md, and `init-and-push-to-gitea.sh` are preserved verbatim as historical / genesis records.
+
+All four product surfaces share the EXPOSE prefix per ADR-009: **EXPOSE Core** (Apache 2.0), **EXPOSE Threat Context** (proprietary), **EXPOSE Identity Surface** (proprietary), **EXPOSE Research** (CC BY 4.0 datasets).
+
+## Codename: FF6K (preserved)
 
 The internal working codename for this project is **FF6K**, shortened from the original conversational codename **FatFinger6000**. The name originated as a deliberate counterpoint to high-capability frontier AI tooling: where Mythos-class capabilities represent the open-ended, narrative-reasoning frontier of AI security analysis, FatFinger6000 represented the deterministic, dependable, structured substrate that produces input for that analysis. The humor of the name was always in tension with the rigor of the engineering — the joke was that the most boring possible tool name applied to a genuinely sophisticated piece of infrastructure.
 
@@ -11,7 +17,7 @@ The decision to use FF6K (rather than the full FatFinger6000) as the working cod
 2. Provide a transition point toward the eventual public name
 3. Preserve the lineage joke for those who get the reference, without putting it at the front of federal procurement conversations
 
-The public product name will be selected in a subsequent session, locked, and propagated mechanically across all artifacts before public publication. FF6K will remain the internal codename in development artifacts, internal communications, and historical references throughout the project's lifetime.
+Per the original convention, **FF6K continues as the internal codename** in development artifacts, internal communications, and historical references throughout the project's lifetime. **EXPOSE is used in all public-facing and customer-facing artifacts.** The Gitea repository remains at `pitt-street-labs/ff6k` (internal codename); a renamed-to-`expose` Gitea repo is a separate decision deferred to pre-publication review.
 
 ## Specification phase timeline
 
@@ -39,11 +45,11 @@ The strategic foundation session also clarified the niche positioning and the MI
 | Stage | Name |
 |---|---|
 | Original codename | FatFinger6000 |
-| Specification phase codename | FF6K (current) |
+| Specification phase codename | FF6K (preserved as internal codename per above) |
 | Heliograph candidate (rejected after sanity check) | Heliograph — found multiple AI-tooling product conflicts |
 | PERIM candidate (rejected after sanity check) | PERIM — found "perimeter" framing conceptually misaligned with Zero Trust direction |
 | EASI candidate (rejected after evaluation) | EASI — too descriptive of the category, not distinctive as a brand |
-| Public name (deferred) | TBD in subsequent naming session |
+| Public name selected (Session H, 2026-05-10) | **EXPOSE** (EXtended Perimeter Ontology Security Evaluation) — preliminary EASM/security-tooling conflict check clean; formal trademark search deferred to pre-publication review |
 
 ## Strategic decisions locked
 

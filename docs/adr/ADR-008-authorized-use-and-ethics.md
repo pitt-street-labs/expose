@@ -6,14 +6,14 @@
 
 ## Context
 
-FatFinger6000 is genuinely capable — it attributes external assets to organizations, identifies cloud resources, fingerprints tech stacks, scores leads for red team prioritization. It can be misused. The Apache 2.0 public posture (Decision 5) means anyone can clone and run it, including with intent the project's positioning documents say is unintended.
+EXPOSE is genuinely capable — it attributes external assets to organizations, identifies cloud resources, fingerprints tech stacks, scores leads for red team prioritization. It can be misused. The Apache 2.0 public posture (Decision 5) means anyone can clone and run it, including with intent the project's positioning documents say is unintended.
 
 This decision establishes:
 
 - The project's intended-use posture and how it is communicated.
 - Runtime behavior that nudges operators toward authorized use.
 - Handling of incidental data — observations about organizations that aren't the operator's.
-- Explicit non-goals that scope what FatFinger6000 will and will not do.
+- Explicit non-goals that scope what EXPOSE will and will not do.
 
 ## Decision
 
@@ -27,7 +27,7 @@ This decision establishes:
 - **Non-goals:** active exploitation, PII enrichment beyond public records, adversarial use against third parties, unauthorized reconnaissance.
 - **Capability disclosure:** plain-language description of what the tool does.
 - **Adversary-controlled inputs:** acknowledgment that sanitization is a security property, not just code quality.
-- **Downstream workflow boundary:** Environment 2 (separate, downstream LLM tooling) has its own safety responsibilities; FatFinger6000 produces structured input for those workflows.
+- **Downstream workflow boundary:** Environment 2 (separate, downstream LLM tooling) has its own safety responsibilities; EXPOSE produces structured input for those workflows.
 
 These documents are maintained, not one-time writes. Quarterly review cadence.
 
@@ -56,9 +56,9 @@ This means the deliverable is *only* about the operator's own assets, the graph 
 
 ### Explicit non-goals
 
-The following are out of scope for FatFinger6000 — not deferred, not future-work, but deliberately not part of the project:
+The following are out of scope for EXPOSE — not deferred, not future-work, but deliberately not part of the project:
 
-- **Active exploitation, vulnerability validation, or post-discovery offensive action.** FatFinger6000 produces leads. Exploitation toolchains (Nuclei, Metasploit, manual red team) are different categories.
+- **Active exploitation, vulnerability validation, or post-discovery offensive action.** EXPOSE produces leads. Exploitation toolchains (Nuclei, Metasploit, manual red team) are different categories.
 - **PII enrichment beyond public records.** Registrant emails are PII but publicly disclosed; the tool treats them as such. The tool does not enrich with private data sources, paid identity-resolution services, or social-graph correlation.
 - **Adversarial use against third parties.** The medium-mode default warns; ETHICS.md positions; the tool cannot prevent misuse but does not facilitate it.
 - **Open-ended narrative reasoning, exploit hypothesis generation, red team briefing prose.** These are Environment 2's responsibility.
@@ -90,7 +90,7 @@ The following are out of scope for FatFinger6000 — not deferred, not future-wo
 
 **No retention pruning — keep all observations forever.** Operationally simpler but compliance-hostile. Rejected.
 
-**No explicit non-goals.** Tempting to leave open. Rejected because clear scope statements help operators evaluate whether FatFinger6000 fits their needs and reduce ambiguous adoption that could lead to misuse.
+**No explicit non-goals.** Tempting to leave open. Rejected because clear scope statements help operators evaluate whether EXPOSE fits their needs and reduce ambiguous adoption that could lead to misuse.
 
 ## When to revisit
 

@@ -23,7 +23,7 @@ A secondary consideration: the project will pursue federal markets (per ADR-010)
 
 ### The four product surfaces
 
-**1. FF6K Core (Apache 2.0)**
+**1. EXPOSE Core (Apache 2.0)**
 
 The open-source engine. Public repository. Includes:
 - The discovery, sanitization, attribution, and artifact generation pipeline
@@ -37,7 +37,7 @@ The open-source engine. Public repository. Includes:
 
 License: Apache 2.0. DCO sign-off required for contributions. Public GitHub repository (when published; currently lab-only per consent gate).
 
-**2. FF6K Threat Context (proprietary, separate license)**
+**2. EXPOSE Threat Context (proprietary, separate license)**
 
 Commercial module. Private repository. Consumes Core's signed artifact, produces an enriched artifact. Includes:
 - APT targeting profile correlation
@@ -49,7 +49,7 @@ Commercial module. Private repository. Consumes Core's signed artifact, produces
 
 License: Korlogos commercial EULA. Available to commercial and federal customers under separate agreement. The artifact format produced is a documented superset of Core's canonical schema; downstream consumers can ingest either.
 
-**3. FF6K Identity Surface (proprietary, separate license, higher ethics bar)**
+**3. EXPOSE Identity Surface (proprietary, separate license, higher ethics bar)**
 
 Commercial module. Private repository. Includes:
 - WHOIS-personnel correlation beyond what Core does (registrant graph analysis, historical registrant pivots)
@@ -59,7 +59,7 @@ Commercial module. Private repository. Includes:
 
 License: Korlogos commercial EULA. Sold separately with stricter contractual terms covering authorized-use representations, GDPR/CCPA handling, and explicit prohibitions on unauthorized surveillance use cases. The ethics surface is materially larger than Core's; this module's separate licensing reflects that.
 
-**4. FF6K Research (open dataset, separate data license)**
+**4. EXPOSE Research (open dataset, separate data license)**
 
 Public dataset offering. Includes:
 - Periodic published reference graph datasets (anonymized or fully synthetic, depending on dataset)
@@ -83,7 +83,7 @@ The Core repository depends on no proprietary code. Commercial modules depend on
 
 ### Naming convention
 
-The internal codename FF6K is used in working artifacts during specification phase. The public name will be selected in a subsequent session, locked, and propagated as a mechanical rename across all artifacts before public publication. All four product surfaces will share the public-name prefix (e.g., `<PublicName> Core`, `<PublicName> Threat Context`, `<PublicName> Identity Surface`, `<PublicName> Research`).
+The public name **EXPOSE** (EXtended Perimeter Ontology Security Evaluation) was selected in Session H on 2026-05-10 and propagated across all public-facing and spec artifacts via the mechanical rename pass. The internal codename **FF6K** (shortened from FatFinger6000) is preserved for development artifacts, internal communications, and historical references per HISTORY.md. All four product surfaces share the EXPOSE prefix: **EXPOSE Core**, **EXPOSE Threat Context**, **EXPOSE Identity Surface**, **EXPOSE Research**.
 
 ## Consequences
 
@@ -108,7 +108,7 @@ The internal codename FF6K is used in working artifacts during specification pha
 
 **Apache 2.0 everything.** Single repository, no commercial modules, all features open. Rejected because the commercialization ideas (dark-web crawling, historical enrichment, personnel reconnaissance) require investment that needs commercial protection. Without that protection, the work either doesn't get done at all or gets done by a competitor who forks Core, adds the features, and doesn't contribute back.
 
-**Source-available everything (BUSL-1.1, PolyForm Strict).** Public repositories, code visible, commercial restrictions enforced by license. Rejected for v1 because (a) loses OSI-approved-license community engagement, (b) federal procurement preferences favor true open-source, (c) the engine itself does not need source-available protection because the value of FF6K is in the operational excellence and rule-pack tuning, not the code.
+**Source-available everything (BUSL-1.1, PolyForm Strict).** Public repositories, code visible, commercial restrictions enforced by license. Rejected for v1 because (a) loses OSI-approved-license community engagement, (b) federal procurement preferences favor true open-source, (c) the engine itself does not need source-available protection because the value of EXPOSE is in the operational excellence and rule-pack tuning, not the code.
 
 **Engine and modules in same repository, modules under different license.** Rejected because mixed-license repositories create endless confusion in dependency analysis, license auditing, and fork management. Clean separation between repositories with explicit Apache 2.0 SDK boundary in Core is much cleaner.
 
@@ -122,7 +122,7 @@ The four-surface structure is intended to be durable. Triggers for revisiting:
 
 - **Significant commercial competitive threat that BUSL would meaningfully address.** Move from Apache 2.0 to BUSL on Core is a significant decision and would require contributor agreement; trigger only if open-source posture is genuinely costing meaningful commercial revenue.
 - **Module consolidation pressure.** If Threat Context and Identity Surface have substantially overlapping infrastructure or customers always buy both, consolidation may simplify operations.
-- **Research dataset gains independent strategic importance.** If FF6K Research becomes a major research-infrastructure contribution in its own right, it may warrant its own governance structure (foundation-hosted, with sponsorship, etc.).
+- **Research dataset gains independent strategic importance.** If EXPOSE Research becomes a major research-infrastructure contribution in its own right, it may warrant its own governance structure (foundation-hosted, with sponsorship, etc.).
 
 ## References
 

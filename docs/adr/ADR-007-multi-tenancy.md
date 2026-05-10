@@ -6,7 +6,7 @@
 
 ## Context
 
-FatFinger6000's v1 deployment is lab-only on ARC, serving a single org's surface (Korlogos's own perimeter and active client engagements). Multi-tenancy is not strictly required for v1 to ship.
+EXPOSE's v1 deployment is lab-only on ARC, serving a single org's surface (Korlogos's own perimeter and active client engagements). Multi-tenancy is not strictly required for v1 to ship.
 
 The question is whether the codebase should be designed with multi-tenancy as a first-class concept (so it can be activated later via configuration) or designed single-tenant and refactored when needed.
 
@@ -47,7 +47,7 @@ CI fails on regressions in tenant isolation tests regardless of PR scope.
 **Positive:**
 
 - Activating multi-tenancy is a configuration change, not a refactor.
-- External operators using FatFinger6000 for consulting work can serve multiple clients without forking.
+- External operators using EXPOSE for consulting work can serve multiple clients without forking.
 - The data layer's tenant scoping is enforced from day one; no risk of "we'll add tenant_id later" creating gaps.
 - Cross-tenant isolation tests prevent regressions even before a second tenant exists.
 - The marginal complexity is small — `WHERE tenant_id = $1` in queries and a tenant context in request handlers — compared to the design and ops complexity already committed elsewhere.

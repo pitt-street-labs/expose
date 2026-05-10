@@ -6,13 +6,13 @@
 
 ## Context
 
-FatFinger6000 is an external attack surface intelligence pipeline with three workload types: API-bound collectors with high I/O concurrency, an attribution engine that's mostly graph traversal and rule evaluation, and an LLM enrichment layer that's bounded structured-output calls. The choice of implementation language affects collector ergonomics, LLM SDK maturity, deployment artifact, type-safety guarantees, and the realistic pace of contribution from external developers.
+EXPOSE is an external attack surface intelligence pipeline with three workload types: API-bound collectors with high I/O concurrency, an attribution engine that's mostly graph traversal and rule evaluation, and an LLM enrichment layer that's bounded structured-output calls. The choice of implementation language affects collector ergonomics, LLM SDK maturity, deployment artifact, type-safety guarantees, and the realistic pace of contribution from external developers.
 
 Four practical options were considered: Python, Go, TypeScript/Node, and Rust.
 
 ## Decision
 
-**Python** is the implementation language for FatFinger6000. Specific stack:
+**Python** is the implementation language for EXPOSE. Specific stack:
 
 - **Pydantic v2** for type-safe data modeling. Schemas are central to the project; Pydantic gives validated, JSON-Schema-compatible types as a first-class concern.
 - **FastAPI** for HTTP surfaces (admin API, future delivery API in production-hardening).
@@ -30,7 +30,7 @@ Orchestration framework (Temporal vs. Celery vs. simpler alternatives) is deferr
 - Pydantic provides the typed schemas the spec leans on heavily. The canonical artifact schema, rule pack schema, and observation graph entities all benefit from Pydantic's validation, serialization, and JSON Schema generation.
 - The Anthropic Python SDK is the reference implementation. OpenAI and Gemini Python SDKs are similarly mature. Local Ollama integration via httpx is straightforward.
 - Security tooling ecosystem in Python is unmatched: dnspython, cryptography, Censys/Shodan SDKs, certstream clients.
-- Existing ARC infrastructure runs Python services; FatFinger6000 slots into operational patterns the team already knows.
+- Existing ARC infrastructure runs Python services; EXPOSE slots into operational patterns the team already knows.
 - External contribution friction is low — Python is the most common language for security tooling.
 
 **Negative:**

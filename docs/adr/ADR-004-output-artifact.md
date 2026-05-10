@@ -6,7 +6,7 @@
 
 ## Context
 
-FatFinger6000's purpose is to drive downstream CTEM workflows and red team lead review. The question is how the pipeline delivers its output: as a live API surface that consumers query in real time, as a streaming feed, as files in object storage, or some combination.
+EXPOSE's purpose is to drive downstream CTEM workflows and red team lead review. The question is how the pipeline delivers its output: as a live API surface that consumers query in real time, as a streaming feed, as files in object storage, or some combination.
 
 This decision interacts strongly with the two-environment model. Environment 1 (this codebase) produces structured intelligence. Environment 2 (separate, downstream) consumes it for narrative reasoning under appropriate safeguards. The handoff between environments is air-gapped.
 
@@ -24,8 +24,8 @@ Optional derived partition views (`partitions/by-cloud-provider/aws.json`, `part
 
 Artifact identity:
 
-- Schema versioned as `fatfinger6000/v1`. Backward-compatible changes within v1 guaranteed; breaking changes are major version bumps.
-- Custom JSON Schema, not STIX 2.1. STIX is a general threat intelligence ontology; FatFinger6000's domain is narrower and benefits from purpose-built semantics.
+- Schema versioned as `expose/v1`. Backward-compatible changes within v1 guaranteed; breaking changes are major version bumps.
+- Custom JSON Schema, not STIX 2.1. STIX is a general threat intelligence ontology; EXPOSE's domain is narrower and benefits from purpose-built semantics.
 - File granularity: single canonical file per run, not partitioned. Partition views are derived, not authoritative.
 
 Delta semantics:
@@ -65,7 +65,7 @@ Storage and delivery:
 
 ## Alternatives considered
 
-**STIX 2.1 with custom extensions.** Standard threat intelligence format with broad ecosystem support. Rejected because STIX's ontology (Indicator, Observed-Data, Infrastructure, Identity, Relationship) is designed for sharing IoCs and threat actor activity, not for representing one's own external surface. Forcing FatFinger6000's domain into STIX means either misusing the ontology or wrapping in custom extensions until effectively writing a custom schema with extra ceremony. CTEM platforms don't natively consume STIX particularly well anyway.
+**STIX 2.1 with custom extensions.** Standard threat intelligence format with broad ecosystem support. Rejected because STIX's ontology (Indicator, Observed-Data, Infrastructure, Identity, Relationship) is designed for sharing IoCs and threat actor activity, not for representing one's own external surface. Forcing EXPOSE's domain into STIX means either misusing the ontology or wrapping in custom extensions until effectively writing a custom schema with extra ceremony. CTEM platforms don't natively consume STIX particularly well anyway.
 
 **Live HTTPS API as primary delivery for v1.** Real-time consumption, supports versioning, supports auditing. Rejected for v1 because it adds operational complexity inappropriate for the lab phase (auth, rate limiting, audit logging, durability of the API itself). Deferred to production-hardening.
 

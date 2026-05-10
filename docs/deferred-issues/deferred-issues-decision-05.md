@@ -6,13 +6,13 @@ epic.
 
 ---
 
-## Issue: Trademark registration for "FatFinger6000"
+## Issue: Trademark registration for "EXPOSE"
 
 **Labels:** `epic:repo-governance`, `area:legal`, `priority:low`, `type:legal`
 
 **Summary**
 Apache 2.0 does not grant trademark rights. If preventing confusingly-named
-forks matters, "FatFinger6000" should be registered as a Korlogos / Pitt
+forks matters, "EXPOSE" should be registered as a Korlogos / Pitt
 Street Labs trademark.
 
 **Acceptance criteria**
@@ -41,7 +41,7 @@ time if used. Self-filed is feasible but riskier.
 Apache 2.0 projects typically require either a CLA (signed agreement
 transferring or licensing rights to the project) or a DCO (per-commit
 sign-off attesting the contributor has the right to submit). Decide which
-posture FatFinger6000 takes before accepting external contributions.
+posture EXPOSE takes before accepting external contributions.
 
 **Tradeoffs**
 - DCO: lighter weight, well-tolerated by community, sufficient for most OSS
@@ -71,7 +71,7 @@ This is the lighter posture and does not impede the dual-repo strategy.
 
 **Summary**
 Public security tooling needs a clear vulnerability disclosure policy. Where
-do researchers report security issues in FatFinger6000 itself? What's the
+do researchers report security issues in EXPOSE itself? What's the
 response SLA? What's the credit policy?
 
 **Acceptance criteria**

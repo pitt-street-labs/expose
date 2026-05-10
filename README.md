@@ -1,4 +1,4 @@
-# FatFinger6000
+# EXPOSE
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Status: Pre-release](https://img.shields.io/badge/status-pre--release-yellow.svg)](#status)
@@ -20,7 +20,7 @@ Bootstraps from minimal seeds — organization name, brand strings, known apex d
 
 ## Intended use
 
-FatFinger6000 is designed for:
+EXPOSE is designed for:
 
 - **Defensive CTEM workflows** — security teams mapping their own organization's external surface for prioritization and response.
 - **Authorized red team operations** — supporting engagements with explicit scope contracts.
@@ -37,7 +37,7 @@ See [`ETHICS.md`](ETHICS.md) for the full intended-use posture.
 
 ## Two-environment model
 
-FatFinger6000 is **Environment 1** in a deliberate two-environment design:
+EXPOSE is **Environment 1** in a deliberate two-environment design:
 
 - **Environment 1 (this codebase)** — deterministic discovery and bounded structured-output enrichment. Produces signed JSON artifacts.
 - **Environment 2 (separate, downstream)** — open-ended LLM-driven narrative analysis, possibly using high-capability models under appropriate safeguards. Out of scope for this codebase.
@@ -93,36 +93,36 @@ See [`docs/SPEC.md`](docs/SPEC.md) for the full architecture.
 
 ```bash
 # Clone the repository
-git clone https://github.com/korlogos/fatfinger6000.git
-cd fatfinger6000
+git clone https://github.com/korlogos/expose.git
+cd expose
 
 # Configure your tenant (see docs/SPEC.md §10.1)
 cp examples/tenant-config.yaml.template tenant-config.yaml
 # Edit tenant-config.yaml with your seeds, scope, collector credentials
 
 # Deploy via Helm chart (k3s lab deployment)
-helm install fatfinger6000 ./deploy/helm-chart \
+helm install expose ./deploy/helm-chart \
     --values tenant-config.yaml \
-    --namespace fatfinger6000 --create-namespace
+    --namespace expose --create-namespace
 
 # Trigger a manual run
-kubectl exec -n fatfinger6000 deploy/fatfinger6000-control-plane -- \
-    fatfinger6000 run trigger --tenant default
+kubectl exec -n expose deploy/expose-control-plane -- \
+    expose run trigger --tenant default
 
 # Retrieve the artifact (lab deployment)
-kubectl exec -n fatfinger6000 deploy/fatfinger6000-control-plane -- \
-    fatfinger6000 artifact list --tenant default
+kubectl exec -n expose deploy/expose-control-plane -- \
+    expose artifact list --tenant default
 
 # Verify the artifact signature
 cosign verify-blob --signature canonical.json.gz.sig canonical.json.gz \
-    --certificate-identity-regexp '^https://github.com/korlogos/fatfinger6000/' \
+    --certificate-identity-regexp '^https://github.com/korlogos/expose/' \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
 ## Project structure
 
 ```
-fatfinger6000/
+expose/
 ├── docs/
 │   ├── SPEC.md              # Main specification
 │   ├── adr/                 # Architecture Decision Records
@@ -162,7 +162,7 @@ The engine is open source. Client-specific rule packs and engagement-specific in
 
 ## Acknowledgements
 
-FatFinger6000 builds on the work of:
+EXPOSE builds on the work of:
 
 - The [Sigstore](https://www.sigstore.dev/) project (cosign, Rekor, Fulcio).
 - The [OpenTelemetry](https://opentelemetry.io/) project.

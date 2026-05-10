@@ -6,7 +6,7 @@
 
 ## Context
 
-FatFinger6000 has bounded enrichment work that benefits from LLM judgment: attribution sanity-checking on ambiguous candidates, tech-stack inference where Wappalyzer-style rules are insufficient, noise classification on suspicious observations. The question is which LLM the pipeline uses, where it runs, and how the integration is bounded for safety.
+EXPOSE has bounded enrichment work that benefits from LLM judgment: attribution sanity-checking on ambiguous candidates, tech-stack inference where Wappalyzer-style rules are insufficient, noise classification on suspicious observations. The question is which LLM the pipeline uses, where it runs, and how the integration is bounded for safety.
 
 This decision sits inside a deliberate two-environment model:
 
@@ -77,7 +77,7 @@ Trigger conditions for changes:
 - **Local LLM quality degrades or volume grows beyond 2080 Super throughput.** GPU upgrade path documented in deferred issues. Migration to 16GB+ VRAM unlocks 14B-class models; 24GB+ unlocks 32-70B with quantization.
 - **External LLM costs exceed tenant cost ceilings repeatedly.** Either tighten enrichment policy (only `medium` and `requires_review`, not `high`) or invest in better local LLM hardware.
 - **A new frontier provider emerges or existing providers shift defaults.** New provider is a new `LLMProvider` implementation. Easy to add.
-- **Mythos-class GA changes the Environment 2 story.** Coordination happens at the artifact contract boundary; FatFinger6000 itself is unaffected.
+- **Mythos-class GA changes the Environment 2 story.** Coordination happens at the artifact contract boundary; EXPOSE itself is unaffected.
 - **A regulatory or compliance change requires Environment 1 to operate fully air-gapped.** Local Ollama is the path; quality tradeoff is real.
 
 ## References

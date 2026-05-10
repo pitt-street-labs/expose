@@ -6,7 +6,7 @@
 
 ## Context
 
-FatFinger6000 needs to run in Korlogos's ARC lab at Pitt Street Labs for v1, but must be deployable to cloud (AWS/Azure/GCP) and to customer on-prem environments without architectural rework. Portability is a first-class requirement, not a future-work item.
+EXPOSE needs to run in Korlogos's ARC lab at Pitt Street Labs for v1, but must be deployable to cloud (AWS/Azure/GCP) and to customer on-prem environments without architectural rework. Portability is a first-class requirement, not a future-work item.
 
 The system has three workloads with distinct infrastructure preferences:
 

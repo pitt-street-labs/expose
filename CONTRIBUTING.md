@@ -1,6 +1,6 @@
-# Contributing to FatFinger6000
+# Contributing to EXPOSE
 
-Thanks for your interest in contributing. FatFinger6000 is open source under Apache 2.0 and welcomes contributions from the community.
+Thanks for your interest in contributing. EXPOSE is open source under Apache 2.0 and welcomes contributions from the community.
 
 ## Before you start
 
@@ -52,7 +52,7 @@ For a series of commits, use `git rebase --signoff main` to sign off on all of t
 
 **Test coverage.** Always welcome. Cross-tenant isolation tests, regression tests for previous bugs, integration tests against synthetic seed graphs.
 
-**Bug reports.** Open an issue with reproduction steps, FatFinger6000 version, deployment environment, expected vs. actual behavior.
+**Bug reports.** Open an issue with reproduction steps, EXPOSE version, deployment environment, expected vs. actual behavior.
 
 **Feature requests.** Open an issue describing the use case. We'll discuss whether it fits the project's scope and intent before any code is written.
 
@@ -71,8 +71,8 @@ If you're unsure whether a contribution fits the project, open a discussion issu
 ## Development setup
 
 ```bash
-git clone https://github.com/korlogos/fatfinger6000.git
-cd fatfinger6000
+git clone https://github.com/korlogos/expose.git
+cd expose
 
 # Install uv (Python package manager): https://docs.astral.sh/uv/
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -108,12 +108,12 @@ For Helm chart development:
 curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
 
 # Spin up a local cluster
-k3d cluster create fatfinger6000-dev
+k3d cluster create expose-dev
 
 # Install the chart
-helm install fatfinger6000 ./deploy/helm-chart \
+helm install expose ./deploy/helm-chart \
     --values deploy/dev/local-values.yaml \
-    --namespace fatfinger6000 --create-namespace
+    --namespace expose --create-namespace
 ```
 
 ## Pull request workflow
@@ -172,7 +172,7 @@ Pre-release tags use `-rc.N` and `-beta.N` suffixes.
 
 ## Questions
 
-Open a discussion at https://github.com/korlogos/fatfinger6000/discussions for design questions, usage questions, or general discussion. File issues for bug reports and feature requests with concrete asks.
+Open a discussion at https://github.com/korlogos/expose/discussions for design questions, usage questions, or general discussion. File issues for bug reports and feature requests with concrete asks.
 
 For Code of Conduct concerns, email `conduct@korlogos.com`.
 

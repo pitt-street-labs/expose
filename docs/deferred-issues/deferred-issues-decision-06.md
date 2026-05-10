@@ -29,7 +29,7 @@ need APIs and CLI tooling to create, configure, suspend, and delete tenants.
   - `POST /admin/tenants/{id}/resume` — resume suspended tenant
   - `DELETE /admin/tenants/{id}` — schedule tenant deletion (soft delete with
     retention period, then hard delete)
-- CLI tooling: `fatfinger6000 tenant create|list|show|update|suspend|delete`
+- CLI tooling: `expose tenant create|list|show|update|suspend|delete`
 - Admin authentication separate from tenant bearer tokens (deployment-level
   admin credentials, not tenant-issued)
 - Audit log entries for every tenant lifecycle event

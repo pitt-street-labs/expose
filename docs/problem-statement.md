@@ -1,17 +1,18 @@
-# FF6K — Problem Statement
+# EXPOSE — Problem Statement
 
 **Status:** Scaffold awaiting researcher-journey framing from project lead
-**Working codename:** FF6K (public name TBD)
+**Public name:** EXPOSE (selected 2026-05-10 in Session H)
+**Internal codename:** FF6K
 
-This document captures the problem FF6K solves, framed around the cybersecurity-researcher journey of the project lead. It is the foundational narrative document — the "why does this exist" answer — that drives README content, marketing positioning, and federal procurement narrative.
+This document captures the problem EXPOSE solves, framed around the cybersecurity-researcher journey of the project lead. It is the foundational narrative document — the "why does this exist" answer — that drives README content, marketing positioning, and federal procurement narrative.
 
-The structure below is a scaffold. Each section has placeholder questions and prompts that the project lead populates with their own framing and language. The result should be 1500-2500 words, readable by both technical and non-technical audiences, that authentically reflects the project lead's perspective on the gap FF6K fills.
+The structure below is a scaffold. Each section has placeholder questions and prompts that the project lead populates with their own framing and language. The result should be 1500-2500 words, readable by both technical and non-technical audiences, that authentically reflects the project lead's perspective on the gap EXPOSE fills.
 
 ---
 
 ## 1. The practitioner experience
 
-*Two to four paragraphs answering: what is the lived experience of being a cybersecurity practitioner — specifically a cloud cybersecurity architect doing CTEM, red team support, and municipal infrastructure work — that creates the gap FF6K fills?*
+*Two to four paragraphs answering: what is the lived experience of being a cybersecurity practitioner — specifically a cloud cybersecurity architect doing CTEM, red team support, and municipal infrastructure work — that creates the gap EXPOSE fills?*
 
 *Anchor questions to consider:*
 - *What did you find frustrating or inadequate about existing tools when doing real client engagements (NYC DOT, Koi deployments, etc.)?*
@@ -23,9 +24,9 @@ The structure below is a scaffold. Each section has placeholder questions and pr
 
 ---
 
-## 2. The specific gap FF6K addresses
+## 2. The specific gap EXPOSE addresses
 
-*One to two paragraphs naming, concretely, what FF6K does that existing tools do not. This section is technical and specific, not abstract.*
+*One to two paragraphs naming, concretely, what EXPOSE does that existing tools do not. This section is technical and specific, not abstract.*
 
 *Reference points to draw on:*
 - *Continuous attribution with cryptographic provenance — no incumbent does this*
@@ -54,12 +55,12 @@ The structure below is a scaffold. Each section has placeholder questions and pr
 
 ## 4. The researcher-journey framing
 
-*One to two paragraphs in your own voice connecting the problem to your trajectory as a researcher. This is the section that distinguishes FF6K from a generic vendor pitch — it grounds the project in a specific person's professional journey rather than a market opportunity.*
+*One to two paragraphs in your own voice connecting the problem to your trajectory as a researcher. This is the section that distinguishes EXPOSE from a generic vendor pitch — it grounds the project in a specific person's professional journey rather than a market opportunity.*
 
 *Anchor questions to consider:*
 - *What specific clients, deployments, or projects shaped your view of what was needed?*
 - *What did the ARC project teach you about preparedness-oriented thinking that applies to commercial cybersecurity?*
-- *How does your work on municipal IoT, cloud security frameworks, and AI security inform what FF6K must be?*
+- *How does your work on municipal IoT, cloud security frameworks, and AI security inform what EXPOSE must be?*
 - *Why does the federal trajectory matter to you specifically?*
 
 [Placeholder for researcher-journey framing — 300-400 words]
@@ -68,7 +69,7 @@ The structure below is a scaffold. Each section has placeholder questions and pr
 
 ## 5. The pragmatic outcome
 
-*One paragraph naming concretely what FF6K enables that was not previously possible. Not abstract benefits — specific outcomes a practitioner experiences.*
+*One paragraph naming concretely what EXPOSE enables that was not previously possible. Not abstract benefits — specific outcomes a practitioner experiences.*
 
 *Reference points:*
 - *A team can generate a defensible, signed, attributed external surface artifact for an enterprise in hours instead of days*
@@ -81,7 +82,7 @@ The structure below is a scaffold. Each section has placeholder questions and pr
 
 ---
 
-## 6. What FF6K is not
+## 6. What EXPOSE is not
 
 *One paragraph reaffirming the boundaries from positioning.md, in your own voice, so that buyers and adopters who read this document understand what they are not getting.*
 
@@ -101,7 +102,7 @@ The structure below is a scaffold. Each section has placeholder questions and pr
 
 When you populate this scaffold:
 
-1. **Write in your own voice.** This document is most effective when it sounds like the practitioner who built it, not a marketing department. First-person is acceptable in section 4. The other sections can use first-person plural ("we built FF6K because...") or descriptive prose.
+1. **Write in your own voice.** This document is most effective when it sounds like the practitioner who built it, not a marketing department. First-person is acceptable in section 4. The other sections can use first-person plural ("we built EXPOSE because...") or descriptive prose.
 
 2. **Be specific.** "Frustration with existing tools" is not specific. "The third time I had to manually correlate a Censys query against three passive DNS providers and a registrar pivot to attribute one cloud asset for a NYC DOT vendor assessment, I started thinking about what this should look like as a continuous pipeline" is specific. Specificity is what makes this document credible.
 

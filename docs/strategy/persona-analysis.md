@@ -1,11 +1,11 @@
-# FF6K — Three-Persona Strategy Review
+# EXPOSE — Three-Persona Strategy Review
 
 **Status:** Advisory — not locked. Open for revision in subsequent sessions.
 **Date:** 2026-05-09
 **Author context:** AI-assisted synthesis from the locked spec-phase artifacts (SPEC.md, all 10 ADRs, positioning.md, ETHICS.md). Produced in response to a project-lead request for a strategy review across three named personas.
-**Working codename:** FF6K (public name TBD per Session H)
+**Public name:** EXPOSE (selected 2026-05-10 in Session H) / **Internal codename:** FF6K
 
-This document analyses how FF6K sells, operates, and serves three named personas — red teamer, threat researcher, corporate security director — and identifies one missing audience plus seven strategic recommendations. It is intended to inform Session B (competitive analysis), Session C (module specifications), and the eventual go-to-market workstream. It does **not** replace those sessions; it surfaces structural questions and assets the project lead can use to scope them.
+This document analyses how EXPOSE sells, operates, and serves three named personas — red teamer, threat researcher, corporate security director — and identifies one missing audience plus seven strategic recommendations. It is intended to inform Session B (competitive analysis), Session C (module specifications), and the eventual go-to-market workstream. It does **not** replace those sessions; it surfaces structural questions and assets the project lead can use to scope them.
 
 This is advisory analysis, not locked architecture. Treat it as input to subsequent work, not as a foundation document on the level of `positioning.md` or the ADRs.
 
@@ -37,9 +37,9 @@ This is advisory analysis, not locked architecture. Treat it as input to subsequ
 
 | Dimension | Detail |
 |---|---|
-| **Sells on** | **FF6K Research dataset offering (CC BY 4.0) is the headline** — almost no one in the EASM category publishes reference datasets. Reproducible deterministic artifact generation; provenance chain on every claim; Apache 2.0 means friction-free academic adoption; eval harness (Phase 2 deliverable) is exactly what attribution-methodology papers need. |
+| **Sells on** | **EXPOSE Research dataset offering (CC BY 4.0) is the headline** — almost no one in the EASM category publishes reference datasets. Reproducible deterministic artifact generation; provenance chain on every claim; Apache 2.0 means friction-free academic adoption; eval harness (Phase 2 deliverable) is exactly what attribution-methodology papers need. |
 | **Operates as** | Self-hosted on lab compute or research cloud; seeds drawn from own institutional infrastructure, partnered research domains, or synthetic targets; local Ollama for cost discipline; downstream dataset publication is a separate workflow under the operator's control. |
-| **Use cases** | Attribution-accuracy methodology research; EASM tool benchmarking (FF6K eval datasets become the benchmark the broader community adopts); reproducible reference architecture for security papers; ML training data; graduate-level cybersecurity course labs. |
+| **Use cases** | Attribution-accuracy methodology research; EASM tool benchmarking (EXPOSE eval datasets become the benchmark the broader community adopts); reproducible reference architecture for security papers; ML training data; graduate-level cybersecurity course labs. |
 | **Verdict** | Yes — and this is the most strategically underleveraged piece of the project. |
 
 **Risks and notes for this audience.**
@@ -67,7 +67,7 @@ This is advisory analysis, not locked architecture. Treat it as input to subsequ
 - "Open-source means we have to operate it" is friction for risk-averse buyers. The absence of a Korlogos managed-service offering until ADR-010's "future commercial" milestone leaves a gap that competitors fill (Mandiant Advantage ASM, Microsoft Defender EASM, Censys ASM).
 - Frequent confusion point: **"FedRAMP-ready" is not "FedRAMP-authorized."** Buyers will hear "ready" and think they have nothing to do. The Federal Customer Deployment Guide (Session G) is upstream of any confident federal sales conversation; without it, the FedRAMP-ready claim does not land defensibly.
 - The dual-audience framing (defensive CTEM + authorized red team) may unsettle compliance-minded buyers. The strategic-buyer pitch in `positioning.md` §5.3 already downplays the red team angle for them — this is the right call; preserve it.
-- Incumbents have polish, integration libraries, and support contracts. FF6K wins on cost, FedRAMP-readiness, openness, and signed-artifact rigor; loses on out-of-the-box CTEM-vendor adapters (correctly out-of-scope per ADR-004 but a frequent procurement-conversation friction point).
+- Incumbents have polish, integration libraries, and support contracts. EXPOSE wins on cost, FedRAMP-readiness, openness, and signed-artifact rigor; loses on out-of-the-box CTEM-vendor adapters (correctly out-of-scope per ADR-004 but a frequent procurement-conversation friction point).
 
 ---
 
@@ -93,7 +93,7 @@ This is advisory analysis, not locked architecture. Treat it as input to subsequ
 
 The three personas above are mostly right, but there is a fourth worth surfacing because they pair with the Security Director persona for federal sales:
 
-**The Federal CDM Engineer.** The person inside an agency who ingests FF6K artifacts into the agency's Continuous Diagnostics and Mitigation program, the agency SIEM, the RMF continuous-monitoring evidence stream. The positioning targets federal *buyers* (CISOs and contracting officers) but the *daily user* is this person.
+**The Federal CDM Engineer.** The person inside an agency who ingests EXPOSE artifacts into the agency's Continuous Diagnostics and Mitigation program, the agency SIEM, the RMF continuous-monitoring evidence stream. The positioning targets federal *buyers* (CISOs and contracting officers) but the *daily user* is this person.
 
 They care about:
 
@@ -110,7 +110,7 @@ This is the *user* persona that pairs with the Security Director *buyer* persona
 
 1. **Dual-audience GTM is a strategic asset but needs separate sales motions.** Do not collapse defensive CTEM and red team into a single pitch deck. Different reference customers, different conferences (Black Hat / DEF CON for red team; RSA / Gartner Security Summit for defensive CISOs), different language registers. The three-layer pitch in `positioning.md` already handles this — preserve it.
 
-2. **FF6K Research is the most underleveraged piece of the structure.** Almost no commercial EASM publishes research datasets. This is the credibility wedge for academic adoption, which compounds into federal-research credibility, which compounds into federal commercial sales. Treat Research as marketing infrastructure with its own budget and roadmap, not as a side artifact. Consider sponsoring an academic conference paper or two before public launch.
+2. **EXPOSE Research is the most underleveraged piece of the structure.** Almost no commercial EASM publishes research datasets. This is the credibility wedge for academic adoption, which compounds into federal-research credibility, which compounds into federal commercial sales. Treat Research as marketing infrastructure with its own budget and roadmap, not as a side artifact. Consider sponsoring an academic conference paper or two before public launch.
 
 3. **Identity Surface module needs its own GTM and ethics conversation.** Different buyer (red team lead, not CISO), different ethics surface (personnel reconnaissance), different procurement. Compliance-minded enterprise buyers will be cautious. Probably warrants a session distinct from Session C's general module specification — perhaps "Session C.5: Identity Surface go-to-market" — to design that specific motion.
 

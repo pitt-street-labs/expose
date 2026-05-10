@@ -1,10 +1,10 @@
-# FatFinger6000 — Specification
+# EXPOSE — Specification
 
 **Status:** Draft — v0.1
 **License:** Apache 2.0 (engine); separate private repo for client-specific rule packs
 **Maintainer:** Korlogos / Pitt Street Labs
 
-This document is the foundational specification for FatFinger6000, a continuous external attack surface intelligence pipeline whose sole deliverable is a signed, deterministic JSON artifact suitable for downstream Continuous Threat Exposure Management (CTEM) workflows and red team lead review.
+This document is the foundational specification for EXPOSE, a continuous external attack surface intelligence pipeline whose sole deliverable is a signed, deterministic JSON artifact suitable for downstream Continuous Threat Exposure Management (CTEM) workflows and red team lead review.
 
 This spec is the contract between intent and implementation. Companion documents:
 
@@ -19,7 +19,7 @@ This spec is the contract between intent and implementation. Companion documents
 
 ### 1.1 Goals
 
-FatFinger6000 produces, on a daily batch cadence, a comprehensive enriched view of a tenant's externally reachable cloud assets across AWS, Azure, and GCP, structured as a signed JSON artifact that downstream processes consume.
+EXPOSE produces, on a daily batch cadence, a comprehensive enriched view of a tenant's externally reachable cloud assets across AWS, Azure, and GCP, structured as a signed JSON artifact that downstream processes consume.
 
 The system bootstraps from minimal seeds — organization name, brand strings, known apex domains — and progressively expands attributed surface through public data sources (Certificate Transparency logs, passive DNS, ASN/BGP data, internet-wide scan datasets, cloud provider IP range manifests). It produces:
 
@@ -32,9 +32,9 @@ The system bootstraps from minimal seeds — organization name, brand strings, k
 
 ### 1.2 Non-goals
 
-The following are explicit non-goals. Each is documented because someone will eventually ask why FatFinger6000 doesn't do them.
+The following are explicit non-goals. Each is documented because someone will eventually ask why EXPOSE doesn't do them.
 
-**Active exploitation, vulnerability validation, or any post-discovery offensive action.** FatFinger6000 produces leads. Exploitation toolchains (Nuclei, Metasploit, manual red team operations) are different categories and explicitly out of scope.
+**Active exploitation, vulnerability validation, or any post-discovery offensive action.** EXPOSE produces leads. Exploitation toolchains (Nuclei, Metasploit, manual red team operations) are different categories and explicitly out of scope.
 
 **PII enrichment beyond public records.** Registrant emails, contact names, and similar fields disclosed in WHOIS/RDAP and certificate registration are PII but are publicly disclosed. The pipeline treats them as such. The pipeline does not enrich with private data sources, paid identity-resolution services, or social-graph correlation.
 
@@ -44,17 +44,17 @@ The following are explicit non-goals. Each is documented because someone will ev
 
 **Live API surface for CTEM platform integration in v1.** The artifact is the API. CTEM platforms ingest the JSON file. v2 production-hardening adds an authenticated HTTPS API for retrieval; v1 is lab-deployed with file-system delivery.
 
-**Open-ended narrative reasoning, exploit hypothesis generation, red team briefing prose.** These are the work product of Environment 2 — a separate, downstream LLM-driven workflow consuming the artifact via air-gapped manual handoff. FatFinger6000 produces structured input for those workflows, not narrative output.
+**Open-ended narrative reasoning, exploit hypothesis generation, red team briefing prose.** These are the work product of Environment 2 — a separate, downstream LLM-driven workflow consuming the artifact via air-gapped manual handoff. EXPOSE produces structured input for those workflows, not narrative output.
 
-**Air-gapped operation of the pipeline itself.** The discovery stage requires internet egress to specific allowlisted API providers (CT logs, passive DNS, Censys, Shodan, etc.). Customer environments without internet egress cannot run FatFinger6000. The artifact itself, once produced, can be transported to air-gapped environments for downstream analysis.
+**Air-gapped operation of the pipeline itself.** The discovery stage requires internet egress to specific allowlisted API providers (CT logs, passive DNS, Censys, Shodan, etc.). Customer environments without internet egress cannot run EXPOSE. The artifact itself, once produced, can be transported to air-gapped environments for downstream analysis.
 
 ## 2. System overview
 
 ### 2.1 The two-environment model
 
-FatFinger6000 operates in **Environment 1** — the deterministic discovery and enrichment pipeline this specification defines. Environment 1 produces the canonical JSON artifact.
+EXPOSE operates in **Environment 1** — the deterministic discovery and enrichment pipeline this specification defines. Environment 1 produces the canonical JSON artifact.
 
-The artifact is then **manually transferred** (download, signature verification, ingestion) to **Environment 2** — a separate operational environment where downstream LLM-driven analysis happens. Environment 2 is out of scope for this specification. It may use Mythos-class capabilities under appropriate safeguards (Project Glasswing, equivalent programs, or operator-administered controls); FatFinger6000 neither calls nor depends on those capabilities.
+The artifact is then **manually transferred** (download, signature verification, ingestion) to **Environment 2** — a separate operational environment where downstream LLM-driven analysis happens. Environment 2 is out of scope for this specification. It may use Mythos-class capabilities under appropriate safeguards (Project Glasswing, equivalent programs, or operator-administered controls); EXPOSE neither calls nor depends on those capabilities.
 
 The two-environment separation is deliberate. It preserves the air-gap discipline appropriate for high-capability autonomous LLM tooling, keeps Environment 1's safety properties simple to audit, and isolates the domains of concern: Environment 1 is "what is reachable that belongs to us"; Environment 2 is "what does an operator do about it."
 
@@ -114,21 +114,21 @@ The pipeline crosses two important trust boundaries:
 
 ### 3.1 Adversaries and their goals
 
-**External adversaries who control DNS, certificate, or service banner content.** They plant prompt-injection-style payloads in cert SANs, DNS TXT records, HTTP banners, and similar fields to manipulate FatFinger6000's downstream LLM enrichment or to corrupt the JSON artifact. Mitigation: stage 3 sanitization treats all such content as untrusted; LLM prompts wrap collected content in explicit external-observation tags with system-prompt instructions to treat enclosed content as data. SafeLLMClient enforces structured-output validation; outputs that fail validation are not stored.
+**External adversaries who control DNS, certificate, or service banner content.** They plant prompt-injection-style payloads in cert SANs, DNS TXT records, HTTP banners, and similar fields to manipulate EXPOSE's downstream LLM enrichment or to corrupt the JSON artifact. Mitigation: stage 3 sanitization treats all such content as untrusted; LLM prompts wrap collected content in explicit external-observation tags with system-prompt instructions to treat enclosed content as data. SafeLLMClient enforces structured-output validation; outputs that fail validation are not stored.
 
-**External adversaries who detect and fingerprint the FatFinger6000 scanner fleet.** They use the fingerprint to evade discovery during scans or to attribute scanning activity back to the operator. Mitigation: scanner egress profiles route active probing through deployment-configured egress points (cloud-account-isolated for ARC, dedicated cloud accounts for cloud deployments), TLS fingerprint randomization where feasible, distributed scan origins.
+**External adversaries who detect and fingerprint the EXPOSE scanner fleet.** They use the fingerprint to evade discovery during scans or to attribute scanning activity back to the operator. Mitigation: scanner egress profiles route active probing through deployment-configured egress points (cloud-account-isolated for ARC, dedicated cloud accounts for cloud deployments), TLS fingerprint randomization where feasible, distributed scan origins.
 
 **Insider misconfiguration of authorization scope.** Operator inadvertently configures scope that overlaps with assets they are not authorized to analyze. Mitigation: scope-aware warnings flagged in artifact (medium enforcement mode default), hard mode available for stricter deployments, ETHICS.md positioning, audit logs of all scope changes.
 
 **Tenant data leakage in multi-tenant deployments.** A bug in middleware, query construction, or caching exposes one tenant's artifacts to another. Mitigation: tenant isolation enforced via `tenant_id` columns on all relevant tables, query interception in test mode, cross-tenant isolation test suite gating CI, periodic red-team review of tenant boundaries.
 
-**Supply-chain attacks against FatFinger6000 itself.** A malicious dependency, compromised CI, or tampered container image substitutes attacker-controlled code into operator deployments. Mitigation: signed images with cosign, SBOM generation via syft, SLSA Level 2 (target Level 3) provenance attestations, dependency pinning, reproducible builds where feasible.
+**Supply-chain attacks against EXPOSE itself.** A malicious dependency, compromised CI, or tampered container image substitutes attacker-controlled code into operator deployments. Mitigation: signed images with cosign, SBOM generation via syft, SLSA Level 2 (target Level 3) provenance attestations, dependency pinning, reproducible builds where feasible.
 
 **Compromise of LLM provider credentials.** API key for Anthropic/OpenAI/Gemini is exfiltrated and used by an adversary against the operator's billing account. Mitigation: secrets backend abstraction with just-in-time fetch, tenant-scoped keys when production-hardening adds the abstraction, hard cost ceilings per run, audit logging of all LLM calls.
 
 **Air-gap handoff compromise.** The JSON artifact is tampered with between Environment 1 and Environment 2. Mitigation: cosign-signed artifacts, signature verification on Environment 2 side, transparency log entries when keyless signing is used.
 
-### 3.2 What FatFinger6000 explicitly does not defend against
+### 3.2 What EXPOSE explicitly does not defend against
 
 It does not defend against compromise of the operator's host system. If the operator's infrastructure is compromised, the attacker can produce arbitrary signed artifacts using the operator's credentials. Defense at that layer is the operator's responsibility.
 
@@ -140,14 +140,14 @@ It does not defend against data leakage in collector API providers. If Censys, S
 
 ### 4.1 Deployment topology
 
-FatFinger6000 is containerized, deployed via Helm chart, and target-agnostic. v1 production deployment runs on ARC at Pitt Street Labs (k3s, self-managed Postgres, MinIO, Vaultwarden). The same artifacts deploy to AWS/Azure/GCP/customer-on-prem with different values files.
+EXPOSE is containerized, deployed via Helm chart, and target-agnostic. v1 production deployment runs on ARC at Pitt Street Labs (k3s, self-managed Postgres, MinIO, Vaultwarden). The same artifacts deploy to AWS/Azure/GCP/customer-on-prem with different values files.
 
 Component containers:
 
-- **`fatfinger6000-control-plane`** — orchestrator API, run scheduler, attribution engine, artifact generator. Stateless; depends on Postgres and object store.
-- **`fatfinger6000-collector-worker`** — executes collector modules. Multiple replicas; pulls jobs from the work queue. Holds collector API keys via secrets backend, fetched just-in-time per call.
-- **`fatfinger6000-scanner-worker`** — executes active probing. Separate from collector workers because of egress isolation requirements. Configurable egress profile per deployment.
-- **`fatfinger6000-llm-worker`** — executes LLM enrichment jobs. Talks to configured LLM provider (Ollama by default for v1 lab; frontier providers via configuration).
+- **`expose-control-plane`** — orchestrator API, run scheduler, attribution engine, artifact generator. Stateless; depends on Postgres and object store.
+- **`expose-collector-worker`** — executes collector modules. Multiple replicas; pulls jobs from the work queue. Holds collector API keys via secrets backend, fetched just-in-time per call.
+- **`expose-scanner-worker`** — executes active probing. Separate from collector workers because of egress isolation requirements. Configurable egress profile per deployment.
+- **`expose-llm-worker`** — executes LLM enrichment jobs. Talks to configured LLM provider (Ollama by default for v1 lab; frontier providers via configuration).
 - **`postgres`** — relational store for the observation graph, run metadata, configuration, audit log. Production deployments use managed Postgres; lab uses self-managed.
 - **`minio`** (or S3-compatible) — object store for evidence (raw cert PEMs, raw HTTP responses, raw DNS responses) keyed by content hash, plus canonical artifacts.
 - **`ollama`** (optional) — local LLM server. v1 lab default; cloud deployments may run external LLM providers and skip Ollama.
@@ -292,7 +292,7 @@ Collectors are pluggable modules implementing a uniform contract. The collector 
 ```python
 from abc import ABC, abstractmethod
 from typing import AsyncIterator
-from fatfinger6000.types import Seed, Observation, CollectorConfig
+from expose.types import Seed, Observation, CollectorConfig
 
 class Collector(ABC):
     """Abstract base class for all collector modules."""
