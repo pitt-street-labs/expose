@@ -2,6 +2,10 @@
 
 Subcommands:
 
+- ``expose serve`` — start the FastAPI HTTP server
+- ``expose db upgrade`` — run Alembic migrations forward
+- ``expose db downgrade`` — run Alembic migrations backward
+- ``expose db current`` — show current migration revision
 - ``expose run start <seed> --tenant <id>`` — execute an in-process pipeline run
 - ``expose run start <seed> --tenant <id> --live`` — execute against a real Postgres
 - ``expose run status <run_id> --tenant <id>`` — look up a run's state
@@ -538,6 +542,128 @@ def run_list(tenant: UUID) -> None:
             f"{r.total_dispatches:>10} {r.total_observations:>4} "
             f"{r.duration_ms:>8.1f}ms"
         )
+
+
+# --- ``expose serve`` command -------------------------------------------------
+
+
+@main.command()
+@click.option(
+    "--host",
+    default="0.0.0.0",  # noqa: S104
+    show_default=True,
+    help="Bind address.",
+)
+@click.option(
+    "--port",
+    default=8000,
+    show_default=True,
+    type=int,
+    help="Listen port.",
+)
+@click.option(
+    "--reload",
+    "reload_flag",
+    is_flag=True,
+    default=False,
+    help="Enable auto-reload (development only).",
+)
+@click.option(
+    "--no-otel",
+    is_flag=True,
+    default=False,
+    help="Disable OpenTelemetry observability.",
+)
+def serve(host: str, port: int, *, reload_flag: bool, no_otel: bool) -> None:
+    """Start the EXPOSE API HTTP server.
+
+    Launches uvicorn with the application factory.  Use ``--reload`` for
+    development and ``--no-otel`` to silence OTel console output locally.
+    """
+    import uvicorn  # noqa: PLC0415
+
+    # When --reload is active uvicorn needs the import string so it can
+    # re-import after file changes.  Without --reload we can pass the
+    # pre-built app directly for faster startup.
+    if reload_flag:
+        # Set the flag via env so the factory picks it up on reload.
+        import os  # noqa: PLC0415
+
+        if no_otel:
+            os.environ["EXPOSE_NO_OTEL"] = "1"
+        uvicorn.run(
+            "expose.api.app:create_app",
+            factory=True,
+            host=host,
+            port=port,
+            reload=True,
+        )
+    else:
+        from expose.api.app import create_app  # noqa: PLC0415
+
+        app = create_app(enable_otel=not no_otel)
+        uvicorn.run(app, host=host, port=port)
+
+
+# --- ``expose db`` subgroup ---------------------------------------------------
+
+
+@main.group()
+def db() -> None:
+    """Database migration management (Alembic)."""
+
+
+def _alembic_config() -> Any:
+    """Build an Alembic ``Config`` pointing at the project's alembic.ini."""
+    from pathlib import Path  # noqa: PLC0415
+
+    from alembic.config import Config  # noqa: PLC0415
+
+    ini_path = Path(__file__).resolve().parent.parent.parent / "alembic.ini"
+    return Config(str(ini_path))
+
+
+@db.command()
+@click.option(
+    "--revision",
+    default="head",
+    show_default=True,
+    help="Target revision (e.g. 'head', '+1', a specific hash).",
+)
+def upgrade(revision: str) -> None:
+    """Run database migrations forward to REVISION."""
+    from alembic import command as alembic_cmd  # noqa: PLC0415
+
+    cfg = _alembic_config()
+    click.echo(f"Upgrading database to revision: {revision}")
+    alembic_cmd.upgrade(cfg, revision)
+    click.echo("Done.")
+
+
+@db.command()
+@click.option(
+    "--revision",
+    default="-1",
+    show_default=True,
+    help="Target revision (e.g. '-1', 'base', a specific hash).",
+)
+def downgrade(revision: str) -> None:
+    """Run database migrations backward to REVISION."""
+    from alembic import command as alembic_cmd  # noqa: PLC0415
+
+    cfg = _alembic_config()
+    click.echo(f"Downgrading database to revision: {revision}")
+    alembic_cmd.downgrade(cfg, revision)
+    click.echo("Done.")
+
+
+@db.command()
+def current() -> None:
+    """Show the current database migration revision."""
+    from alembic import command as alembic_cmd  # noqa: PLC0415
+
+    cfg = _alembic_config()
+    alembic_cmd.current(cfg, verbose=True)
 
 
 if __name__ == "__main__":
