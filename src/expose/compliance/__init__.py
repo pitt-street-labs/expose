@@ -15,14 +15,17 @@ Shipped components:
   tenant into a portable ``TenantDataExport`` envelope.
 - ``DataDeleter`` -- deletes all tenant data with dry-run safety,
   litigation-hold checks, and audit-grade structured logging.
+- ``MisuseDetector`` -- advisory heuristic checks for potentially
+  unauthorized scanning behavior (per ADR-008 / ETHICS.md).
 
 References:
     - GDPR Article 17: Right to erasure ("right to be forgotten")
     - GDPR Article 20: Right to data portability
     - CCPA Section 1798.105: Right to deletion
     - ADR-007: Multi-tenancy (tenant scoping)
-    - ADR-008: Data minimization
+    - ADR-008: Data minimization / ethics
     - Issue #26: GDPR/CCPA tenant data export and deletion
+    - Issue #33: Misuse-detection patterns
 """
 
 from expose.compliance.data_deletion import (
@@ -35,6 +38,12 @@ from expose.compliance.data_export import (
     ExportMetadata,
     TenantDataExport,
 )
+from expose.compliance.misuse_detection import (
+    MisuseAlert,
+    MisuseDetector,
+    MisuseIndicator,
+    MisuseThresholds,
+)
 
 __all__ = [
     "DataDeleter",
@@ -42,5 +51,9 @@ __all__ = [
     "DeletionRequest",
     "DeletionResult",
     "ExportMetadata",
+    "MisuseAlert",
+    "MisuseDetector",
+    "MisuseIndicator",
+    "MisuseThresholds",
     "TenantDataExport",
 ]

@@ -116,3 +116,31 @@ class EntityList(BaseModel):
 
     entities: list[EntityResponse]
     total: int
+
+
+# ---------------------------------------------------------------------------
+# Run trigger request / response models (run trigger API)
+# ---------------------------------------------------------------------------
+
+
+class RunCreate(BaseModel):
+    """Body for ``POST /v1/tenants/{tenant_id}/runs``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    seeds: list[str] = Field(min_length=1)
+    seed_type: str | None = None
+    collector_ids: list[str] | None = None
+
+
+class RunStarted(BaseModel):
+    """Response for ``POST /v1/tenants/{tenant_id}/runs`` — 202 Accepted."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    run_id: UUID
+    tenant_id: UUID
+    state: str
+    seeds: list[str]
+    collector_ids: list[str]
+    message: str

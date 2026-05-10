@@ -556,7 +556,7 @@ def run_list(tenant: UUID) -> None:
 )
 @click.option(
     "--port",
-    default=8000,
+    default=8090,
     show_default=True,
     type=int,
     help="Listen port.",

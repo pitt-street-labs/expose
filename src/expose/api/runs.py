@@ -1,7 +1,8 @@
-"""FastAPI router for run and entity read endpoints.
+"""FastAPI router for run and entity endpoints.
 
-Implements the run results API described in issue #10:
+Implements the run results API described in issue #10 plus the run trigger:
 
+* **Start run**     — ``POST /v1/tenants/{tenant_id}/runs``    → 202
 * **List runs**     — ``GET /v1/tenants/{tenant_id}/runs``     → 200
 * **Get run**       — ``GET /v1/tenants/{tenant_id}/runs/{run_id}`` → 200 | 404
 * **List entities** — ``GET /v1/tenants/{tenant_id}/entities`` → 200
@@ -13,21 +14,33 @@ is shared with the tenants router (imported from :mod:`expose.api.tenants`).
 
 from __future__ import annotations
 
-from typing import Annotated
+import asyncio
+import logging
+from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import async_sessionmaker as _async_sessionmaker
+
+    from expose.api.events import RunEventBus
+    from expose.collectors.base import Seed
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from expose.api.schemas import (
     EntityList,
     EntityResponse,
+    RunCreate,
     RunList,
     RunResponse,
+    RunStarted,
 )
 from expose.api.tenants import get_session
-from expose.db.models import Entity, Run
+from expose.db.models import Entity, Run, Tenant
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Session dependency — reuses the same placeholder as tenants.py.
@@ -69,6 +82,173 @@ def _entity_to_response(entity: Entity) -> EntityResponse:
 # ---------------------------------------------------------------------------
 
 router = APIRouter(prefix="/v1", tags=["runs", "entities"])
+
+
+# ---------------------------------------------------------------------------
+# POST /tenants/{tenant_id}/runs — start a new pipeline run
+# ---------------------------------------------------------------------------
+
+
+def _get_tier1_collector_ids() -> list[str]:
+    """Return collector IDs for all registered Tier-1 collectors."""
+    import expose.collectors.builtin  # noqa: F401, PLC0415  — trigger @register_collector
+    from expose.collectors.registry import DEFAULT_REGISTRY  # noqa: PLC0415
+    from expose.collectors.tiers import CollectorTier  # noqa: PLC0415
+
+    return [cls.collector_id for cls in DEFAULT_REGISTRY.by_tier(CollectorTier.TIER_1)]
+
+
+async def _run_pipeline_background(
+    *,
+    run_id: UUID,
+    tenant_id: UUID,
+    seeds: list[Seed],
+    collector_ids: list[str],
+    session_factory: _async_sessionmaker[AsyncSession],
+    event_bus: RunEventBus | None,
+) -> None:
+    """Execute the pipeline in the background with its own DB session.
+
+    The request session is closed by the time this runs, so we create a
+    fresh session from the factory stored on ``app.state``.
+    """
+    from expose.collectors.registry import DEFAULT_REGISTRY  # noqa: PLC0415
+    from expose.collectors.tiers import TenantAuthorizationScope  # noqa: PLC0415
+    from expose.egress.direct import DirectEgressProfile  # noqa: PLC0415
+    from expose.pipeline.dispatcher import PipelineDispatcher  # noqa: PLC0415
+    from expose.pipeline.run_executor import RunExecutor  # noqa: PLC0415
+    from expose.repositories.entity_repo import EntityRepository  # noqa: PLC0415
+    from expose.repositories.run_repo import RunRepository  # noqa: PLC0415
+
+    try:
+        async with session_factory() as session:
+            try:
+                run_repo = RunRepository(session)
+                entity_repo = EntityRepository(session)
+
+                seed_identifiers = frozenset(s.value for s in seeds)
+                scope = TenantAuthorizationScope(
+                    explicit_entity_identifiers=seed_identifiers,
+                )
+
+                dispatcher = PipelineDispatcher(
+                    registry=DEFAULT_REGISTRY,
+                    tenant_scope=scope,
+                    tenant_id=tenant_id,
+                    egress_profile=DirectEgressProfile(),
+                )
+
+                executor = RunExecutor(
+                    dispatcher=dispatcher,  # type: ignore[arg-type]
+                    run_repo=run_repo,
+                    entity_repo=entity_repo,
+                )
+
+                await executor.execute(
+                    run_id=run_id,
+                    tenant_id=tenant_id,
+                    seeds=seeds,
+                    collector_ids=collector_ids,
+                )
+
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+    except Exception:
+        logger.exception(
+            "Background pipeline run failed: run_id=%s tenant_id=%s",
+            run_id,
+            tenant_id,
+        )
+
+
+@router.post("/tenants/{tenant_id}/runs", status_code=202, response_model=RunStarted)
+async def start_run(
+    tenant_id: UUID,
+    body: RunCreate,
+    request: Request,
+    session: SessionDep,
+) -> RunStarted:
+    """Start a new pipeline run for a tenant.
+
+    Returns 202 Accepted with the run_id. The run executes asynchronously.
+    Monitor progress via SSE at ``/v1/tenants/{tenant_id}/runs/{run_id}/events``.
+    """
+    from datetime import UTC  # noqa: PLC0415
+    from datetime import datetime as _datetime  # noqa: PLC0415
+    from uuid import uuid4 as _uuid4  # noqa: PLC0415
+
+    from expose import __version__  # noqa: PLC0415
+    from expose.cli import detect_seed_type  # noqa: PLC0415
+    from expose.collectors.base import Seed, SeedType  # noqa: PLC0415
+
+    # 1. Verify the tenant exists
+    tenant = await session.get(Tenant, tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    # 2. Auto-detect seed types
+    seed_objects: list[Seed] = []
+    for raw_seed in body.seeds:
+        st = SeedType(body.seed_type) if body.seed_type is not None else detect_seed_type(raw_seed)
+        seed_objects.append(Seed(seed_type=st, value=raw_seed))
+
+    # 3. Default collector_ids to all Tier-1 if not specified
+    collector_ids = body.collector_ids if body.collector_ids else _get_tier1_collector_ids()
+
+    # 4. Create Run row in the database
+    run_id = _uuid4()
+    run = Run(
+        id=run_id,
+        tenant_id=tenant_id,
+        pipeline_version=__version__,
+        state="pending",
+        started_at=_datetime.now(UTC),
+    )
+    session.add(run)
+    await session.flush()
+
+    # 5. Start background pipeline execution
+    sf = getattr(request.app.state, "session_factory", None)
+    if sf is not None:
+        from expose.api.events import get_event_bus  # noqa: PLC0415
+
+        event_bus: RunEventBus | None = None
+        if hasattr(request.app.state, "event_bus"):
+            event_bus = get_event_bus(request.app)
+
+        # Store reference to prevent GC before completion (RUF006).
+        _bg_tasks: list[asyncio.Task[None]] = getattr(request.app.state, "_bg_tasks", [])
+        task = asyncio.create_task(
+            _run_pipeline_background(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                seeds=seed_objects,
+                collector_ids=collector_ids,
+                session_factory=sf,
+                event_bus=event_bus,
+            )
+        )
+        _bg_tasks.append(task)
+        task.add_done_callback(_bg_tasks.remove)
+        request.app.state._bg_tasks = _bg_tasks
+
+    # 6. Return 202 immediately
+    return RunStarted(
+        run_id=run_id,
+        tenant_id=tenant_id,
+        state="pending",
+        seeds=body.seeds,
+        collector_ids=collector_ids,
+        message=f"Run {run_id} accepted. Monitor via SSE at "
+        f"/v1/tenants/{tenant_id}/runs/{run_id}/events",
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET endpoints
+# ---------------------------------------------------------------------------
 
 
 @router.get("/tenants/{tenant_id}/runs", response_model=RunList)

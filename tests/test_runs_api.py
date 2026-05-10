@@ -439,3 +439,156 @@ async def test_get_entity_wrong_tenant(
     # Trying to fetch tenant A's entity via tenant B's path → 404
     resp = await client.get(f"/v1/tenants/{tid_b}/entities/{eid}")
     assert resp.status_code == 404
+
+
+# === 13. POST with valid seeds → 202, returns run_id =========================
+
+
+async def test_start_run_valid_seeds(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    tid = await _seed_tenant(session_factory, "start-run-tenant")
+    resp = await client.post(
+        f"/v1/tenants/{tid}/runs",
+        json={"seeds": ["example.com"]},
+    )
+    assert resp.status_code == 202
+    data = resp.json()
+    assert "run_id" in data
+    # Validate it is a valid UUID
+    UUID(data["run_id"])
+    assert data["tenant_id"] == str(tid)
+    assert data["state"] == "pending"
+    assert data["seeds"] == ["example.com"]
+    assert isinstance(data["collector_ids"], list)
+    assert isinstance(data["message"], str)
+    assert str(data["run_id"]) in data["message"]
+
+
+# === 14. POST with empty seeds list → 422 ====================================
+
+
+async def test_start_run_empty_seeds(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    tid = await _seed_tenant(session_factory, "empty-seeds-tenant")
+    resp = await client.post(
+        f"/v1/tenants/{tid}/runs",
+        json={"seeds": []},
+    )
+    assert resp.status_code == 422
+
+
+# === 15. POST to nonexistent tenant → 404 ====================================
+
+
+async def test_start_run_nonexistent_tenant(
+    client: AsyncClient,
+) -> None:
+    fake_tid = uuid4()
+    resp = await client.post(
+        f"/v1/tenants/{fake_tid}/runs",
+        json={"seeds": ["example.com"]},
+    )
+    assert resp.status_code == 404
+
+
+# === 16. POST with specific collector_ids → accepted ==========================
+
+
+async def test_start_run_specific_collectors(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    tid = await _seed_tenant(session_factory, "specific-collectors-tenant")
+    resp = await client.post(
+        f"/v1/tenants/{tid}/runs",
+        json={
+            "seeds": ["example.com"],
+            "collector_ids": ["ct-crtsh", "cloud-aws-ranges"],
+        },
+    )
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["collector_ids"] == ["ct-crtsh", "cloud-aws-ranges"]
+
+
+# === 17. POST with auto-detected seed types (domain + IP mix) =================
+
+
+async def test_start_run_mixed_seed_types(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    tid = await _seed_tenant(session_factory, "mixed-seeds-tenant")
+    resp = await client.post(
+        f"/v1/tenants/{tid}/runs",
+        json={"seeds": ["example.com", "192.168.1.1", "10.0.0.0/24"]},
+    )
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["seeds"] == ["example.com", "192.168.1.1", "10.0.0.0/24"]
+    assert data["state"] == "pending"
+    # Verify a run_id was generated
+    UUID(data["run_id"])
+
+
+# === 18. RunStarted response has correct fields ==============================
+
+
+async def test_run_started_response_fields(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    tid = await _seed_tenant(session_factory, "response-fields-tenant")
+    resp = await client.post(
+        f"/v1/tenants/{tid}/runs",
+        json={"seeds": ["test.example.org"]},
+    )
+    assert resp.status_code == 202
+    data = resp.json()
+
+    # Verify all required fields are present
+    expected_keys = {"run_id", "tenant_id", "state", "seeds", "collector_ids", "message"}
+    assert set(data.keys()) == expected_keys
+
+    # Type checks
+    UUID(data["run_id"])
+    UUID(data["tenant_id"])
+    assert isinstance(data["state"], str)
+    assert isinstance(data["seeds"], list)
+    assert isinstance(data["collector_ids"], list)
+    assert isinstance(data["message"], str)
+
+    # Frozen model rejects extra fields — verify by POST with extra body fields
+    resp_extra = await client.post(
+        f"/v1/tenants/{tid}/runs",
+        json={"seeds": ["a.com"], "unknown_field": "bad"},
+    )
+    assert resp_extra.status_code == 422
+
+
+# === 19. POST creates a Run row visible via GET ==============================
+
+
+async def test_start_run_creates_db_row(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    tid = await _seed_tenant(session_factory, "db-row-tenant")
+    post_resp = await client.post(
+        f"/v1/tenants/{tid}/runs",
+        json={"seeds": ["db-row.example.com"]},
+    )
+    assert post_resp.status_code == 202
+    run_id = post_resp.json()["run_id"]
+
+    # The run should now appear in GET /runs
+    get_resp = await client.get(f"/v1/tenants/{tid}/runs/{run_id}")
+    assert get_resp.status_code == 200
+    data = get_resp.json()
+    assert data["id"] == run_id
+    assert data["tenant_id"] == str(tid)
+    assert data["state"] == "pending"
