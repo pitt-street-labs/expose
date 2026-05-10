@@ -88,6 +88,9 @@ secrets.yaml
 # Container build cache
 .docker/
 
+# Claude Code session artifacts (cron locks, transcripts, etc.)
+.claude/
+
 # Helm
 deploy/helm-chart/charts/
 deploy/helm-chart/Chart.lock
