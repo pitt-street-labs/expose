@@ -39,7 +39,7 @@ flowchart LR
 sequenceDiagram
   autonumber
   participant Pipeline as EXPOSE Pipeline
-  participant ObjStore as Object Store (MinIO/S3)
+  participant ObjStore as Object Store - MinIO or S3
   participant Operator as Operator
   participant Cosign as cosign verify
   participant E2 as Environment 2

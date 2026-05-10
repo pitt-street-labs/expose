@@ -22,7 +22,7 @@ flowchart TD
     ACTV[Active probing<br/>DNS, TLS, HTTP, port surface<br/>attribution-tier-gated]
   end
 
-  TB1{{Trust boundary<br/>untrusted external content<br/>↓<br/>sanitized canonical observations}}
+  TB1{{"Trust boundary<br/>untrusted external content<br/>↓<br/>sanitized canonical observations"}}
 
   subgraph S3 ["Stage 3 — Sanitization & Normalization (deterministic)"]
     SAN[Strip control chars,<br/>NFC normalize, length-cap,<br/>flag suspicious content]
@@ -38,7 +38,7 @@ flowchart TD
     RP --> CONF
   end
 
-  TB2{{Trust boundary<br/>deterministic graph state<br/>↓<br/>LLM context (structured-output, bounded)}}
+  TB2{{"Trust boundary<br/>deterministic graph state<br/>↓<br/>LLM context (structured-output, bounded)"}}
 
   subgraph S4b ["Stage 4b — LLM Enrichment (bounded, structured-output)"]
     PRMPT[Prepare prompt<br/>external_observation tags]

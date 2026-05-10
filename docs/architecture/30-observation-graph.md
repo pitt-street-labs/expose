@@ -42,7 +42,7 @@ erDiagram
     uuid id PK
     uuid tenant_id FK
     text canonical_identifier "lowercase IDN-normalized"
-    text attribution_status "confirmed|high|medium|requires_review|not_yours|rejected"
+    text attribution_status "confirmed,high,medium,requires_review,not_yours,rejected"
     numeric attribution_confidence
     timestamptz first_observed_at
     timestamptz last_observed_at
@@ -91,13 +91,13 @@ erDiagram
     timestamptz first_observed_at
     timestamptz last_observed_at
     jsonb properties "issuer, not_before, not_after, sans"
-    text evidence_ref "sha256: pointer to PEM in object store"
+    text evidence_ref "sha256 pointer to PEM in object store"
   }
 
   Service {
     uuid id PK
     uuid tenant_id FK
-    text canonical_identifier "host:port/proto composite"
+    text canonical_identifier "host port proto composite"
     text attribution_status
     numeric attribution_confidence
     timestamptz first_observed_at
@@ -108,7 +108,7 @@ erDiagram
   CloudResource {
     uuid id PK
     uuid tenant_id FK
-    text canonical_identifier "ARN | Azure resource ID | GCP name"
+    text canonical_identifier "ARN, Azure resource ID, or GCP name"
     text attribution_status
     numeric attribution_confidence
     timestamptz first_observed_at
@@ -158,7 +158,7 @@ erDiagram
     numeric confidence "1.0 deterministic, lower inferred"
     timestamptz observed_at
     text collector_id "which collector observed this"
-    text evidence_ref "sha256: pointer to raw observation"
+    text evidence_ref "sha256 pointer to raw observation"
     jsonb properties
   }
 ```

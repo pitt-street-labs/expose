@@ -14,8 +14,8 @@ sequenceDiagram
   participant MW as Tenant middleware
   participant CP as control-plane
   participant Q as Work queue
-  participant W as Worker (collector / scanner / llm)
-  participant DB as Postgres (tenant_id scoped)
+  participant W as Worker - collector / scanner / llm
+  participant DB as Postgres - tenant_id scoped
   participant OS as Object store
 
   Op->>API: request with auth token
