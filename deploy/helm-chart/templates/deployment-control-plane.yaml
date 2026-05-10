@@ -1,0 +1,68 @@
+{{- if .Values.controlPlane.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "expose.fullname" . }}-control-plane
+  labels:
+    {{- include "expose.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+spec:
+  replicas: {{ .Values.controlPlane.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "expose.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: control-plane
+  template:
+    metadata:
+      labels:
+        {{- include "expose.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: control-plane
+    spec:
+      serviceAccountName: {{ include "expose.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: control-plane
+          image: {{ include "expose.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          command: ["expose"]
+          args: ["--version"]  # placeholder; control-plane API command lands Sprint 7+
+          env:
+            - name: EXPOSE_DB_HOST
+              value: {{ .Values.postgres.host | quote }}
+            - name: EXPOSE_DB_PORT
+              value: {{ .Values.postgres.port | quote }}
+            - name: EXPOSE_DB_DATABASE
+              value: {{ .Values.postgres.database | quote }}
+            - name: EXPOSE_DB_SSLMODE
+              value: {{ .Values.postgres.sslmode | quote }}
+            {{- if .Values.postgres.existingSecret }}
+            - name: EXPOSE_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.existingSecret }}
+                  key: user
+            - name: EXPOSE_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.existingSecret }}
+                  key: password
+            {{- end }}
+            - name: EXPOSE_DEFAULT_TENANT_ID
+              value: {{ .Values.tenant.defaultId | quote }}
+            - name: EXPOSE_LOG_LEVEL
+              value: "info"
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.controlPlane.resources | nindent 12 }}
+          # Liveness / readiness probes wire to /healthz endpoints landing
+          # in Sprint 7+ when the control-plane API materializes.
+          # readinessProbe / livenessProbe stubs intentionally omitted until
+          # the endpoint exists (probes against a missing endpoint cause
+          # CrashLoopBackOff that masks real startup failures).
+{{- end }}

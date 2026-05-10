@@ -1,0 +1,32 @@
+Thank you for installing {{ .Chart.Name }}.
+
+Chart version:   {{ .Chart.Version }}
+App version:     {{ .Chart.AppVersion }}
+Release name:    {{ .Release.Name }}
+Namespace:       {{ .Release.Namespace }}
+
+This chart is currently a SKELETON. EXPOSE Core Phase 1 implementation is in
+progress; the control-plane API, collector workers, scanner workers, and LLM
+worker are landing in Sprints 3-9. The deployment-control-plane manifest
+launches a placeholder container that prints `expose --version` until the
+real control-plane API ships.
+
+To verify the chart renders cleanly:
+
+    helm lint deploy/helm-chart/
+    helm template my-expose deploy/helm-chart/ --debug
+
+Production deployments must:
+  - Set image.tag to a specific version (do not rely on chart default).
+  - Provide an external Postgres (set postgres.host and postgres.existingSecret).
+  - Provide object storage credentials (set objectStorage.endpoint and existingSecret).
+  - Configure the SecretsBackend (vaultwarden / aws-secrets-manager / vault).
+  - Configure the scanner worker EgressProfile to non-`direct` outside cloud
+    deployments.
+  - Wire OpenTelemetry to the deployment's observability backend.
+
+For federal-customer deployment guidance, see:
+    docs/strategy/federal-customer-deployment-guide.md
+
+For the comprehensive specification:
+    docs/SPEC.md

@@ -1,0 +1,157 @@
+# EXPOSE Core — default Helm values.
+#
+# Per ADR-003 §"State is externalized" — operators must provide:
+#   - Postgres connection (managed Postgres recommended for production; in-cluster
+#     postgres only for dev/lab per #2 production deployment documentation issue)
+#   - Object storage credentials (S3-compatible: MinIO/AWS S3/Azure Blob/GCS)
+#   - Secrets backend reference (Vaultwarden/AWS SM/Azure KV/GCP Secret Manager)
+#
+# Per ADR-007: tenant context is injected via middleware; values configure the
+# default tenant lifecycle. Multi-tenant deployments add tenants via the admin
+# API once available (Phase 3 production-hardening, #23).
+#
+# Per ADR-010: FIPS-validated cryptography enforced via container image; Helm
+# does not relax this. Observability via OpenTelemetry exporters operators wire
+# to their own backend.
+
+global:
+  # OCI image source — operators may override to point at internal registry
+  # mirrors (federal customers self-hosting per Session G deployment guide).
+  imageRegistry: "ghcr.io/korlogos"
+  imagePullSecrets: []
+
+image:
+  repository: expose
+  pullPolicy: IfNotPresent
+  # Set explicitly per release; chart appVersion is the default.
+  tag: ""
+
+# Default tenant — v1 deployment ships with a single tenant. Multi-tenant
+# lifecycle deferred to Phase 3 production-hardening (#23 Tenant lifecycle API).
+tenant:
+  defaultId: "00000000-0000-0000-0000-000000000000"
+  defaultName: "default"
+
+# === Control plane ==========================================================
+controlPlane:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests: { cpu: "200m", memory: "512Mi" }
+    limits:   { cpu: "1000m", memory: "2Gi" }
+  service:
+    type: ClusterIP
+    port: 8000
+
+# === Workers ================================================================
+collectorWorker:
+  enabled: true
+  replicaCount: 2
+  resources:
+    requests: { cpu: "100m", memory: "256Mi" }
+    limits:   { cpu: "500m", memory: "1Gi" }
+
+scannerWorker:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests: { cpu: "100m", memory: "256Mi" }
+    limits:   { cpu: "500m", memory: "1Gi" }
+  # EgressProfile per ADR-003 §"Scanner egress" + #1 active-scanner-egress
+  # issue. Operators MUST configure an explicit egress profile for production;
+  # the chart fails closed if `direct` is used in non-cloud deployments.
+  egressProfile:
+    type: "direct"  # direct | socks5 | wireguard | http_connect
+    # Tor / public-proxy egress per #39: configure as socks5 with explicit
+    # operator attestation. The artifact records `egress_anonymized: true`
+    # automatically when an anonymizing endpoint is configured.
+    config: {}
+
+llmWorker:
+  enabled: false  # off in v1 (Phase 1); turn on for Phase 2 LLM enrichment.
+  replicaCount: 1
+  resources:
+    requests: { cpu: "200m", memory: "1Gi" }
+    limits:   { cpu: "2000m", memory: "4Gi" }
+  # Per ADR-005 multi-provider abstraction. Operators provide credentials
+  # via the secrets backend reference; never inline in values.
+  provider: "ollama"
+  costCeilingUSD: 5.00
+
+# === State services (operator-provided in production) =======================
+postgres:
+  # In-cluster Postgres is dev-only per #2. For production, leave .enabled
+  # false and provide existingSecret + host below.
+  enabled: false
+  # External Postgres connection (production):
+  host: ""
+  port: 5432
+  database: "expose"
+  existingSecret: ""        # Kubernetes secret containing user/password keys
+  sslmode: "require"
+
+objectStorage:
+  # MinIO for lab; S3-compatible cloud bucket for production.
+  enabled: false             # in-cluster MinIO; lab-only
+  endpoint: ""               # external object store endpoint
+  bucket: "expose-artifacts"
+  region: "us-east-1"
+  existingSecret: ""         # credentials secret
+
+secretsBackend:
+  # SecretsProvider abstraction per ADR-003. v1 implementations: vaultwarden,
+  # aws-secrets-manager. Vault, Azure KV, GCP SM deferred (#8).
+  type: "aws-secrets-manager"
+  config: {}
+
+# === Observability ==========================================================
+observability:
+  # OpenTelemetry per ADR-003. Operator wires to whatever backend the
+  # deployment provides (Prometheus + Loki + Tempo on ARC; CloudWatch on AWS).
+  otlp:
+    enabled: true
+    endpoint: ""            # otlp://prometheus.observability.svc:4317 etc.
+    insecure: false
+
+  # Bundled "everything included" subchart deferred to #7.
+  bundled:
+    enabled: false
+
+# === Network policies (per #4 deployment-portability epic) ==================
+networkPolicies:
+  enabled: true
+  defaultDeny: true
+  # Specific allow rules: control plane → Postgres, control plane → object
+  # store, etc. Detail lands as the Helm chart matures past skeleton.
+
+# === Pod security ===========================================================
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# === Ingress ================================================================
+ingress:
+  enabled: false
+  className: ""
+  hosts: []
+
+# === Run scheduling =========================================================
+runSchedule:
+  # Per-tenant cron expression for default daily runs. Operators override
+  # per-tenant via tenant config (Phase 3 admin API).
+  defaultCron: "0 2 * * *"  # 02:00 UTC daily

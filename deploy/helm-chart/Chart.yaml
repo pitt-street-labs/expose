@@ -1,0 +1,25 @@
+apiVersion: v2
+name: expose
+description: |
+  EXPOSE Core — continuous, attributed, cryptographically signed external attack
+  surface intelligence. Apache 2.0 engine producing signed JSON artifacts for
+  CTEM workflows and authorized red team operations.
+type: application
+version: 0.1.0-dev
+appVersion: "0.1.0-dev"
+kubeVersion: ">=1.28.0-0"
+keywords:
+  - easm
+  - ctem
+  - attack-surface
+  - security
+  - fedramp
+home: https://github.com/korlogos/expose
+sources:
+  - https://github.com/korlogos/expose
+maintainers:
+  - name: Korlogos / Pitt Street Labs
+icon: https://expose.korlogos.com/icon.png
+annotations:
+  category: Security
+  licenses: Apache-2.0

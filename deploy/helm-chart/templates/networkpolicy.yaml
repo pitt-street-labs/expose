@@ -1,0 +1,25 @@
+{{- if and .Values.networkPolicies.enabled .Values.networkPolicies.defaultDeny -}}
+# Default-deny baseline per #4 (Network policy and pod-to-pod restrictions).
+# Specific allow rules — control-plane → Postgres, control-plane → object store,
+# scanner-worker → egress proxy, etc. — are added in subsequent commits as
+# the worker manifests materialize and the egress topology is final.
+#
+# Operators can override via values.networkPolicies.enabled=false in
+# environments that manage network policies externally (Cilium, Calico
+# GlobalNetworkPolicy, OPA, etc.).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "expose.fullname" . }}-default-deny
+  labels:
+    {{- include "expose.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "expose.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  # No ingress / egress rules listed → all traffic denied by default.
+  # Specific allows added per-component as worker manifests land.
+{{- end }}
