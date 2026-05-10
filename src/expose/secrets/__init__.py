@@ -13,19 +13,23 @@ values themselves.
 Sub-modules:
 
 - ``backend`` — :class:`SecretsBackend` ABC and :class:`SecretNotFoundError`.
-- ``memory_backend`` — :class:`InMemoryBackend` (test/dev only — production
-  deployments wire Vaultwarden / cloud KMS / HashiCorp Vault implementations
-  per SPEC §6.4).
-
-This package is the v1 framework. Issue #8 tracks Vault/KMS-backed
-implementations for production-hardening.
+- ``memory_backend`` — :class:`InMemoryBackend` (test/dev only).
+- ``env_backend`` — :class:`EnvSecretsBackend` (lightweight production —
+  reads secrets from environment variables, useful for Kubernetes).
+- ``vault_backend`` — :class:`VaultSecretsBackend` (production — HashiCorp
+  Vault KV v2 via httpx).
 """
 
 from expose.secrets.backend import SecretNotFoundError, SecretsBackend
+from expose.secrets.env_backend import EnvSecretsBackend
 from expose.secrets.memory_backend import InMemoryBackend
+from expose.secrets.vault_backend import VaultAuthError, VaultSecretsBackend
 
 __all__ = [
+    "EnvSecretsBackend",
     "InMemoryBackend",
     "SecretNotFoundError",
     "SecretsBackend",
+    "VaultAuthError",
+    "VaultSecretsBackend",
 ]

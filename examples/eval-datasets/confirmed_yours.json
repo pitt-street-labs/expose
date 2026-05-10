@@ -1,0 +1,92 @@
+{
+  "name": "confirmed_yours",
+  "category": "confirmed_yours",
+  "cases": [
+    {
+      "case_id": "cy-001",
+      "description": "IP in tenant's authorized AWS account range with 3 collector confirmations",
+      "entity_type": "ip",
+      "canonical_identifier": "203.0.113.42",
+      "observations": [
+        {
+          "collector_id": "cloud-range-check",
+          "cloud_account_match": true,
+          "provider": "aws",
+          "matched_range": "203.0.113.0/24"
+        },
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Acme Corp",
+          "matches_tenant": true
+        },
+        {
+          "collector_id": "cert-transparency",
+          "subject": "*.acme.example.com",
+          "issuer": "Let's Encrypt"
+        }
+      ],
+      "expected_attribution": "confirmed",
+      "expected_confidence_min": 0.95,
+      "expected_confidence_max": 1.0
+    },
+    {
+      "case_id": "cy-002",
+      "description": "Domain with WHOIS match and cloud account confirmation plus DNS records",
+      "entity_type": "domain",
+      "canonical_identifier": "app.acme.example.com",
+      "observations": [
+        {
+          "collector_id": "cloud-range-check",
+          "cloud_account_match": true,
+          "provider": "azure",
+          "matched_range": "198.51.100.0/24"
+        },
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Acme Corp",
+          "matches_tenant": true
+        },
+        {
+          "collector_id": "active-dns",
+          "record_type": "A",
+          "value": "198.51.100.10"
+        },
+        {
+          "collector_id": "active-http",
+          "status_code": 200,
+          "server_header": "nginx"
+        }
+      ],
+      "expected_attribution": "confirmed",
+      "expected_confidence_min": 0.95,
+      "expected_confidence_max": 1.0
+    },
+    {
+      "case_id": "cy-003",
+      "description": "Cloud resource ID directly in tenant's authorized scope",
+      "entity_type": "cloud_resource_id",
+      "canonical_identifier": "arn:aws:ec2:us-east-1:123456789012:instance/i-0abc123def456",
+      "observations": [
+        {
+          "collector_id": "cloud-range-check",
+          "cloud_account_match": true,
+          "provider": "aws",
+          "account_id": "123456789012"
+        },
+        {
+          "collector_id": "active-http",
+          "status_code": 200,
+          "server_header": "Apache"
+        },
+        {
+          "collector_id": "cert-transparency",
+          "subject": "internal.acme.example.com",
+          "issuer": "Acme Internal CA"
+        }
+      ],
+      "expected_attribution": "confirmed",
+      "expected_confidence_min": 0.95,
+      "expected_confidence_max": 1.0
+    }
+  ]
+}

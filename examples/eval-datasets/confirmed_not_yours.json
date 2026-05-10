@@ -1,0 +1,65 @@
+{
+  "name": "confirmed_not_yours",
+  "category": "confirmed_not_yours",
+  "cases": [
+    {
+      "case_id": "cn-001",
+      "description": "IP registered to a completely different organization with no tenant signals",
+      "entity_type": "ip",
+      "canonical_identifier": "192.0.2.99",
+      "observations": [],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.2
+    },
+    {
+      "case_id": "cn-002",
+      "description": "Domain with WHOIS showing different registrant and different cloud account",
+      "entity_type": "domain",
+      "canonical_identifier": "evil-corp.example.net",
+      "observations": [
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Evil Corp Ltd",
+          "matches_tenant": false
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    },
+    {
+      "case_id": "cn-003",
+      "description": "Shared CDN IP -- belongs to CDN provider, not tenant",
+      "entity_type": "ip",
+      "canonical_identifier": "198.51.100.200",
+      "observations": [
+        {
+          "collector_id": "cloud-range-check",
+          "cloud_account_match": false,
+          "provider": "aws",
+          "service_category": "cdn"
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    },
+    {
+      "case_id": "cn-004",
+      "description": "Domain parked by a registrar -- no active infrastructure",
+      "entity_type": "domain",
+      "canonical_identifier": "parked-placeholder.example.org",
+      "observations": [
+        {
+          "collector_id": "active-http",
+          "status_code": 200,
+          "server_header": "registrar-parking"
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    }
+  ]
+}
