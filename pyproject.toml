@@ -85,6 +85,8 @@ dev = [
     "pytest-cov>=6.0,<7",
     # HTTP mocking
     "respx>=0.21,<1",
+    # Async SQLite for fast unit tests (no Docker / testcontainers required)
+    "aiosqlite>=0.20,<1",
     # Real Postgres + NATS for integration tests (testcontainers per CONTRIBUTING.md)
     "testcontainers[postgres,nats]>=4.8,<5",
     # Type checking — mypy in strict mode per ADR-001

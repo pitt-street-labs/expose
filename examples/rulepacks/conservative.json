@@ -1,0 +1,304 @@
+{
+  "$schema": "https://expose.korlogos.com/schemas/rulepack-v1.json",
+
+  "pack_id": "conservative",
+  "pack_version": "0.1.0",
+  "pack_format_version": "v1",
+  "description": "Rule pack for high-assurance and government environments. Raises attribution thresholds across the board, requires multiple independent signals for confirmed tier, flags all ambiguous entities for manual review, and penalizes single-source attributions. Tier-3 dispatch is restricted to entities with high or confirmed attribution only.",
+
+  "tier_thresholds": {
+    "confirmed": 0.98,
+    "high": 0.85,
+    "medium": 0.65
+  },
+
+  "attribution_rules": [
+    {
+      "rule_id": "explicit-rejection-strict",
+      "rule_version": "1.0.0",
+      "category": "rejection_rule",
+      "priority": 1,
+      "description": "Target is explicitly listed as out-of-scope. In high-assurance environments, rejection rules are evaluated first and are absolute.",
+      "when": {
+        "predicate": "target_in_explicit_authorization_scope",
+        "params": { "rejection_only": true }
+      },
+      "then": {
+        "outcome": "reject"
+      }
+    },
+    {
+      "rule_id": "multi-signal-confirmed-requirement",
+      "rule_version": "1.0.0",
+      "category": "high_confidence_join",
+      "priority": 5,
+      "description": "For confirmed-tier attribution, require both cloud account authoritative match AND subdomain of an authorized apex. A single signal, even a strong one, is insufficient in high-assurance environments.",
+      "when": {
+        "all_of": [
+          {
+            "predicate": "target_ip_in_authorized_cloud_account_range",
+            "params": {}
+          },
+          {
+            "predicate": "target_subdomain_of_authorized_apex",
+            "params": {}
+          }
+        ]
+      },
+      "then": {
+        "outcome": "promote",
+        "confidence_delta": 0.95
+      }
+    },
+    {
+      "rule_id": "cloud-account-single-signal",
+      "rule_version": "1.0.0",
+      "category": "cloud_authoritative",
+      "priority": 10,
+      "description": "Cloud account IP match alone. Unlike baseline, this only promotes to high tier — confirmed requires corroborating evidence in conservative mode.",
+      "when": {
+        "all_of": [
+          {
+            "predicate": "target_ip_in_authorized_cloud_account_range",
+            "params": {}
+          },
+          {
+            "not": {
+              "predicate": "target_subdomain_of_authorized_apex",
+              "params": {}
+            }
+          }
+        ]
+      },
+      "then": {
+        "outcome": "promote",
+        "confidence_delta": 0.70,
+        "review_flag": true,
+        "review_reason": "high_value_target_low_confidence"
+      }
+    },
+    {
+      "rule_id": "subdomain-match-guarded",
+      "rule_version": "1.0.0",
+      "category": "high_confidence_join",
+      "priority": 20,
+      "description": "Subdomain of authorized apex — moderate confidence. Must be corroborated by infrastructure signals for higher tiers.",
+      "when": {
+        "all_of": [
+          {
+            "predicate": "target_subdomain_of_authorized_apex",
+            "params": {}
+          },
+          {
+            "not": {
+              "predicate": "target_ip_in_authorized_cloud_account_range",
+              "params": {}
+            }
+          }
+        ]
+      },
+      "then": {
+        "outcome": "promote",
+        "confidence_delta": 0.55,
+        "review_flag": true,
+        "review_reason": "high_value_target_low_confidence"
+      }
+    },
+    {
+      "rule_id": "cert-san-with-verification",
+      "rule_version": "1.0.0",
+      "category": "infrastructure_correlation",
+      "priority": 30,
+      "description": "TLS certificate SAN matches an in-scope domain. Moderate signal — certificates can be issued for any domain with control verification, so this alone does not confirm ownership in high-assurance contexts.",
+      "when": {
+        "predicate": "target_has_certificate_with_san_in_scope",
+        "params": {}
+      },
+      "then": {
+        "outcome": "promote",
+        "confidence_delta": 0.40,
+        "review_flag": true,
+        "review_reason": "high_value_target_low_confidence"
+      }
+    },
+    {
+      "rule_id": "shared-cert-chain-conservative",
+      "rule_version": "1.0.0",
+      "category": "infrastructure_correlation",
+      "priority": 40,
+      "description": "Target shares TLS cert chain with an already-confirmed target. Requires the reference target to be at confirmed tier, not just high.",
+      "when": {
+        "predicate": "target_shares_cert_chain_with_attributed_target",
+        "params": { "minimum_tier": "confirmed" }
+      },
+      "then": {
+        "outcome": "promote",
+        "confidence_delta": 0.35
+      }
+    },
+    {
+      "rule_id": "registrant-pivot-flagged",
+      "rule_version": "1.0.0",
+      "category": "registrant_pivot",
+      "priority": 50,
+      "description": "Registrant matches authorized pattern. In high-assurance mode, registrant data is treated as a weak signal — WHOIS data can be outdated, privacy-guarded, or spoofed. Always flagged for review.",
+      "when": {
+        "predicate": "target_registrant_matches_authorized_pattern",
+        "params": {}
+      },
+      "then": {
+        "outcome": "promote",
+        "confidence_delta": 0.30,
+        "review_flag": true,
+        "review_reason": "high_value_target_low_confidence"
+      }
+    },
+    {
+      "rule_id": "nameserver-match-conservative",
+      "rule_version": "1.0.0",
+      "category": "infrastructure_correlation",
+      "priority": 55,
+      "description": "Nameserver matches authorized pattern. Weak signal in isolation — shared hosting and delegated DNS mean nameserver overlap is common across unrelated organizations.",
+      "when": {
+        "predicate": "target_nameserver_matches_authorized_pattern",
+        "params": {}
+      },
+      "then": {
+        "outcome": "promote",
+        "confidence_delta": 0.20,
+        "review_flag": true,
+        "review_reason": "high_value_target_low_confidence"
+      }
+    },
+    {
+      "rule_id": "naming-convention-flagged",
+      "rule_version": "1.0.0",
+      "category": "naming_heuristic",
+      "priority": 60,
+      "description": "Target responds with an authorized naming convention. Naming heuristics are inherently ambiguous — always flag for analyst review in high-assurance mode.",
+      "when": {
+        "predicate": "target_responds_with_authorized_naming_convention",
+        "params": {}
+      },
+      "then": {
+        "outcome": "promote",
+        "confidence_delta": 0.25,
+        "review_flag": true,
+        "review_reason": "high_value_target_low_confidence"
+      }
+    },
+    {
+      "rule_id": "single-source-penalty",
+      "rule_version": "1.0.0",
+      "category": "high_confidence_join",
+      "priority": 150,
+      "description": "Single-source attribution penalty. In high-assurance environments, any entity observed by only one collector is demoted and flagged. Single-source data is inherently unreliable for attribution decisions.",
+      "when": {
+        "all_of": [
+          {
+            "predicate": "target_observed_by_collectors_count_gte",
+            "params": { "count": 1 }
+          },
+          {
+            "not": {
+              "predicate": "target_observed_by_collectors_count_gte",
+              "params": { "count": 2 }
+            }
+          }
+        ]
+      },
+      "then": {
+        "outcome": "demote",
+        "confidence_delta": -0.20,
+        "review_flag": true,
+        "review_reason": "high_value_target_low_confidence"
+      }
+    },
+    {
+      "rule_id": "ambiguous-entity-review-gate",
+      "rule_version": "1.0.0",
+      "category": "high_confidence_join",
+      "priority": 180,
+      "description": "Any entity observed by fewer than three collectors and not in an authorized cloud range is flagged for manual review. Conservative posture demands analyst sign-off on ambiguous attributions.",
+      "when": {
+        "all_of": [
+          {
+            "not": {
+              "predicate": "target_observed_by_collectors_count_gte",
+              "params": { "count": 3 }
+            }
+          },
+          {
+            "not": {
+              "predicate": "target_ip_in_authorized_cloud_account_range",
+              "params": {}
+            }
+          }
+        ]
+      },
+      "then": {
+        "outcome": "neutral",
+        "review_flag": true,
+        "review_reason": "high_value_target_low_confidence"
+      }
+    },
+    {
+      "rule_id": "multi-collector-corroboration",
+      "rule_version": "1.0.0",
+      "category": "high_confidence_join",
+      "priority": 25,
+      "description": "Target observed by three or more independent collectors and is a subdomain of an authorized apex. Multiple corroborating sources provide the independent verification high-assurance environments require.",
+      "when": {
+        "all_of": [
+          {
+            "predicate": "target_observed_by_collectors_count_gte",
+            "params": { "count": 3 }
+          },
+          {
+            "predicate": "target_subdomain_of_authorized_apex",
+            "params": {}
+          }
+        ]
+      },
+      "then": {
+        "outcome": "promote",
+        "confidence_delta": 0.40
+      }
+    }
+  ],
+
+  "lead_score_formula": {
+    "formula_version": "0.1.0",
+    "weights": {
+      "attribution_confidence": 30,
+      "exposure_severity_max": 30,
+      "tech_stack_risk": 20,
+      "freshness": 5,
+      "cloud_provider_factor": 15
+    },
+    "modifiers": [
+      {
+        "description": "New assets get a modest freshness boost. Conservative environments prioritize thoroughness over speed, so the multiplier is lower than baseline.",
+        "when": {
+          "predicate": "target_first_observed_within_days",
+          "params": { "days": 7 }
+        },
+        "then_multiply": 1.1
+      },
+      {
+        "description": "Exposed admin panels are always critical, even in conservative mode.",
+        "when": {
+          "predicate": "target_has_exposure_indicator",
+          "params": { "indicator": "admin_panel_exposed" }
+        },
+        "then_multiply": 1.5
+      }
+    ],
+    "category_thresholds": {
+      "critical_priority": 90,
+      "high_priority": 70,
+      "medium_priority": 50,
+      "low_priority": 30
+    }
+  }
+}

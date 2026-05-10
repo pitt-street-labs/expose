@@ -3,6 +3,7 @@
 Subcommands:
 
 - ``expose run start <seed> --tenant <id>`` — execute an in-process pipeline run
+- ``expose run start <seed> --tenant <id> --live`` — execute against a real Postgres
 - ``expose run status <run_id> --tenant <id>`` — look up a run's state
 - ``expose run list --tenant <id>`` — list recent runs for a tenant
 - ``expose artifact list --tenant <id>`` — list artifacts from past runs (future)
@@ -191,6 +192,122 @@ async def _execute_stub_run(
     }
 
 
+# === Live pipeline execution (real Postgres + dispatcher) =====================
+
+_LIVE_DB_ERROR = (
+    "ERROR: Cannot connect to Postgres. Set EXPOSE_DB_* environment "
+    "variables or use --live with a running database."
+)
+
+
+async def _execute_live_run(
+    *,
+    tenant_id: UUID,
+    seeds: list[Seed],
+    collector_ids: list[str],
+) -> dict[str, Any]:
+    """Execute a real pipeline run via RunExecutor + PipelineDispatcher.
+
+    Requires a running Postgres database configured via ``EXPOSE_DB_*``
+    environment variables. Raises ``SystemExit(1)`` with a descriptive
+    error if the database is unreachable.
+    """
+    # Late imports to avoid pulling DB/pipeline machinery for the stub path.
+    from expose.collectors.tiers import TenantAuthorizationScope  # noqa: PLC0415
+    from expose.db.engine import (  # noqa: PLC0415
+        DatabaseSettings,
+        create_async_engine_from_settings,
+        create_session_factory,
+        session_scope,
+    )
+    from expose.egress.direct import DirectEgressProfile  # noqa: PLC0415
+    from expose.pipeline.dispatcher import PipelineDispatcher  # noqa: PLC0415
+    from expose.pipeline.run_executor import RunExecutor  # noqa: PLC0415
+    from expose.repositories.entity_repo import EntityRepository  # noqa: PLC0415
+    from expose.repositories.run_repo import RunRepository  # noqa: PLC0415
+    from expose.types.shared import TenantId  # noqa: PLC0415
+
+    try:
+        settings = DatabaseSettings()
+    except Exception:
+        click.echo(click.style(_LIVE_DB_ERROR, fg="red"), err=True)
+        raise SystemExit(1)  # noqa: B904
+
+    try:
+        engine = create_async_engine_from_settings(settings)
+    except Exception:
+        click.echo(click.style(_LIVE_DB_ERROR, fg="red"), err=True)
+        raise SystemExit(1)  # noqa: B904
+
+    factory = create_session_factory(engine)
+
+    try:
+        async with session_scope(factory) as session:
+            run_repo = RunRepository(session)
+            entity_repo = EntityRepository(session)
+
+            # Create the run row in ``pending`` state.
+            run = await run_repo.create(
+                tenant_id=TenantId(tenant_id),
+                pipeline_version=__version__,
+            )
+
+            # Build tenant authorization scope from the seed values.
+            seed_identifiers = frozenset(s.value for s in seeds)
+            scope = TenantAuthorizationScope(
+                explicit_entity_identifiers=seed_identifiers,
+            )
+
+            dispatcher = PipelineDispatcher(
+                registry=DEFAULT_REGISTRY,
+                tenant_scope=scope,
+                tenant_id=tenant_id,
+                egress_profile=DirectEgressProfile(),
+            )
+
+            # PipelineDispatcher satisfies DispatcherProtocol at runtime (both
+            # DispatchJob/DispatchResult pairs are structurally identical) but
+            # mypy sees them as distinct nominal types because they are
+            # redefined in run_executor.py to avoid a circular import.
+            executor = RunExecutor(
+                dispatcher=dispatcher,  # type: ignore[arg-type]
+                run_repo=run_repo,
+                entity_repo=entity_repo,
+            )
+
+            result = await executor.execute(
+                run_id=run.id,
+                tenant_id=tenant_id,
+                seeds=seeds,
+                collector_ids=collector_ids,
+            )
+
+        return {
+            "run_id": result.run_id,
+            "tenant_id": result.tenant_id,
+            "final_state": result.final_state,
+            "total_seeds": result.total_seeds,
+            "expanded_seeds": result.expanded_seeds,
+            "total_dispatches": result.total_dispatches,
+            "successful_dispatches": result.successful_dispatches,
+            "failed_dispatches": result.failed_dispatches,
+            "denied_dispatches": result.denied_dispatches,
+            "total_observations": result.total_observations,
+            "duration_ms": result.duration_ms,
+            "collector_results": [],
+        }
+    except SystemExit:
+        raise
+    except Exception as exc:
+        click.echo(
+            click.style(f"{_LIVE_DB_ERROR}\nDetail: {exc}", fg="red"),
+            err=True,
+        )
+        raise SystemExit(1) from exc
+    finally:
+        await engine.dispose()
+
+
 # === CLI definition ==========================================================
 
 
@@ -231,17 +348,27 @@ def run() -> None:
     default=None,
     help="Seed type override. Auto-detected if omitted.",
 )
+@click.option(
+    "--live",
+    is_flag=True,
+    default=False,
+    help="Use real pipeline with Postgres persistence (requires EXPOSE_DB_* env vars).",
+)
 def run_start(
     seed: str,
     tenant: UUID,
     collectors: tuple[str, ...],
     seed_type: str | None,
+    *,
+    live: bool,
 ) -> None:
     """Start a pipeline run for SEED (domain, IP, or CIDR).
 
     Examples:
 
       expose run start example.com --tenant 00000000-0000-0000-0000-000000000001
+
+      expose run start example.com --tenant <uuid> --live
 
       expose run start 192.168.1.0/24 --tenant <uuid> --collector ct-crtsh
     """
@@ -254,46 +381,61 @@ def run_start(
     # Build the seed object
     seed_obj = Seed(seed_type=resolved_type, value=seed)
 
-    # Generate run ID
-    run_id = uuid.uuid4()
+    if live:
+        # Live mode — real pipeline execution against Postgres.
+        click.echo(click.style(
+            "Running in live mode — using real pipeline with database persistence.",
+            fg="green",
+        ))
 
-    # Warn that this is stub mode (no real network calls or persistence)
-    click.echo(click.style(
-        "WARNING: Running in stub mode — no real collector calls, "
-        "no database persistence. Results are simulated.",
-        fg="yellow",
-    ))
+        result = asyncio.run(
+            _execute_live_run(
+                tenant_id=tenant,
+                seeds=[seed_obj],
+                collector_ids=collector_ids,
+            )
+        )
 
-    # Execute the stub pipeline
-    result = asyncio.run(
-        _execute_stub_run(
+        run_id: UUID = result["run_id"]
+    else:
+        # Stub mode — simulated results, no network or persistence.
+        run_id = uuid.uuid4()
+
+        click.echo(click.style(
+            "WARNING: Running in stub mode — no real collector calls, "
+            "no database persistence. Results are simulated.",
+            fg="yellow",
+        ))
+
+        result = asyncio.run(
+            _execute_stub_run(
+                run_id=run_id,
+                tenant_id=tenant,
+                seeds=[seed_obj],
+                collector_ids=collector_ids,
+            )
+        )
+
+        # Store the run record for later status/list queries (stub only).
+        now = datetime.now(tz=UTC)
+        record = _RunRecord(
             run_id=run_id,
             tenant_id=tenant,
-            seeds=[seed_obj],
+            state=result["final_state"],
+            seeds=[seed],
             collector_ids=collector_ids,
+            started_at=now,
         )
-    )
-
-    # Store the run record for later status/list queries
-    now = datetime.now(tz=UTC)
-    record = _RunRecord(
-        run_id=run_id,
-        tenant_id=tenant,
-        state=result["final_state"],
-        seeds=[seed],
-        collector_ids=collector_ids,
-        started_at=now,
-    )
-    record.completed_at = now
-    record.total_seeds = result["total_seeds"]
-    record.expanded_seeds = result["expanded_seeds"]
-    record.total_dispatches = result["total_dispatches"]
-    record.successful_dispatches = result["successful_dispatches"]
-    record.failed_dispatches = result["failed_dispatches"]
-    record.denied_dispatches = result["denied_dispatches"]
-    record.total_observations = result["total_observations"]
-    record.duration_ms = result["duration_ms"]
-    _run_store[(tenant, run_id)] = record
+        record.completed_at = now
+        record.total_seeds = result["total_seeds"]
+        record.expanded_seeds = result["expanded_seeds"]
+        record.total_dispatches = result["total_dispatches"]
+        record.successful_dispatches = result["successful_dispatches"]
+        record.failed_dispatches = result["failed_dispatches"]
+        record.denied_dispatches = result["denied_dispatches"]
+        record.total_observations = result["total_observations"]
+        record.duration_ms = result["duration_ms"]
+        _run_store[(tenant, run_id)] = record
 
     # Print summary table
     click.echo(f"\nRun ID:   {run_id}")

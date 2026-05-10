@@ -1,0 +1,242 @@
+{
+  "$schema": "https://expose.korlogos.com/schemas/rulepack-v1.json",
+
+  "pack_id": "cloud-first",
+  "pack_version": "0.1.0",
+  "pack_format_version": "v1",
+  "description": "Rule pack optimized for organizations with a heavy cloud footprint (AWS, Azure, GCP). Boosts attribution confidence for entities in authorized cloud IP ranges, lowers thresholds for cloud-hosted assets, and applies higher evidence requirements for on-premises assets. Includes rules for common cloud service patterns such as S3 buckets, CloudFront distributions, Azure Blob, and GCP Storage.",
+
+  "tier_thresholds": {
+    "confirmed": 0.90,
+    "high": 0.65,
+    "medium": 0.40
+  },
+
+  "attribution_rules": [
+    {
+      "rule_id": "cloud-ip-match-boost",
+      "rule_version": "1.0.0",
+      "category": "cloud_authoritative",
+      "priority": 5,
+      "description": "Target IP falls within an authorized cloud account range. For cloud-first organizations this is ground truth — promote to confirmed with maximum confidence.",
+      "when": {
+        "predicate": "target_ip_in_authorized_cloud_account_range",
+        "params": {}
+      },
+      "then": {
+        "outcome": "promote",
+        "confidence_delta": 1.0
+      }
+    },
+    {
+      "rule_id": "cloud-subdomain-high-confidence",
+      "rule_version": "1.0.0",
+      "category": "high_confidence_join",
+      "priority": 10,
+      "description": "Target is a subdomain of an authorized apex domain and resolves to a cloud provider IP range. Strong indicator of ownership in cloud-first environments.",
+      "when": {
+        "all_of": [
+          {
+            "predicate": "target_subdomain_of_authorized_apex",
+            "params": {}
+          },
+          {
+            "predicate": "target_asn_in_authorized_list",
+            "params": {}
+          }
+        ]
+      },
+      "then": {
+        "outcome": "promote",
+        "confidence_delta": 0.85
+      }
+    },
+    {
+      "rule_id": "cloud-cert-chain-correlation",
+      "rule_version": "1.0.0",
+      "category": "infrastructure_correlation",
+      "priority": 30,
+      "description": "Target shares a TLS certificate chain with an already-attributed cloud asset. In cloud-first orgs, shared certs across cloud services are a strong ownership signal.",
+      "when": {
+        "predicate": "target_shares_cert_chain_with_attributed_target",
+        "params": { "minimum_tier": "high" }
+      },
+      "then": {
+        "outcome": "promote",
+        "confidence_delta": 0.50
+      }
+    },
+    {
+      "rule_id": "cloud-naming-convention-match",
+      "rule_version": "1.0.0",
+      "category": "naming_heuristic",
+      "priority": 40,
+      "description": "Target responds with naming conventions matching the organization's authorized patterns (e.g., S3 bucket naming, CloudFront distribution IDs, Azure Blob container names, GCP Storage bucket prefixes).",
+      "when": {
+        "predicate": "target_responds_with_authorized_naming_convention",
+        "params": {}
+      },
+      "then": {
+        "outcome": "promote",
+        "confidence_delta": 0.45
+      }
+    },
+    {
+      "rule_id": "cloud-san-certificate-match",
+      "rule_version": "1.0.0",
+      "category": "high_confidence_join",
+      "priority": 15,
+      "description": "Target presents a TLS certificate with a SAN matching an in-scope domain. Common for cloud-hosted services using ACM, Azure Certificates, or GCP-managed SSL.",
+      "when": {
+        "predicate": "target_has_certificate_with_san_in_scope",
+        "params": {}
+      },
+      "then": {
+        "outcome": "promote",
+        "confidence_delta": 0.70
+      }
+    },
+    {
+      "rule_id": "cloud-registrant-pivot",
+      "rule_version": "1.0.0",
+      "category": "registrant_pivot",
+      "priority": 50,
+      "description": "Domain registrant matches an authorized organization pattern. Moderate signal — cloud-first orgs often register domains through centralized accounts.",
+      "when": {
+        "predicate": "target_registrant_matches_authorized_pattern",
+        "params": {}
+      },
+      "then": {
+        "outcome": "promote",
+        "confidence_delta": 0.55
+      }
+    },
+    {
+      "rule_id": "cloud-nameserver-match",
+      "rule_version": "1.0.0",
+      "category": "infrastructure_correlation",
+      "priority": 35,
+      "description": "Target uses nameservers matching the organization's authorized DNS pattern. Cloud-first orgs typically use Route53, Azure DNS, or Cloud DNS — matching the authorized pattern strengthens attribution.",
+      "when": {
+        "predicate": "target_nameserver_matches_authorized_pattern",
+        "params": {}
+      },
+      "then": {
+        "outcome": "promote",
+        "confidence_delta": 0.40
+      }
+    },
+    {
+      "rule_id": "onprem-single-source-review",
+      "rule_version": "1.0.0",
+      "category": "high_confidence_join",
+      "priority": 200,
+      "description": "Non-cloud target observed by only one collector. Cloud-first orgs have less on-prem presence, so single-source on-prem findings need manual review.",
+      "when": {
+        "all_of": [
+          {
+            "predicate": "target_observed_by_collectors_count_gte",
+            "params": { "count": 1 }
+          },
+          {
+            "not": {
+              "predicate": "target_observed_by_collectors_count_gte",
+              "params": { "count": 2 }
+            }
+          },
+          {
+            "not": {
+              "predicate": "target_ip_in_authorized_cloud_account_range",
+              "params": {}
+            }
+          }
+        ]
+      },
+      "then": {
+        "outcome": "neutral",
+        "review_flag": true,
+        "review_reason": "high_value_target_low_confidence"
+      }
+    },
+    {
+      "rule_id": "explicit-rejection",
+      "rule_version": "1.0.0",
+      "category": "rejection_rule",
+      "priority": 1,
+      "description": "Target is explicitly listed as out-of-scope in tenant authorization. Reject regardless of other evidence.",
+      "when": {
+        "predicate": "target_in_explicit_authorization_scope",
+        "params": { "rejection_only": true }
+      },
+      "then": {
+        "outcome": "reject"
+      }
+    },
+    {
+      "rule_id": "cloud-multi-collector-boost",
+      "rule_version": "1.0.0",
+      "category": "high_confidence_join",
+      "priority": 25,
+      "description": "Target observed by three or more independent collectors and is in a cloud IP range. Multiple corroborating sources in a known cloud environment is very strong evidence.",
+      "when": {
+        "all_of": [
+          {
+            "predicate": "target_observed_by_collectors_count_gte",
+            "params": { "count": 3 }
+          },
+          {
+            "predicate": "target_ip_in_authorized_cloud_account_range",
+            "params": {}
+          }
+        ]
+      },
+      "then": {
+        "outcome": "promote",
+        "confidence_delta": 0.30
+      }
+    }
+  ],
+
+  "lead_score_formula": {
+    "formula_version": "0.1.0",
+    "weights": {
+      "attribution_confidence": 15,
+      "exposure_severity_max": 30,
+      "tech_stack_risk": 20,
+      "freshness": 15,
+      "cloud_provider_factor": 20
+    },
+    "modifiers": [
+      {
+        "description": "Newly discovered cloud assets get a freshness boost — cloud environments change rapidly and new assets need prompt review.",
+        "when": {
+          "predicate": "target_first_observed_within_days",
+          "params": { "days": 3 }
+        },
+        "then_multiply": 1.4
+      },
+      {
+        "description": "Exposed admin panels on cloud infrastructure are critical — S3 console endpoints, Azure portal-adjacent services, GCP Console resources.",
+        "when": {
+          "predicate": "target_has_exposure_indicator",
+          "params": { "indicator": "admin_panel_exposed" }
+        },
+        "then_multiply": 1.8
+      },
+      {
+        "description": "Targets with known exposures in cloud environments are prioritized higher due to broader blast radius.",
+        "when": {
+          "predicate": "target_has_exposure_indicator",
+          "params": { "indicator": "database_exposed" }
+        },
+        "then_multiply": 2.0
+      }
+    ],
+    "category_thresholds": {
+      "critical_priority": 75,
+      "high_priority": 55,
+      "medium_priority": 35,
+      "low_priority": 15
+    }
+  }
+}
