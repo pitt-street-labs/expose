@@ -1,0 +1,65 @@
+# Pre-commit hooks for EXPOSE.
+#
+# Install:
+#   uv pip install pre-commit
+#   pre-commit install
+#
+# Run on all files:
+#   pre-commit run --all-files
+#
+# DCO sign-off enforcement is in CI per ADR-006 (DCO bot on the public repo);
+# locally you can also enforce with `gitlint` or by configuring git's commit
+# template to remind you of `-s`.
+
+minimum_pre_commit_version: "4.0.0"
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-case-conflict
+      - id: check-symlinks
+      - id: check-toml
+      - id: check-yaml
+        args: ["--allow-multiple-documents"]
+      - id: check-json
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  # Ruff (formatter + linter) — keep this in sync with pyproject.toml [tool.ruff]
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+
+  # Block secret commits — high-value gate for a security-tooling repo.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  # JSON Schema linting — schemas/ are an authoritative artifact; keep them tight.
+  - repo: https://github.com/python-jsonschema/check-jsonschema
+    rev: 0.30.0
+    hooks:
+      - id: check-jsonschema-with-default-meta-schema
+        files: ^schemas/.*\.json$
+
+  # Helm chart lint — keep deploy/helm-chart/ valid as it grows.
+  - repo: local
+    hooks:
+      - id: helm-lint
+        name: helm lint
+        entry: helm lint
+        language: system
+        files: ^deploy/helm-chart/
+        args: ["deploy/helm-chart/"]
+        pass_filenames: false

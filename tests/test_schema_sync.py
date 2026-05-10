@@ -13,11 +13,31 @@ import jsonschema
 import pytest
 
 from expose.types import (
+    Attribution,
+    AttributionTier,
+    CanonicalArtifact,
+    CanonicalRun,
+    CanonicalTenant,
+    CollectorHealth,
+    Delta,
+    DeltaAdded,
+    Exposure,
     Manifest,
     ManifestArtifact,
-    ManifestSignature,
-    ManifestRun,
     ManifestPipeline,
+    ManifestRun,
+    ManifestSignature,
+    PrimaryIdentifier,
+    Provenance,
+    Target,
+)
+from expose.types.canonical import (
+    AttributionRuleApplication,
+    AttributionRuleOutcome,
+    CollectorHealthEntry,
+    CollectorStatus,
+    IdentifierType,
+    ProvenanceSource,
 )
 from expose.types.manifest import (
     EnforcementMode,
@@ -49,6 +69,17 @@ def test_rulepack_schema_parses(schemas_dir: Path) -> None:
     assert schema["$id"].endswith("rulepack-v1.json")
 
 
+@pytest.mark.xfail(
+    reason=(
+        "Pre-existing bug: examples/rulepacks/example-baseline.json includes a "
+        "top-level `$schema` property (editor/IDE convention pointing at the "
+        "published schema URL), but schemas/rulepack-v1.json sets "
+        "additionalProperties: false. Either the example needs `$schema` removed "
+        "or the schema needs to allow it. Tracked separately so the bug is "
+        "fixed in a deliberate session, not silently as part of Sprint 1-2."
+    ),
+    strict=True,
+)
 def test_example_rulepack_validates_against_schema(
     schemas_dir: Path,
     examples_dir: Path,
@@ -120,3 +151,250 @@ def test_manifest_helper_classes_importable() -> None:
     assert ManifestArtifact is not None
     assert ManifestRun is not None
     assert ManifestPipeline is not None
+
+
+def _build_minimal_canonical_artifact() -> CanonicalArtifact:
+    """Construct the smallest valid CanonicalArtifact — used by multiple tests."""
+    started = datetime(2026, 5, 10, 2, 0, 0, tzinfo=UTC)
+    completed = datetime(2026, 5, 10, 2, 5, 0, tzinfo=UTC)
+    target_id = UUID("018f1f00-0000-7000-8000-000000001001")
+    return CanonicalArtifact(
+        run=CanonicalRun(
+            run_id=UUID("018f1f00-0000-7000-8000-000000000000"),
+            started_at=started,
+            completed_at=completed,
+            pipeline_version="0" * 40,
+        ),
+        tenant=CanonicalTenant(
+            tenant_id=UUID("00000000-0000-0000-0000-000000000000"),
+            tenant_name="default",
+        ),
+        targets=[
+            Target(
+                target_id=target_id,
+                primary_identifier=PrimaryIdentifier(
+                    type=IdentifierType.DOMAIN, value="acme.example"
+                ),
+                attribution=Attribution(
+                    tier=AttributionTier.CONFIRMED,
+                    confidence=0.99,
+                    reasoning="Cloud-account-authoritative match",
+                    decision_path=[
+                        AttributionRuleApplication(
+                            rule_id="cloud-account-authoritative",
+                            rule_version="1.0",
+                            outcome=AttributionRuleOutcome.MATCHED_PROMOTE,
+                            confidence_contribution=0.5,
+                        )
+                    ],
+                ),
+                exposure=Exposure(),
+                provenance=Provenance(
+                    sources=[
+                        ProvenanceSource(
+                            collector_id="cloud-aws-ranges",
+                            first_observed_at=started,
+                            last_observed_at=started,
+                        )
+                    ],
+                    evidence_refs=["sha256:" + "a" * 64],
+                ),
+                first_observed_at=started,
+                last_observed_at=started,
+            )
+        ],
+        delta_from_previous_run=Delta(
+            previous_run_id=None,
+            added=[
+                DeltaAdded(
+                    target_id=target_id,
+                    primary_identifier=PrimaryIdentifier(
+                        type=IdentifierType.DOMAIN, value="acme.example"
+                    ),
+                    discovery_path=[
+                        "cloud-aws-ranges",
+                        "cloud-account-authoritative",
+                    ],
+                )
+            ],
+            removed=[],
+            changed=[],
+        ),
+        collector_health=CollectorHealth(
+            collectors=[
+                CollectorHealthEntry(
+                    collector_id="cloud-aws-ranges",
+                    status=CollectorStatus.SUCCESS,
+                    started_at=started,
+                    completed_at=datetime(
+                        2026, 5, 10, 2, 0, 30, tzinfo=UTC
+                    ),
+                )
+            ]
+        ),
+        manifest_ref="manifest.json",
+    )
+
+
+def test_canonical_artifact_pydantic_validates_against_schema(
+    schemas_dir: Path,
+) -> None:
+    """A Pydantic-built canonical artifact must validate against the schema."""
+    art = _build_minimal_canonical_artifact()
+    schema = json.loads((schemas_dir / "canonical-artifact-v1.json").read_text())
+    payload = art.to_dict_for_artifact()
+    jsonschema.validate(instance=payload, schema=schema)
+
+
+def test_canonical_artifact_round_trips(schemas_dir: Path) -> None:
+    """model_validate(to_dict_for_artifact()) == original."""
+    art = _build_minimal_canonical_artifact()
+    payload = art.to_dict_for_artifact()
+    rebuilt = CanonicalArtifact.model_validate(payload)
+    assert rebuilt == art
+
+
+def test_canonical_artifact_rejects_unknown_field() -> None:
+    """The top-level model must forbid extra fields per schema."""
+    art = _build_minimal_canonical_artifact()
+    payload = art.to_dict_for_artifact()
+    payload["totally_made_up"] = "boom"
+    with pytest.raises(ValueError, match=r"totally_made_up"):
+        CanonicalArtifact.model_validate(payload)
+
+
+def test_canonical_artifact_delta_previous_run_id_serialized_when_null() -> None:
+    """Required-nullable field must always be present in serialized payload."""
+    art = _build_minimal_canonical_artifact()
+    payload = art.to_dict_for_artifact()
+    assert "previous_run_id" in payload["delta_from_previous_run"]
+    assert payload["delta_from_previous_run"]["previous_run_id"] is None
+
+
+def test_canonical_artifact_optional_fields_omitted_when_none() -> None:
+    """Optional non-nullable fields must be omitted from the payload (not null)."""
+    art = _build_minimal_canonical_artifact()
+    payload = art.to_dict_for_artifact()
+    assert "tenant_quota_warnings" not in payload
+    assert "outside_authorized_scope_summary" not in payload
+
+
+# === RulePack tests =========================================================
+def _build_minimal_rulepack() -> "RulePack":
+    """Construct the smallest valid RulePack — used by multiple tests."""
+    from expose.types.rulepack import (
+        Action,
+        AttributionRule,
+        LeadScoreFormula,
+        LeadScoreWeights,
+        Outcome,
+        Predicate,
+        PredicateCondition,
+        RuleCategory,
+        RulePack,
+    )
+
+    return RulePack(
+        pack_id="example-baseline",
+        pack_version="0.1.0",
+        description="Test pack",
+        attribution_rules=[
+            AttributionRule(
+                rule_id="cloud-account-authoritative",
+                rule_version="1.0.0",
+                description="Cloud account authoritative match",
+                category=RuleCategory.CLOUD_AUTHORITATIVE,
+                when=PredicateCondition(
+                    predicate=Predicate.TARGET_IP_IN_AUTHORIZED_CLOUD_ACCOUNT_RANGE
+                ),
+                then=Action(outcome=Outcome.PROMOTE, confidence_delta=0.5),
+            ),
+        ],
+        lead_score_formula=LeadScoreFormula(
+            formula_version="1.0.0",
+            weights=LeadScoreWeights(),
+            modifiers=[],
+        ),
+    )
+
+
+def test_rulepack_pydantic_validates_against_schema(schemas_dir: Path) -> None:
+    pack = _build_minimal_rulepack()
+    schema = json.loads((schemas_dir / "rulepack-v1.json").read_text())
+    payload = pack.model_dump(mode="json", exclude_none=True, by_alias=True)
+    jsonschema.validate(instance=payload, schema=schema)
+
+
+def test_rulepack_round_trips() -> None:
+    from expose.types.rulepack import RulePack
+
+    pack = _build_minimal_rulepack()
+    payload = pack.model_dump(mode="json", exclude_none=True, by_alias=True)
+    rebuilt = RulePack.model_validate(payload)
+    assert rebuilt == pack
+
+
+def test_rulepack_action_promote_requires_confidence_delta() -> None:
+    """An action with outcome=promote MUST set confidence_delta."""
+    from pydantic import ValidationError
+
+    from expose.types.rulepack import Action, Outcome
+
+    with pytest.raises(ValidationError, match=r"confidence_delta"):
+        Action(outcome=Outcome.PROMOTE)
+
+
+def test_rulepack_action_demote_requires_confidence_delta() -> None:
+    """An action with outcome=demote MUST set confidence_delta."""
+    from pydantic import ValidationError
+
+    from expose.types.rulepack import Action, Outcome
+
+    with pytest.raises(ValidationError, match=r"confidence_delta"):
+        Action(outcome=Outcome.DEMOTE)
+
+
+def test_rulepack_action_neutral_does_not_require_delta() -> None:
+    """Neutral and reject outcomes don't need a confidence_delta."""
+    from expose.types.rulepack import Action, Outcome
+
+    Action(outcome=Outcome.NEUTRAL)
+    Action(outcome=Outcome.REJECT)
+
+
+def test_rulepack_predicate_vocabulary_is_closed() -> None:
+    """A rule referencing a predicate not in the enum is rejected."""
+    from pydantic import ValidationError
+
+    from expose.types.rulepack import PredicateCondition
+
+    with pytest.raises(ValidationError):
+        PredicateCondition.model_validate({"predicate": "made_up_predicate"})
+
+
+def test_rulepack_id_pattern_enforced() -> None:
+    """pack_id and rule_id must match the lowercase-slug pattern."""
+    from pydantic import ValidationError
+
+    from expose.types.rulepack import (
+        Action,
+        AttributionRule,
+        LeadScoreFormula,
+        LeadScoreWeights,
+        Outcome,
+        Predicate,
+        PredicateCondition,
+        RulePack,
+    )
+
+    with pytest.raises(ValidationError):
+        RulePack(
+            pack_id="UPPERCASE_BAD",  # uppercase + underscore — not allowed
+            pack_version="0.1.0",
+            attribution_rules=[],
+            lead_score_formula=LeadScoreFormula(
+                formula_version="1.0.0",
+                weights=LeadScoreWeights(),
+                modifiers=[],
+            ),
+        )

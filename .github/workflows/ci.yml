@@ -1,0 +1,161 @@
+# EXPOSE CI workflow.
+#
+# Runs on every PR and push to main. Required gates per ADR-001 + ADR-007 +
+# ADR-010 + #40:
+#   - lint (ruff)
+#   - typecheck (mypy strict)
+#   - tests (pytest with isolation marker forcibly run regardless of selection)
+#   - schema-sync (Pydantic models match schemas/*.json)
+#   - FIPS crypto gate (no banned imports under src/expose/)
+#   - container build (multi-arch via buildx)
+#
+# This workflow uses NO untrusted user-controlled inputs (no github.event.*
+# refs in run: blocks) per the GitHub Actions injection-hardening guidance.
+# All run: blocks operate on hardcoded environment variables and tool outputs.
+#
+# Active only after the consent gate lifts and EXPOSE Core is published.
+# Internally exercise via `act` or any GitHub Actions runner emulator.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Minimum permissions per FedRAMP CM-7 / GitHub OIDC best practice.
+permissions:
+  contents: read
+
+env:
+  FORCE_COLOR: "1"
+  PYTHONUNBUFFERED: "1"
+  UV_VERSION: "0.5.13"
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+      - name: Ruff lint
+        run: uv run ruff check src/ tests/
+      - name: Ruff format check
+        run: uv run ruff format --check src/ tests/
+      - name: Mypy (strict)
+        run: uv run mypy src/
+
+  test:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: expose
+          POSTGRES_PASSWORD: expose
+          POSTGRES_DB: expose
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      EXPOSE_DB_HOST: localhost
+      EXPOSE_DB_PORT: "5432"
+      EXPOSE_DB_USER: expose
+      EXPOSE_DB_PASSWORD: expose
+      EXPOSE_DB_DATABASE: expose
+      EXPOSE_DB_SSLMODE: disable
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+      - name: Apply migrations
+        run: uv run alembic upgrade head
+      - name: Run pytest (default)
+        run: uv run pytest
+      - name: Run isolation tests (force; CI gate per ADR-007 + #28)
+        run: uv run pytest -m isolation --no-cov
+
+  schema-sync:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+      - name: Schema sync
+        run: uv run pytest -m schema_sync --no-cov
+
+  fips-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Install minimal deps for the gate
+        run: uv pip install --system pytest
+      - name: FIPS gate
+        run: pytest tests/test_fips_crypto_gate.py -o addopts=""
+
+  helm-lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+      - name: Helm lint
+        run: helm lint deploy/helm-chart/
+      - name: Helm template (smoke render)
+        run: helm template smoke deploy/helm-chart/ --debug > /dev/null
+
+  container-build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Build (no push — verifying multi-arch buildable)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          tags: expose:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  ci-gate:
+    runs-on: ubuntu-24.04
+    needs: [lint, test, schema-sync, fips-gate, helm-lint, container-build]
+    steps:
+      - run: echo "All required CI gates passed."
