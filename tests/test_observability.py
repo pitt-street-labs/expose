@@ -19,14 +19,11 @@ All tests use in-process OTel SDK components (``SimpleSpanProcessor``,
 
 from __future__ import annotations
 
-import pytest
-
-pytestmark = pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
-
 import json
 from io import StringIO
 from uuid import UUID
 
+import pytest
 import structlog
 from opentelemetry import metrics, trace
 from opentelemetry.sdk.metrics import MeterProvider
@@ -43,6 +40,8 @@ from expose.observability.metrics import (
     init_metrics,
 )
 from expose.observability.tracing import get_tracer, init_tracing, span_context
+
+pytestmark = pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -41,7 +41,11 @@ from expose.collectors.base import (
 )
 from expose.collectors.registry import register_collector
 from expose.collectors.tiers import CollectorTier
-from expose.sanitization.canonicalize import canonicalize_domain, canonicalize_ip
+from expose.sanitization.canonicalize import (
+    CanonicalizationError,
+    canonicalize_domain,
+    canonicalize_ip,
+)
 from expose.sanitization.text import SanitizationFieldKind, sanitize_field
 from expose.types.canonical import CollectorStatus, IdentifierType
 
@@ -302,16 +306,30 @@ class RdapWhoisCollector(Collector):
         events: list[dict[str, Any]] = data.get("events", [])
         registration_date, expiration_date = _extract_dates(events)
 
-        # Extract nameservers.
+        # Extract nameservers — sanitize each through canonicalize_domain.
         ns_objects: list[dict[str, Any]] = data.get("nameservers", [])
         nameservers = _extract_nameservers(ns_objects)
+        nameservers = [
+            canonicalize_domain(ns) for ns in nameservers
+            if ns.strip()
+        ]
 
-        # Extract status.
-        status_list = _extract_status(data.get("status", []))
+        # Extract status — sanitize each through generic field sanitizer.
+        status_list = [
+            sanitize_field(s, SanitizationFieldKind.GENERIC).value
+            for s in _extract_status(data.get("status", []))
+        ]
 
-        # WHOIS server (port43).
+        # WHOIS server (port43) — canonicalize as domain.
         port43_raw: str | None = data.get("port43")
-        rdap_port43 = port43_raw.strip() or None if isinstance(port43_raw, str) else None
+        rdap_port43: str | None = None
+        if isinstance(port43_raw, str) and port43_raw.strip():
+            try:
+                rdap_port43 = canonicalize_domain(port43_raw)
+            except CanonicalizationError:
+                rdap_port43 = sanitize_field(
+                    port43_raw, SanitizationFieldKind.GENERIC
+                ).value
 
         # Build structured payload — omit None values for clean output.
         payload: dict[str, Any] = {}

@@ -25,7 +25,6 @@ Key design properties:
 
 from __future__ import annotations
 
-import contextvars
 import logging
 import time
 from enum import StrEnum
@@ -49,14 +48,10 @@ from expose.collectors.tiers import (
     Tier3DispatchDeniedError,
     assert_tier_3_dispatch_allowed,
 )
+from expose.observability import current_tenant_id
 from expose.types.canonical import CollectorStatus
 
 logger = logging.getLogger(__name__)
-
-# === Tenant context propagation =============================================
-current_tenant_id: contextvars.ContextVar[UUID] = contextvars.ContextVar(
-    "current_tenant_id",
-)
 
 
 # === Dispatch envelope ======================================================

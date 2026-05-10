@@ -99,7 +99,6 @@ class _TokenBucket:
         async with self._lock:
             now = time.monotonic()
             if host not in self._buckets:
-                # First request for this host — grant immediately.
                 self._buckets[host] = 0.0
                 self._timestamps[host] = now
                 return
@@ -112,9 +111,10 @@ class _TokenBucket:
                 self._buckets[host] -= 1.0
                 return
 
-        # Not enough tokens — wait for replenishment outside the lock.
-        deficit = 1.0 - self._buckets.get(host, 0.0)
-        wait = deficit / self._rate if self._rate > 0 else 0.0
+            # Capture deficit under lock before releasing for sleep.
+            deficit = 1.0 - self._buckets[host]
+            wait = deficit / self._rate if self._rate > 0 else 0.0
+
         await asyncio.sleep(wait)
 
         async with self._lock:
@@ -331,8 +331,11 @@ def _build_payload(response: httpx.Response) -> dict[str, Any]:
             raw_server, SanitizationFieldKind.HTTP_SERVER_HEADER
         ).value
 
-    # Content-Type
-    content_type = response.headers.get("content-type")
+    # Content-Type — sanitized.
+    raw_ct = response.headers.get("content-type")
+    content_type: str | None = None
+    if raw_ct is not None:
+        content_type = sanitize_field(raw_ct, SanitizationFieldKind.GENERIC).value
 
     # Title
     title = _extract_title(body)
@@ -348,8 +351,13 @@ def _build_payload(response: httpx.Response) -> dict[str, Any]:
     banner_text = banner_bytes.decode("utf-8", errors="replace")
     banner = sanitize_field(banner_text, SanitizationFieldKind.HTTP_BANNER).value
 
+    # Final URL — sanitized.
+    final_url = sanitize_field(
+        str(response.url), SanitizationFieldKind.HTTP_REDIRECT_TARGET
+    ).value
+
     return {
-        "url": str(response.url),
+        "url": final_url,
         "status_code": response.status_code,
         "server_header": server_header,
         "content_type": content_type,

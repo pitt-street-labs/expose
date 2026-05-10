@@ -15,13 +15,9 @@ Convenience:
 - :data:`current_tenant_id` — ``contextvars.ContextVar`` for tenant propagation.
 
 The :data:`current_tenant_id` context variable is defined here as the
-canonical source. The pipeline dispatcher
-(:mod:`expose.pipeline.dispatcher`) defines its own ``current_tenant_id``
-as well; when the two modules are used together the dispatcher's ``set``
-calls populate the same logical context and
-:func:`~expose.observability.tracing.span_context` reads it back. This
-module re-exports its own so that instrumentation code does not need to
-depend on the pipeline package.
+single canonical source. The pipeline dispatcher imports and uses this
+same variable, so ``span_context`` reads tenant context set by the
+dispatcher.
 """
 
 from __future__ import annotations

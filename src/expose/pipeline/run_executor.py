@@ -148,7 +148,7 @@ class RunExecutor:
         self._run_repo = run_repo
         self._entity_repo = entity_repo
 
-    async def execute(
+    async def execute(  # noqa: PLR0912
         self,
         *,
         run_id: UUID,
@@ -233,15 +233,24 @@ class RunExecutor:
         # already sanitized.
 
         # === Stage 4: Graph upsert ============================================
+        upsert_failures = 0
         for obs in all_observations:
-            await self._entity_repo.create_or_update(
-                tenant_id=TenantId(tenant_id),
-                entity_type=obs.subject.identifier_type.value,
-                canonical_identifier=obs.subject.identifier_value,
-                properties=_observation_properties(obs),
-                attribution_status="unattributed",
-                attribution_confidence=Decimal("0.000"),
-            )
+            try:
+                await self._entity_repo.create_or_update(
+                    tenant_id=TenantId(tenant_id),
+                    entity_type=obs.subject.identifier_type.value,
+                    canonical_identifier=obs.subject.identifier_value,
+                    properties=_observation_properties(obs),
+                    attribution_status="unattributed",
+                    attribution_confidence=Decimal("0.000"),
+                )
+            except Exception:
+                logger.exception(
+                    "Entity upsert failed for %s/%s",
+                    obs.subject.identifier_type.value,
+                    obs.subject.identifier_value,
+                )
+                upsert_failures += 1
 
         # TODO(stage-4b): LLM enrichment — out of scope for Sprint 3-4
         # When implemented, this stage will pass graph entities through the
