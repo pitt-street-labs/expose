@@ -1,0 +1,62 @@
+{
+  "objectClassName": "domain",
+  "handle": "D123456-LROR",
+  "ldhName": "private-domain.com",
+  "links": [
+    {
+      "value": "https://rdap.org/domain/private-domain.com",
+      "rel": "self",
+      "href": "https://rdap.org/domain/private-domain.com",
+      "type": "application/rdap+json"
+    }
+  ],
+  "status": ["client transfer prohibited"],
+  "entities": [
+    {
+      "objectClassName": "entity",
+      "handle": "REDACTED",
+      "roles": ["registrant"],
+      "remarks": [
+        {
+          "title": "REDACTED FOR PRIVACY",
+          "description": [
+            "Registration data has been redacted per ICANN's Temporary Specification for gTLD Registration Data."
+          ]
+        }
+      ]
+    },
+    {
+      "objectClassName": "entity",
+      "handle": "1234",
+      "roles": ["registrar"],
+      "vcardArray": [
+        "vcard",
+        [
+          ["version", {}, "text", "4.0"],
+          ["fn", {}, "text", "NameCheap, Inc."]
+        ]
+      ]
+    }
+  ],
+  "events": [
+    {
+      "eventAction": "registration",
+      "eventDate": "2020-01-15T10:30:00Z"
+    },
+    {
+      "eventAction": "expiration",
+      "eventDate": "2026-01-15T10:30:00Z"
+    }
+  ],
+  "nameservers": [
+    {
+      "objectClassName": "nameserver",
+      "ldhName": "ns1.namecheap.com"
+    },
+    {
+      "objectClassName": "nameserver",
+      "ldhName": "ns2.namecheap.com"
+    }
+  ],
+  "port43": "whois.namecheap.com"
+}

@@ -1,0 +1,58 @@
+{
+  "objectClassName": "domain",
+  "handle": "D999999-LROR",
+  "ldhName": "malicious-org.com",
+  "links": [
+    {
+      "value": "https://rdap.org/domain/malicious-org.com",
+      "rel": "self",
+      "href": "https://rdap.org/domain/malicious-org.com",
+      "type": "application/rdap+json"
+    }
+  ],
+  "status": ["active"],
+  "entities": [
+    {
+      "objectClassName": "entity",
+      "handle": "EVIL123",
+      "roles": ["registrant"],
+      "vcardArray": [
+        "vcard",
+        [
+          ["version", {}, "text", "4.0"],
+          ["fn", {}, "text", "<script>alert('xss')</script>Evil Corp"],
+          ["org", {}, "text", "<script>alert('xss')</script>Evil Corp"]
+        ]
+      ]
+    },
+    {
+      "objectClassName": "entity",
+      "handle": "9999",
+      "roles": ["registrar"],
+      "vcardArray": [
+        "vcard",
+        [
+          ["version", {}, "text", "4.0"],
+          ["fn", {}, "text", "Shady Registrar <img src=x onerror=alert(1)>"]
+        ]
+      ]
+    }
+  ],
+  "events": [
+    {
+      "eventAction": "registration",
+      "eventDate": "2024-01-01T00:00:00Z"
+    },
+    {
+      "eventAction": "expiration",
+      "eventDate": "2025-01-01T00:00:00Z"
+    }
+  ],
+  "nameservers": [
+    {
+      "objectClassName": "nameserver",
+      "ldhName": "ns1.evil.com"
+    }
+  ],
+  "port43": "whois.evil.com"
+}

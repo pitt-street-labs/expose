@@ -1,0 +1,58 @@
+{
+  "objectClassName": "ip network",
+  "handle": "NET-93-184-216-0-1",
+  "name": "EDGECAST-NETBLK-03",
+  "type": "DIRECT ALLOCATION",
+  "startAddress": "93.184.216.0",
+  "endAddress": "93.184.216.255",
+  "links": [
+    {
+      "value": "https://rdap.arin.net/registry/ip/93.184.216.34",
+      "rel": "self",
+      "href": "https://rdap.arin.net/registry/ip/93.184.216.34",
+      "type": "application/rdap+json"
+    }
+  ],
+  "status": ["active"],
+  "entities": [
+    {
+      "objectClassName": "entity",
+      "handle": "EC-ARIN",
+      "roles": ["registrant"],
+      "vcardArray": [
+        "vcard",
+        [
+          ["version", {}, "text", "4.0"],
+          ["fn", {}, "text", "Edgecast Inc."],
+          ["org", {}, "text", "Edgecast Inc."],
+          ["adr", {}, "text", ["", "", "13031 W Jefferson Blvd", "Los Angeles", "CA", "90094", "US"]]
+        ]
+      ]
+    },
+    {
+      "objectClassName": "entity",
+      "handle": "ABUSE-ARIN",
+      "roles": ["abuse"],
+      "vcardArray": [
+        "vcard",
+        [
+          ["version", {}, "text", "4.0"],
+          ["fn", {}, "text", "Abuse Department"],
+          ["email", {}, "text", "abuse@edgecast.com"],
+          ["tel", {}, "uri", "tel:+1-877-334-3236"]
+        ]
+      ]
+    }
+  ],
+  "events": [
+    {
+      "eventAction": "registration",
+      "eventDate": "2014-03-14T16:16:51Z"
+    },
+    {
+      "eventAction": "last changed",
+      "eventDate": "2023-11-28T19:22:33Z"
+    }
+  ],
+  "port43": "whois.arin.net"
+}

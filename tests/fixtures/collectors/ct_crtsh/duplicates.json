@@ -1,0 +1,35 @@
+[
+  {
+    "issuer_ca_id": 16418,
+    "issuer_name": "C=US, O=Let's Encrypt, CN=R3",
+    "common_name": "dup.example.com",
+    "name_value": "dup.example.com\nwww.dup.example.com",
+    "id": 1111111111,
+    "entry_timestamp": "2025-03-01T08:00:00.000",
+    "not_before": "2025-03-01T00:00:00",
+    "not_after": "2025-06-01T00:00:00",
+    "serial_number": "aabbccdd00112233aabbccdd00112233"
+  },
+  {
+    "issuer_ca_id": 16418,
+    "issuer_name": "C=US, O=Let's Encrypt, CN=R3",
+    "common_name": "dup.example.com",
+    "name_value": "dup.example.com\nwww.dup.example.com",
+    "id": 2222222222,
+    "entry_timestamp": "2025-03-01T09:00:00.000",
+    "not_before": "2025-03-01T00:00:00",
+    "not_after": "2025-06-01T00:00:00",
+    "serial_number": "aabbccdd00112233aabbccdd00112233"
+  },
+  {
+    "issuer_ca_id": 185756,
+    "issuer_name": "C=US, O=Amazon, CN=Amazon RSA 2048 M01",
+    "common_name": "other.example.com",
+    "name_value": "other.example.com",
+    "id": 3333333333,
+    "entry_timestamp": "2025-03-02T10:00:00.000",
+    "not_before": "2025-03-02T00:00:00",
+    "not_after": "2025-06-02T00:00:00",
+    "serial_number": "11223344556677889900aabbccddeeff"
+  }
+]

@@ -1,0 +1,37 @@
+{
+  "changeNumber": 20260510,
+  "cloud": "Public",
+  "values": [
+    {
+      "name": "AzureCloud.eastus",
+      "id": "AzureCloud.eastus",
+      "properties": {
+        "changeNumber": 42,
+        "region": "eastus",
+        "regionId": 21,
+        "platform": "Azure",
+        "systemService": "",
+        "addressPrefixes": [
+          "20.42.0.0/17",
+          "20.62.128.0/17",
+          "40.71.0.0/16"
+        ]
+      }
+    },
+    {
+      "name": "AzureCloud.westeurope",
+      "id": "AzureCloud.westeurope",
+      "properties": {
+        "changeNumber": 15,
+        "region": "westeurope",
+        "regionId": 18,
+        "platform": "Azure",
+        "systemService": "",
+        "addressPrefixes": [
+          "13.69.0.0/17",
+          "2603:1020:200::/48"
+        ]
+      }
+    }
+  ]
+}

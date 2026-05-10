@@ -1,0 +1,24 @@
+[
+  {
+    "issuer_ca_id": 16418,
+    "issuer_name": "C=US, O=Let's Encrypt, CN=R3",
+    "common_name": "example.com",
+    "name_value": "example.com\nwww.example.com",
+    "id": 9876543210,
+    "entry_timestamp": "2025-01-15T10:30:00.000",
+    "not_before": "2025-01-15T00:00:00",
+    "not_after": "2025-04-15T00:00:00",
+    "serial_number": "03a1b2c3d4e5f60718293a4b5c6d7e8f"
+  },
+  {
+    "issuer_ca_id": 185756,
+    "issuer_name": "C=US, O=Amazon, CN=Amazon RSA 2048 M01",
+    "common_name": "api.example.com",
+    "name_value": "api.example.com",
+    "id": 9876543211,
+    "entry_timestamp": "2025-02-20T14:45:00.000",
+    "not_before": "2025-02-20T00:00:00",
+    "not_after": "2025-05-20T00:00:00",
+    "serial_number": "0faa1122334455667788aabbccddeeff"
+  }
+]

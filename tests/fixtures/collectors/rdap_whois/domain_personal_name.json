@@ -1,0 +1,60 @@
+{
+  "objectClassName": "domain",
+  "handle": "D789012-LROR",
+  "ldhName": "personal-domain.net",
+  "links": [
+    {
+      "value": "https://rdap.org/domain/personal-domain.net",
+      "rel": "self",
+      "href": "https://rdap.org/domain/personal-domain.net",
+      "type": "application/rdap+json"
+    }
+  ],
+  "status": ["active"],
+  "entities": [
+    {
+      "objectClassName": "entity",
+      "handle": "PERSON123",
+      "roles": ["registrant"],
+      "vcardArray": [
+        "vcard",
+        [
+          ["version", {}, "text", "4.0"],
+          ["fn", {}, "text", "John Doe"],
+          ["email", {}, "text", "john.doe@example.com"],
+          ["tel", {}, "uri", "tel:+1-555-123-4567"],
+          ["adr", {}, "text", ["", "", "123 Main Street", "Springfield", "IL", "62704", "US"]]
+        ]
+      ]
+    },
+    {
+      "objectClassName": "entity",
+      "handle": "5678",
+      "roles": ["registrar"],
+      "vcardArray": [
+        "vcard",
+        [
+          ["version", {}, "text", "4.0"],
+          ["fn", {}, "text", "GoDaddy.com, LLC"]
+        ]
+      ]
+    }
+  ],
+  "events": [
+    {
+      "eventAction": "registration",
+      "eventDate": "2018-06-01T00:00:00Z"
+    },
+    {
+      "eventAction": "expiration",
+      "eventDate": "2026-06-01T00:00:00Z"
+    }
+  ],
+  "nameservers": [
+    {
+      "objectClassName": "nameserver",
+      "ldhName": "ns1.godaddy.com"
+    }
+  ],
+  "port43": "whois.godaddy.com"
+}

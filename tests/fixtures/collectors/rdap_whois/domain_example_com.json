@@ -1,0 +1,78 @@
+{
+  "objectClassName": "domain",
+  "handle": "2138514_DOMAIN_COM-VRSN",
+  "ldhName": "example.com",
+  "links": [
+    {
+      "value": "https://rdap.verisign.com/com/v1/domain/example.com",
+      "rel": "self",
+      "href": "https://rdap.verisign.com/com/v1/domain/example.com",
+      "type": "application/rdap+json"
+    }
+  ],
+  "status": ["client delete prohibited", "client transfer prohibited", "client update prohibited"],
+  "entities": [
+    {
+      "objectClassName": "entity",
+      "handle": "IANA",
+      "roles": ["registrant"],
+      "vcardArray": [
+        "vcard",
+        [
+          ["version", {}, "text", "4.0"],
+          ["fn", {}, "text", "Internet Assigned Numbers Authority"],
+          ["org", {}, "text", "Internet Assigned Numbers Authority"],
+          ["adr", {}, "text", ["", "", "12025 Waterfront Drive", "Los Angeles", "CA", "90094", "US"]],
+          ["email", {}, "text", "admin@iana.org"],
+          ["tel", {}, "uri", "tel:+1-310-301-5800"]
+        ]
+      ]
+    },
+    {
+      "objectClassName": "entity",
+      "handle": "376",
+      "roles": ["registrar"],
+      "vcardArray": [
+        "vcard",
+        [
+          ["version", {}, "text", "4.0"],
+          ["fn", {}, "text", "RESERVED-Internet Assigned Numbers Authority"]
+        ]
+      ],
+      "publicIds": [
+        {
+          "type": "IANA Registrar ID",
+          "identifier": "376"
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "eventAction": "registration",
+      "eventDate": "1995-08-14T04:00:00Z"
+    },
+    {
+      "eventAction": "expiration",
+      "eventDate": "2025-08-13T04:00:00Z"
+    },
+    {
+      "eventAction": "last changed",
+      "eventDate": "2024-08-14T07:01:44Z"
+    }
+  ],
+  "nameservers": [
+    {
+      "objectClassName": "nameserver",
+      "ldhName": "a.iana-servers.net"
+    },
+    {
+      "objectClassName": "nameserver",
+      "ldhName": "b.iana-servers.net"
+    }
+  ],
+  "port43": "whois.verisign-grs.com",
+  "secureDNS": {
+    "delegationSigned": true
+  }
+}

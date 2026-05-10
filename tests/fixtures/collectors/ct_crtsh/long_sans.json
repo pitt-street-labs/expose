@@ -1,0 +1,13 @@
+[
+  {
+    "issuer_ca_id": 16418,
+    "issuer_name": "C=US, O=Let's Encrypt, CN=R3",
+    "common_name": "wildcard.example.com",
+    "name_value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example.com\n<script>alert('xss')</script>.example.com",
+    "id": 5555555555,
+    "entry_timestamp": "2025-04-01T12:00:00.000",
+    "not_before": "2025-04-01T00:00:00",
+    "not_after": "2025-07-01T00:00:00",
+    "serial_number": "deadbeef00112233deadbeef00112233"
+  }
+]
