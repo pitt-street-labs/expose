@@ -1,0 +1,41 @@
+{{- if .Values.security.podSecurityStandards.enabled -}}
+# =============================================================================
+# EXPOSE Core — Pod Security Standards enforcement (Gitea #4)
+#
+# PodSecurityPolicy was removed in Kubernetes 1.25. This chart requires
+# >=1.28 (Chart.yaml kubeVersion), so we use the built-in Pod Security
+# Admission controller via namespace labels.
+#
+# This resource creates the namespace (if security.podSecurityStandards
+# .createNamespace is true) with the appropriate PSA labels. If the
+# namespace already exists, operators must apply these labels manually or
+# via their namespace provisioning tooling.
+#
+# Per ADR-010 FIPS requirements and the principle of least privilege:
+#   - enforce: restricted  (block non-compliant pods)
+#   - audit:   restricted  (log violations)
+#   - warn:    restricted  (warn on apply)
+#
+# The "restricted" profile enforces:
+#   - runAsNonRoot
+#   - No privilege escalation
+#   - Drop ALL capabilities
+#   - Seccomp RuntimeDefault or Localhost
+#   - No host namespaces, ports, or paths
+# =============================================================================
+{{- if .Values.security.podSecurityStandards.createNamespace }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Release.Namespace }}
+  labels:
+    {{- include "expose.labels" . | nindent 4 }}
+    # Pod Security Admission labels
+    pod-security.kubernetes.io/enforce: {{ .Values.security.podSecurityStandards.enforce | default "restricted" | quote }}
+    pod-security.kubernetes.io/enforce-version: {{ .Values.security.podSecurityStandards.version | default "latest" | quote }}
+    pod-security.kubernetes.io/audit: {{ .Values.security.podSecurityStandards.audit | default "restricted" | quote }}
+    pod-security.kubernetes.io/audit-version: {{ .Values.security.podSecurityStandards.version | default "latest" | quote }}
+    pod-security.kubernetes.io/warn: {{ .Values.security.podSecurityStandards.warn | default "restricted" | quote }}
+    pod-security.kubernetes.io/warn-version: {{ .Values.security.podSecurityStandards.version | default "latest" | quote }}
+{{- end }}
+{{- end }}

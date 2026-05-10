@@ -117,12 +117,48 @@ observability:
   bundled:
     enabled: false
 
+# === NATS JetStream (per ADR-003 / #36) =====================================
+nats:
+  # In-cluster NATS is dev/lab-only; production uses an operator-managed
+  # NATS cluster or a managed JetStream service.
+  enabled: false
+  clientPort: 4222
+  clusterPort: 6222
+  replicas: 1
+
 # === Network policies (per #4 deployment-portability epic) ==================
-networkPolicies:
+# Full per-component policies: default deny, then explicit allow for each
+# component's minimum required connectivity. See templates/networkpolicy.yaml.
+networkPolicy:
   enabled: true
   defaultDeny: true
-  # Specific allow rules: control plane → Postgres, control plane → object
-  # store, etc. Detail lands as the Helm chart matures past skeleton.
+
+  # Control-plane (API server) ingress — restrict to specific CIDRs in
+  # production. "0.0.0.0/0" is wide open; operators SHOULD narrow this to
+  # their ingress controller, load balancer, or VPN CIDR.
+  apiServer:
+    ingressCIDR: "0.0.0.0/0"
+
+  # Collector worker egress — passive collectors call public HTTPS APIs.
+  # The NetworkPolicy allows port 443 to non-RFC-1918 addresses; the domain
+  # allowlist below is informational (NetworkPolicy cannot filter by DNS
+  # name; use a CNI with DNS-aware policy — Cilium CiliumNetworkPolicy or
+  # Calico GlobalNetworkPolicy — for domain-level enforcement).
+  collectorEgress:
+    httpsEnabled: true
+    allowedDomains:
+      - crt.sh
+      - rdap.org
+      - ip-ranges.amazonaws.com
+      - download.microsoft.com
+      - www.gstatic.com
+
+  # Scanner worker egress — active scanners reach target hosts on 80/443.
+  # Operators MUST review the egress profile (values.scannerWorker.egressProfile)
+  # in conjunction with this policy.
+  scannerEgress:
+    enabled: true
+    proxyPort: 1080  # SOCKS5/HTTP CONNECT proxy port for non-direct profiles
 
 # === Pod security ===========================================================
 podSecurityContext:
@@ -138,6 +174,24 @@ containerSecurityContext:
   readOnlyRootFilesystem: true
   capabilities:
     drop: [ALL]
+
+# Pod Security Standards — namespace-level enforcement via Kubernetes
+# built-in Pod Security Admission (replaces deprecated PodSecurityPolicy).
+# See templates/podsecurity.yaml.
+security:
+  podSecurityStandards:
+    enabled: true
+    # Set to true to have the chart create the namespace with PSA labels.
+    # If the namespace is managed externally (GitOps, Terraform, etc.),
+    # leave false and apply the labels via your namespace provisioning tool.
+    createNamespace: false
+    # Pod Security Standards profile: baseline | restricted
+    # "restricted" is the hardened default per ADR-010 FIPS posture.
+    enforce: "restricted"
+    audit: "restricted"
+    warn: "restricted"
+    # Pin to a specific PSS version or use "latest".
+    version: "latest"
 
 serviceAccount:
   create: true

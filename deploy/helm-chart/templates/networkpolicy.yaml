@@ -1,12 +1,23 @@
-{{- if and .Values.networkPolicies.enabled .Values.networkPolicies.defaultDeny -}}
-# Default-deny baseline per #4 (Network policy and pod-to-pod restrictions).
-# Specific allow rules — control-plane → Postgres, control-plane → object store,
-# scanner-worker → egress proxy, etc. — are added in subsequent commits as
-# the worker manifests materialize and the egress topology is final.
+{{- if .Values.networkPolicy.enabled -}}
+# =============================================================================
+# EXPOSE Core — NetworkPolicy manifests (Gitea #4)
 #
-# Operators can override via values.networkPolicies.enabled=false in
-# environments that manage network policies externally (Cilium, Calico
-# GlobalNetworkPolicy, OPA, etc.).
+# Defence-in-depth network segmentation for an EASI platform:
+#   1. Default deny all ingress + egress for pods in the release
+#   2. Per-component allow rules scoped to the minimum required connectivity
+#
+# Operators can disable all policies (networkPolicy.enabled=false) for
+# environments that manage segmentation externally (Cilium, Calico
+# GlobalNetworkPolicy, OPA/Gatekeeper, etc.).
+#
+# DNS egress (UDP/TCP 53) is granted to every component because Kubernetes
+# service discovery and collector domain resolution both depend on it.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1. Default deny — all ingress and egress blocked unless explicitly allowed.
+# ---------------------------------------------------------------------------
+{{- if .Values.networkPolicy.defaultDeny }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -20,6 +31,331 @@ spec:
   policyTypes:
     - Ingress
     - Egress
-  # No ingress / egress rules listed → all traffic denied by default.
-  # Specific allows added per-component as worker manifests land.
+  # No ingress/egress rules → all traffic denied.
+{{- end }}
+
+---
+# ---------------------------------------------------------------------------
+# 2. Control plane (API server) — accepts inbound HTTP, talks to Postgres +
+#    NATS + DNS.
+# ---------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "expose.fullname" . }}-control-plane
+  labels:
+    {{- include "expose.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "expose.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: control-plane
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # HTTP API — configurable source CIDR (default: any)
+    - from:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.apiServer.ingressCIDR | quote }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.controlPlane.service.port }}
+  egress:
+    # → Postgres
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: postgres
+      ports:
+        - protocol: TCP
+          port: {{ .Values.postgres.port | default 5432 }}
+    {{- if .Values.postgres.host }}
+    # → External Postgres (operator-provided)
+    - to:
+        - ipBlock:
+            cidr: "0.0.0.0/0"
+      ports:
+        - protocol: TCP
+          port: {{ .Values.postgres.port | default 5432 }}
+    {{- end }}
+    # → NATS JetStream
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: nats
+      ports:
+        - protocol: TCP
+          port: {{ .Values.nats.clientPort | default 4222 }}
+    # → kube-dns (service discovery)
+    - to: []
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# ---------------------------------------------------------------------------
+# 3. Collector worker — no inbound; outbound to Postgres, NATS, DNS, and
+#    passive-collector API endpoints (crt.sh, RDAP, cloud IP ranges).
+# ---------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "expose.fullname" . }}-collector-worker
+  labels:
+    {{- include "expose.labels" . | nindent 4 }}
+    app.kubernetes.io/component: collector-worker
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "expose.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: collector-worker
+  policyTypes:
+    - Ingress
+    - Egress
+  # ingress: intentionally empty — workers accept no inbound connections.
+  egress:
+    # → Postgres
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: postgres
+      ports:
+        - protocol: TCP
+          port: {{ .Values.postgres.port | default 5432 }}
+    {{- if .Values.postgres.host }}
+    - to:
+        - ipBlock:
+            cidr: "0.0.0.0/0"
+      ports:
+        - protocol: TCP
+          port: {{ .Values.postgres.port | default 5432 }}
+    {{- end }}
+    # → NATS JetStream
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: nats
+      ports:
+        - protocol: TCP
+          port: {{ .Values.nats.clientPort | default 4222 }}
+    # → Passive collector HTTPS endpoints (crt.sh, RDAP, cloud IP ranges)
+    {{- if .Values.networkPolicy.collectorEgress.httpsEnabled }}
+    - to:
+        - ipBlock:
+            cidr: "0.0.0.0/0"
+            except:
+              # Block access to cluster-internal and RFC 1918 ranges.
+              # Collectors should only reach public APIs.
+              - "10.0.0.0/8"
+              - "172.16.0.0/12"
+              - "192.168.0.0/16"
+              - "169.254.0.0/16"
+      ports:
+        - protocol: TCP
+          port: 443
+    {{- end }}
+    # → kube-dns
+    - to: []
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# ---------------------------------------------------------------------------
+# 4. Scanner worker — no inbound; outbound to Postgres, NATS, DNS, and
+#    target hosts (active scanning per ADR-003 egress profile).
+#    Active scanners need broader egress than passive collectors.
+# ---------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "expose.fullname" . }}-scanner-worker
+  labels:
+    {{- include "expose.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scanner-worker
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "expose.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: scanner-worker
+  policyTypes:
+    - Ingress
+    - Egress
+  # ingress: intentionally empty — workers accept no inbound connections.
+  egress:
+    # → Postgres
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: postgres
+      ports:
+        - protocol: TCP
+          port: {{ .Values.postgres.port | default 5432 }}
+    {{- if .Values.postgres.host }}
+    - to:
+        - ipBlock:
+            cidr: "0.0.0.0/0"
+      ports:
+        - protocol: TCP
+          port: {{ .Values.postgres.port | default 5432 }}
+    {{- end }}
+    # → NATS JetStream
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: nats
+      ports:
+        - protocol: TCP
+          port: {{ .Values.nats.clientPort | default 4222 }}
+    # → Target hosts for active scanning (HTTP/HTTPS + DNS)
+    {{- if .Values.networkPolicy.scannerEgress.enabled }}
+    - to:
+        - ipBlock:
+            cidr: "0.0.0.0/0"
+            except:
+              - "10.0.0.0/8"
+              - "172.16.0.0/12"
+              - "192.168.0.0/16"
+              - "169.254.0.0/16"
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+    {{- end }}
+    # → Egress proxy (SOCKS5/WireGuard/HTTP CONNECT per ADR-003)
+    {{- if and .Values.scannerWorker.egressProfile (ne .Values.scannerWorker.egressProfile.type "direct") }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: egress-proxy
+      ports:
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.scannerEgress.proxyPort | default 1080 }}
+    {{- end }}
+    # → kube-dns
+    - to: []
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# ---------------------------------------------------------------------------
+# 5. Postgres — accepts connections from control plane and workers only.
+# ---------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "expose.fullname" . }}-postgres
+  labels:
+    {{- include "expose.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "expose.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgres
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "expose.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: control-plane
+        - podSelector:
+            matchLabels:
+              {{- include "expose.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: collector-worker
+        - podSelector:
+            matchLabels:
+              {{- include "expose.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: scanner-worker
+      ports:
+        - protocol: TCP
+          port: {{ .Values.postgres.port | default 5432 }}
+  # Postgres needs no outbound except DNS for hostname resolution.
+  egress:
+    - to: []
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# ---------------------------------------------------------------------------
+# 6. NATS JetStream — accepts connections from control plane and workers only.
+# ---------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "expose.fullname" . }}-nats
+  labels:
+    {{- include "expose.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nats
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "expose.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: nats
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "expose.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: control-plane
+        - podSelector:
+            matchLabels:
+              {{- include "expose.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: collector-worker
+        - podSelector:
+            matchLabels:
+              {{- include "expose.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: scanner-worker
+      ports:
+        - protocol: TCP
+          port: {{ .Values.nats.clientPort | default 4222 }}
+    # NATS cluster port — intra-cluster routing (multi-replica NATS)
+    {{- if gt (int (.Values.nats.replicas | default 1)) 1 }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "expose.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: nats
+      ports:
+        - protocol: TCP
+          port: {{ .Values.nats.clusterPort | default 6222 }}
+    {{- end }}
+  egress:
+    # NATS cluster routing (multi-replica)
+    {{- if gt (int (.Values.nats.replicas | default 1)) 1 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "expose.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: nats
+      ports:
+        - protocol: TCP
+          port: {{ .Values.nats.clusterPort | default 6222 }}
+    {{- end }}
+    # DNS
+    - to: []
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
 {{- end }}
