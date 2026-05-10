@@ -1,0 +1,69 @@
+# Version control
+.git/
+.gitignore
+.gitattributes
+
+# Python build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing / linting caches
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+.mypy_cache/
+.ruff_cache/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local development
+local/
+tmp/
+*.local.yaml
+tenant-config.yaml
+
+# Secrets — never bake into images
+*.key
+*.pem
+*.crt
+.secrets/
+secrets.yaml
+
+# Docs (not needed at runtime)
+docs/
+*.md
+!README.md
+
+# Helm chart (deployed separately)
+deploy/
+
+# Tests (not shipped in image)
+tests/
+
+# Genesis records (not shipped in image)
+HANDOFF.md
+init-and-push-to-gitea.sh
+
+# Claude Code session artifacts
+.claude/
