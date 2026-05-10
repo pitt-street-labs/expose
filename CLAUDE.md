@@ -42,7 +42,7 @@ This repository (`pitt-street-labs/ff6k` on internal Gitea — repo path retains
 | Internal codename | `FF6K` (use in dev artifacts, repo path, commit messages, internal references) |
 | Gitea repo | `pitt-street-labs/ff6k` (private, internal-codename path; rename deferred) |
 | Gitea URL | https://git.int.korlogos.com:8084/pitt-street-labs/ff6k |
-| Issue tracker | Gitea Issues at the repo above (37 issues filed across 4 milestones) |
+| Issue tracker | Gitea Issues at the repo above (41 issues; #38 Session H closed; #41 rulepack $schema bug) |
 | License | Apache 2.0 (engine); separate proprietary modules per ADR-009 |
 | MITRE ATT&CK anchor | Reconnaissance (TA0043) only for Core; Resource Development (TA0042) is a commercial Threat Context module concern |
 | Two-environment model | E1 = this codebase (deterministic engine); E2 = downstream LLM analysis (out of scope, anticipates Mythos via Project Glasswing) |
@@ -63,11 +63,19 @@ This repository (`pitt-street-labs/ff6k` on internal Gitea — repo path retains
 | Working example rule pack | `examples/rulepacks/example-baseline.json` |
 | Original handoff briefing | `HANDOFF.md` (committed as genesis record) |
 | Init script (already executed) | `init-and-push-to-gitea.sh` (committed as genesis record; token redacted) |
-| Advisory strategy documents | `docs/strategy/` — non-locked analyses informing future sessions (e.g., `persona-analysis.md`) |
+| Advisory strategy documents | `docs/strategy/` — non-locked analyses: `persona-analysis.md`, `competitive-analysis.md` (Session B), `framework-annotation.md` (Session E), `sdlp.md` (Session F), `federal-customer-deployment-guide.md` (Session G), `critical-path.md`, plus session-driven additions |
+| Architecture diagrams | `docs/architecture/` — mermaid diagrams of pipeline stages, two-environment model, deployment topology, observation graph, multi-tenancy, scanner egress, attribution flow, product surfaces, federal deployment pattern |
+| Engine source code (Sprint 1+) | `src/expose/` — `__init__.py`, `cli.py` (click-based skeleton), `types/` (Pydantic models mirroring schemas/), `db/` (SQLAlchemy ORM + Alembic-backed schema), `collectors/` (framework + base ABC + tier gating), `sanitization/` (Sprint 3-4) |
+| Database migrations | `alembic.ini` + `alembic/versions/` (v0001 initial_schema lands tenants/entities/relationships/runs) |
+| Container build | `Dockerfile` (multi-stage, multi-arch via buildx) + `.dockerignore` |
+| Helm chart | `deploy/helm-chart/` (skeleton — full per-component manifests land Sprint 5+) |
+| CI workflow | `.github/workflows/ci.yml` (lint + test + schema-sync + FIPS gate + helm-lint + multi-arch container build + ci-gate aggregator) |
+| Pre-commit | `.pre-commit-config.yaml` (ruff + gitleaks + check-jsonschema + helm lint) |
+| Tests | `tests/` — `test_smoke.py`, `test_schema_sync.py` (Pydantic-vs-schema round-trips), `test_tenant_isolation.py` (ADR-007 v1 deliverable scaffold), `test_fips_crypto_gate.py` (banned-import scan per ADR-010) |
 
 ## Issue tracker conventions
 
-- 37 issues, 7 epics, 4 milestones (Phase 1, Phase 2, Phase 3, Ongoing). Issues #1-34 are the spec-phase backlog; #35 ETHICS quarterly review (due 2026-08-09); #36 orchestration framework selection (Phase 1 critical-path); #37 persona-analysis follow-ups (advisory umbrella).
+- 41 issues, 7 epics, 4 milestones (Phase 1, Phase 2, Phase 3, Ongoing). Issues #1-34 are the spec-phase backlog; #35 ETHICS quarterly review (due 2026-08-09); #36 orchestration framework selection (Phase 1 critical-path); #37 persona-analysis follow-ups (advisory umbrella); **#38 Session H closed-with-resolution: EXPOSE selected**; #39 Tor/proxy egress design; #40 Sprint 1-2 foundation engineering (in-progress); #41 rulepack `$schema` bug (xfail in tests until fix lands).
 - Labels follow `epic:<slug>`, `area:<slug>`, `priority:<level>`, `type:<kind>`, plus `v1` for v1 deliverables (4 issues: #3, #28, #31, #34).
 - Reference issues by number in commits: `Closes #N` or `Refs #N`.
 - New work discovered during a session → file an issue immediately (Tier 3, pre-authorized) rather than letting it slip.

@@ -91,6 +91,53 @@ See [`docs/SPEC.md`](docs/SPEC.md) for the full architecture.
 
 > **Pre-release:** the deployment instructions below describe the target user experience for v1 GA. Implementation is in Phase 1; not all components are functional yet.
 
+### For developers
+
+```bash
+# Clone (when public)
+git clone https://github.com/korlogos/expose.git
+cd expose
+
+# Install uv (the standardized dependency manager): https://docs.astral.sh/uv/
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Sync runtime + dev dependencies
+uv sync --all-extras --dev
+
+# Run the test suite
+uv run pytest
+
+# Run isolation + schema-sync tests explicitly
+uv run pytest -m isolation
+uv run pytest -m schema_sync
+
+# Type-check
+uv run mypy src/
+
+# Lint + format
+uv run ruff check src/ tests/
+uv run ruff format src/ tests/
+
+# Apply Postgres migrations against a local database
+EXPOSE_DB_HOST=localhost EXPOSE_DB_USER=expose EXPOSE_DB_PASSWORD=expose \
+    uv run alembic upgrade head
+
+# Build the multi-arch container image (linux/amd64 + linux/arm64)
+docker buildx build --platform linux/amd64,linux/arm64 -t expose:dev .
+
+# Lint the Helm chart
+helm lint deploy/helm-chart/
+
+# Pre-commit hooks (DCO sign-off, ruff, gitleaks, schema lint, helm lint)
+uv pip install pre-commit
+pre-commit install
+pre-commit run --all-files
+```
+
+See `CONTRIBUTING.md` for DCO sign-off requirements and the full development workflow.
+
+### For operators
+
 ```bash
 # Clone the repository
 git clone https://github.com/korlogos/expose.git
