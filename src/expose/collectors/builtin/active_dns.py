@@ -80,8 +80,20 @@ class ActiveDnsCollector(Collector):
         if HAS_DNSPYTHON:
             self._resolver = _dns_asyncresolver.Resolver()
             self._resolver.lifetime = config.request_timeout_seconds
+            self._apply_egress_profile()
         else:
             self._resolver = None  # type: ignore[assignment]
+
+    def _apply_egress_profile(self) -> None:
+        """Apply DNS resolver kwargs from the egress profile, if configured."""
+        egress_profile = self.config.extra.get("egress_profile")
+        if egress_profile is not None:
+            from expose.egress.base import EgressProfile  # noqa: PLC0415
+
+            if isinstance(egress_profile, EgressProfile):
+                resolver_kwargs = egress_profile.configure_dns_resolver()
+                if "nameservers" in resolver_kwargs:
+                    self._resolver.nameservers = resolver_kwargs["nameservers"]
 
     async def expand(self, seed: Seed) -> AsyncIterator[Observation]:
         """Resolve DNS records for a DOMAIN seed.

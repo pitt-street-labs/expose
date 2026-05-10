@@ -11,6 +11,7 @@ joined in the observability backend.
 
 from __future__ import annotations
 
+import logging as stdlib_logging
 from collections.abc import MutableMapping
 from typing import Any
 
@@ -72,7 +73,7 @@ def configure_logging(
     structlog.configure(
         processors=[*shared_processors, renderer],
         wrapper_class=structlog.make_filtering_bound_logger(
-            structlog._log_levels.NAME_TO_LEVEL[level.lower()],
+            getattr(stdlib_logging, level.upper(), stdlib_logging.INFO),
         ),
         context_class=dict,
         logger_factory=structlog.PrintLoggerFactory(),

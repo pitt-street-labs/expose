@@ -229,6 +229,16 @@ class ActiveHttpCollector(Collector):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+    def _egress_httpx_kwargs(self) -> dict[str, Any]:
+        """Extract httpx client kwargs from the egress profile, if configured."""
+        egress_profile = self.config.extra.get("egress_profile")
+        if egress_profile is not None:
+            from expose.egress.base import EgressProfile  # noqa: PLC0415
+
+            if isinstance(egress_profile, EgressProfile):
+                return egress_profile.configure_httpx_client()
+        return {}
+
     async def _probe_url(
         self,
         *,
@@ -238,10 +248,12 @@ class ActiveHttpCollector(Collector):
         canonical_value: str,
     ) -> Observation:
         """Issue a GET to ``url`` and build an Observation from the response."""
+        egress_kwargs = self._egress_httpx_kwargs()
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=DeprecationWarning)
             warnings.filterwarnings("ignore", message="Unverified HTTPS request")
             async with httpx.AsyncClient(
+                **egress_kwargs,
                 verify=False,  # noqa: S501
                 max_redirects=5,
                 timeout=self.config.request_timeout_seconds,

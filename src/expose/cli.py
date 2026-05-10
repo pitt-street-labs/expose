@@ -257,6 +257,13 @@ def run_start(
     # Generate run ID
     run_id = uuid.uuid4()
 
+    # Warn that this is stub mode (no real network calls or persistence)
+    click.echo(click.style(
+        "WARNING: Running in stub mode — no real collector calls, "
+        "no database persistence. Results are simulated.",
+        fg="yellow",
+    ))
+
     # Execute the stub pipeline
     result = asyncio.run(
         _execute_stub_run(

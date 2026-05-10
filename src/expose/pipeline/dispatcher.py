@@ -215,6 +215,17 @@ class PipelineDispatcher:
                 error_message=str(exc),
                 duration_ms=_elapsed_ms(start_ns),
             )
+        except Exception as exc:
+            logger.exception(
+                "Unexpected error in collector %s",
+                job.collector_id,
+            )
+            return DispatchResult(
+                status=DispatchStatus.COLLECTOR_ERROR,
+                collector_health=health,
+                error_message=f"{type(exc).__name__}: {exc}",
+                duration_ms=_elapsed_ms(start_ns),
+            )
 
         return DispatchResult(
             status=DispatchStatus.SUCCESS,

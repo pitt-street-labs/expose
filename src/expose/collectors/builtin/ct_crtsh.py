@@ -174,22 +174,16 @@ class CrtShCollector(Collector):
 
         try:
             raw: Any = response.json()
-        except Exception:
-            logger.warning(
-                "ct-crtsh: malformed JSON response for domain %r; "
-                "yielding zero observations",
-                domain,
-            )
-            return
+        except Exception as exc:
+            msg = f"crt.sh returned malformed JSON for domain {domain!r}: {exc}"
+            raise CollectorSourceUnreachableError(msg) from exc
 
         if not isinstance(raw, list):
-            logger.warning(
-                "ct-crtsh: expected JSON array from crt.sh for domain %r, "
-                "got %s; yielding zero observations",
-                domain,
-                type(raw).__name__,
+            msg = (
+                f"crt.sh returned {type(raw).__name__} instead of "
+                f"JSON array for domain {domain!r}"
             )
-            return
+            raise CollectorSourceUnreachableError(msg)
 
         entries: list[dict[str, Any]] = raw
 
@@ -216,6 +210,7 @@ class CrtShCollector(Collector):
                     "ct-crtsh: failed to build observation for serial %s: %s",
                     serial,
                     exc,
+                    exc_info=True,
                 )
 
     async def health_check(self) -> CollectorHealthCheck:

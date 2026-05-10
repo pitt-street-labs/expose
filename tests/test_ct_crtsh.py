@@ -233,28 +233,28 @@ class TestCrtShExpandNetworkError:
 
 
 class TestCrtShExpandMalformedResponse:
-    """Test 5: malformed JSON is handled gracefully."""
+    """Test 5: malformed JSON raises CollectorSourceUnreachableError."""
 
     @respx.mock
-    async def test_not_json_yields_nothing(self) -> None:
+    async def test_not_json_raises(self) -> None:
         respx.get("https://crt.sh/", params__contains={"output": "json"}).mock(
             return_value=httpx.Response(200, text="<html>not json</html>"),
         )
 
         collector = CrtShCollector(_make_config())
-        results = await _collect_all(collector, _make_seed())
-        assert results == []
+        with pytest.raises(CollectorSourceUnreachableError, match="malformed JSON"):
+            await _collect_all(collector, _make_seed())
 
     @respx.mock
-    async def test_json_object_instead_of_array(self) -> None:
+    async def test_json_object_instead_of_array_raises(self) -> None:
         fixture = _load_fixture("malformed.json")
         respx.get("https://crt.sh/", params__contains={"output": "json"}).mock(
             return_value=httpx.Response(200, text=fixture),
         )
 
         collector = CrtShCollector(_make_config())
-        results = await _collect_all(collector, _make_seed())
-        assert results == []
+        with pytest.raises(CollectorSourceUnreachableError, match="instead of JSON array"):
+            await _collect_all(collector, _make_seed())
 
 
 class TestCrtShExpandDeduplication:

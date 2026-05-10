@@ -17,6 +17,7 @@ calls.  Coverage:
 12. IP seed: identifier_type=IP, canonical value
 """
 
+from unittest.mock import MagicMock
 from uuid import UUID
 
 import httpx
@@ -35,6 +36,8 @@ from expose.collectors.base import (
 )
 from expose.collectors.builtin.active_http import ActiveHttpCollector
 from expose.collectors.tiers import CollectorTier
+from expose.egress.base import EgressProfile, EgressProfileType
+from expose.egress.direct import DirectEgressProfile
 from expose.types.canonical import CollectorStatus, IdentifierType
 
 # Deterministic test IDs.
@@ -481,3 +484,64 @@ class TestCollectorMetadata:
 
     def test_collector_is_subclass_of_collector_abc(self) -> None:
         assert issubclass(ActiveHttpCollector, Collector)
+
+
+# ======================================================================
+# 13. Egress profile integration
+# ======================================================================
+class TestEgressProfileIntegration:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_works_without_egress_profile(self) -> None:
+        """Backward compatibility: collector works with no egress_profile in extra."""
+        respx.get("https://example.com").mock(
+            return_value=httpx.Response(200, content=b"OK")
+        )
+        respx.get("http://example.com").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="example.com")
+        # Config with no egress_profile key at all.
+        observations = await _collect(seed, _config())
+
+        assert len(observations) == 1
+        assert observations[0].structured_payload["status_code"] == 200
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_direct_egress_profile_works(self) -> None:
+        """DirectEgressProfile passes through without altering behavior."""
+        respx.get("https://example.com").mock(
+            return_value=httpx.Response(
+                200,
+                headers={"server": "nginx"},
+                content=b"<html><title>Direct</title></html>",
+            )
+        )
+        respx.get("http://example.com").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="example.com")
+        cfg = _config(egress_profile=DirectEgressProfile())
+        observations = await _collect(seed, cfg)
+
+        assert len(observations) == 1
+        assert observations[0].structured_payload["title"] == "Direct"
+
+    @pytest.mark.asyncio
+    async def test_egress_profile_configure_httpx_client_called(self) -> None:
+        """The egress profile's configure_httpx_client method is invoked."""
+        mock_profile = MagicMock(spec=EgressProfile)
+        mock_profile.profile_type = EgressProfileType.DIRECT
+        mock_profile.configure_httpx_client.return_value = {}
+
+        cfg = _config(egress_profile=mock_profile)
+        collector = ActiveHttpCollector(cfg)
+
+        # Call the internal helper directly to verify it delegates.
+        result = collector._egress_httpx_kwargs()
+
+        mock_profile.configure_httpx_client.assert_called_once()
+        assert result == {}

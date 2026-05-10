@@ -45,6 +45,8 @@ from expose.collectors.builtin.active_dns import (
 )
 from expose.collectors.registry import DEFAULT_REGISTRY
 from expose.collectors.tiers import CollectorTier
+from expose.egress.base import EgressProfile, EgressProfileType
+from expose.egress.direct import DirectEgressProfile
 from expose.types.canonical import CollectorStatus, ExtendedIdentifierType
 
 # Suppress DeprecationWarnings from dnspython internals if present.
@@ -477,3 +479,63 @@ class TestActiveDnsRegistration:
         assert ActiveDnsCollector.collector_version == "0.1.0"
         assert ActiveDnsCollector.tier == CollectorTier.TIER_3
         assert ActiveDnsCollector.requires_credentials is False
+
+
+# === Egress profile integration ===============================================
+
+
+def _config_with_egress(**extra: Any) -> CollectorConfig:
+    """Build a CollectorConfig with extra fields for egress tests."""
+    return CollectorConfig(
+        tenant_id=TENANT_ID,
+        run_id=RUN_ID,
+        extra=dict(extra),  # type: ignore[arg-type]
+    )
+
+
+@pytest.mark.skipif(not HAS_DNSPYTHON, reason="dnspython not installed")
+class TestActiveDnsEgressProfile:
+    """Egress profile integration tests for the DNS collector."""
+
+    async def test_works_without_egress_profile(self) -> None:
+        """Backward compatibility: collector works with no egress_profile."""
+        answers = {"A": _make_a_answer(["93.184.216.34"])}
+        collector = ActiveDnsCollector(_config())
+        collector._resolver = _mock_resolver_factory(answers)
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="example.com")
+        observations = [obs async for obs in collector.expand(seed)]
+
+        assert len(observations) == 1
+        assert observations[0].structured_payload["values"] == ["93.184.216.34"]
+
+    async def test_direct_egress_profile_works(self) -> None:
+        """DirectEgressProfile passes through without altering resolver."""
+        cfg = _config_with_egress(egress_profile=DirectEgressProfile())
+        collector = ActiveDnsCollector(cfg)
+
+        # DirectEgressProfile returns {} from configure_dns_resolver,
+        # so the resolver's nameservers should remain unchanged (system default).
+        answers = {"A": _make_a_answer(["93.184.216.34"])}
+        collector._resolver = _mock_resolver_factory(answers)
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="example.com")
+        observations = [obs async for obs in collector.expand(seed)]
+
+        assert len(observations) == 1
+        assert observations[0].structured_payload["record_type"] == "A"
+
+    async def test_egress_profile_configure_dns_resolver_called(self) -> None:
+        """A mock egress profile's configure_dns_resolver is invoked."""
+        mock_profile = MagicMock(spec=EgressProfile)
+        mock_profile.profile_type = EgressProfileType.DIRECT
+        mock_profile.configure_dns_resolver.return_value = {
+            "nameservers": ["10.0.0.53"],
+        }
+
+        cfg = _config_with_egress(egress_profile=mock_profile)
+        collector = ActiveDnsCollector(cfg)
+
+        mock_profile.configure_dns_resolver.assert_called_once()
+        # The resolver's nameservers should have been set.
+        assert collector._resolver.nameservers == ["10.0.0.53"]

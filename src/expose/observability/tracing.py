@@ -36,7 +36,7 @@ def _get_service_version() -> str:
         from expose import __version__  # noqa: PLC0415
 
         return __version__
-    except Exception:
+    except (ImportError, AttributeError):
         return "0.1.0.dev0"
 
 
