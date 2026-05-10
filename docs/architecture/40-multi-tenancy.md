@@ -53,7 +53,7 @@ flowchart TB
     HANDLER[Request handler<br/>operates within tenant context]
     SCHED[Scheduler<br/>builds jobs for the tenant]
     ATTRIB[Attribution engine<br/>scoped by tenant_id]
-    GEN[Artifact generator<br/>writes to runs/{tenant_id}/...]
+    GEN["Artifact generator<br/>writes to runs/{tenant_id}/..."]
   end
 
   subgraph BOUNDARY2 ["Boundary 2 — job dispatch"]
@@ -67,7 +67,7 @@ flowchart TB
   end
 
   subgraph BOUNDARY3 ["Boundary 3 — data layer"]
-    QS[Query construction<br/>WHERE tenant_id = $1<br/>ALWAYS scoped]
+    QS["Query construction<br/>WHERE tenant_id = $1<br/>ALWAYS scoped"]
     CACHE[Caching layer<br/>keys include tenant_id]
   end
 
