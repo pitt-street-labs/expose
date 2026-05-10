@@ -24,7 +24,7 @@ the built-in modules, and passes it through. A module-level
 their own to avoid ordering issues.
 
 Collectors are keyed by ``collector_id`` (the stable string identifier on the
-class). Re-registering the same ID raises ``CollectorAlreadyRegistered`` —
+class). Re-registering the same ID raises ``CollectorAlreadyRegisteredError`` —
 this is a programming error, not a runtime condition.
 """
 
@@ -34,7 +34,7 @@ from expose.collectors.base import Collector
 from expose.collectors.tiers import CollectorTier
 
 
-class CollectorAlreadyRegistered(ValueError):
+class CollectorAlreadyRegisteredError(ValueError):
     """A collector with this ``collector_id`` is already registered.
 
     Raised by ``CollectorRegistry.register`` and the ``@register_collector``
@@ -45,7 +45,7 @@ class CollectorAlreadyRegistered(ValueError):
     """
 
 
-class CollectorNotRegistered(KeyError):
+class CollectorNotRegisteredError(KeyError):
     """No collector is registered for the given ID.
 
     Raised by ``CollectorRegistry.get``. Operationally this means either a
@@ -69,7 +69,7 @@ class CollectorRegistry:
 
         Returns the class unchanged so this method can also be used as a
         decorator on the class definition. Raises
-        ``CollectorAlreadyRegistered`` if the ID is already taken.
+        ``CollectorAlreadyRegisteredError`` if the ID is already taken.
         """
 
         cid = collector_cls.collector_id
@@ -80,7 +80,7 @@ class CollectorRegistry:
                 f"{existing.__module__}.{existing.__qualname__}; cannot register "
                 f"{collector_cls.__module__}.{collector_cls.__qualname__}."
             )
-            raise CollectorAlreadyRegistered(msg)
+            raise CollectorAlreadyRegisteredError(msg)
         self._collectors[cid] = collector_cls
         return collector_cls
 
@@ -95,7 +95,7 @@ class CollectorRegistry:
                 "the tenant configuration references an unknown collector or "
                 "the collector package failed to import."
             )
-            raise CollectorNotRegistered(msg) from exc
+            raise CollectorNotRegisteredError(msg) from exc
 
     def is_registered(self, collector_id: str) -> bool:
         """Cheap membership check — useful for tenant-config validation."""
@@ -193,8 +193,8 @@ RegistryLike = Callable[[str], type[Collector]]
 
 __all__ = [
     "DEFAULT_REGISTRY",
-    "CollectorAlreadyRegistered",
-    "CollectorNotRegistered",
+    "CollectorAlreadyRegisteredError",
+    "CollectorNotRegisteredError",
     "CollectorRegistry",
     "RegistryLike",
     "get_collector",

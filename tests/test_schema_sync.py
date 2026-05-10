@@ -44,6 +44,17 @@ from expose.types.manifest import (
     LLMProvider,
     SignatureFormat,
 )
+from expose.types.rulepack import (
+    Action,
+    AttributionRule,
+    LeadScoreFormula,
+    LeadScoreWeights,
+    Outcome,
+    Predicate,
+    PredicateCondition,
+    RuleCategory,
+    RulePack,
+)
 
 pytestmark = pytest.mark.schema_sync
 
@@ -280,20 +291,8 @@ def test_canonical_artifact_optional_fields_omitted_when_none() -> None:
 
 
 # === RulePack tests =========================================================
-def _build_minimal_rulepack() -> "RulePack":
+def _build_minimal_rulepack() -> RulePack:
     """Construct the smallest valid RulePack — used by multiple tests."""
-    from expose.types.rulepack import (
-        Action,
-        AttributionRule,
-        LeadScoreFormula,
-        LeadScoreWeights,
-        Outcome,
-        Predicate,
-        PredicateCondition,
-        RuleCategory,
-        RulePack,
-    )
-
     return RulePack(
         pack_id="example-baseline",
         pack_version="0.1.0",
@@ -326,8 +325,6 @@ def test_rulepack_pydantic_validates_against_schema(schemas_dir: Path) -> None:
 
 
 def test_rulepack_round_trips() -> None:
-    from expose.types.rulepack import RulePack
-
     pack = _build_minimal_rulepack()
     payload = pack.model_dump(mode="json", exclude_none=True, by_alias=True)
     rebuilt = RulePack.model_validate(payload)
@@ -336,9 +333,7 @@ def test_rulepack_round_trips() -> None:
 
 def test_rulepack_action_promote_requires_confidence_delta() -> None:
     """An action with outcome=promote MUST set confidence_delta."""
-    from pydantic import ValidationError
-
-    from expose.types.rulepack import Action, Outcome
+    from pydantic import ValidationError  # noqa: PLC0415  (test-local import is fine)
 
     with pytest.raises(ValidationError, match=r"confidence_delta"):
         Action(outcome=Outcome.PROMOTE)
@@ -346,9 +341,7 @@ def test_rulepack_action_promote_requires_confidence_delta() -> None:
 
 def test_rulepack_action_demote_requires_confidence_delta() -> None:
     """An action with outcome=demote MUST set confidence_delta."""
-    from pydantic import ValidationError
-
-    from expose.types.rulepack import Action, Outcome
+    from pydantic import ValidationError  # noqa: PLC0415  (test-local import is fine)
 
     with pytest.raises(ValidationError, match=r"confidence_delta"):
         Action(outcome=Outcome.DEMOTE)
@@ -356,17 +349,13 @@ def test_rulepack_action_demote_requires_confidence_delta() -> None:
 
 def test_rulepack_action_neutral_does_not_require_delta() -> None:
     """Neutral and reject outcomes don't need a confidence_delta."""
-    from expose.types.rulepack import Action, Outcome
-
     Action(outcome=Outcome.NEUTRAL)
     Action(outcome=Outcome.REJECT)
 
 
 def test_rulepack_predicate_vocabulary_is_closed() -> None:
     """A rule referencing a predicate not in the enum is rejected."""
-    from pydantic import ValidationError
-
-    from expose.types.rulepack import PredicateCondition
+    from pydantic import ValidationError  # noqa: PLC0415  (test-local import is fine)
 
     with pytest.raises(ValidationError):
         PredicateCondition.model_validate({"predicate": "made_up_predicate"})
@@ -374,18 +363,7 @@ def test_rulepack_predicate_vocabulary_is_closed() -> None:
 
 def test_rulepack_id_pattern_enforced() -> None:
     """pack_id and rule_id must match the lowercase-slug pattern."""
-    from pydantic import ValidationError
-
-    from expose.types.rulepack import (
-        Action,
-        AttributionRule,
-        LeadScoreFormula,
-        LeadScoreWeights,
-        Outcome,
-        Predicate,
-        PredicateCondition,
-        RulePack,
-    )
+    from pydantic import ValidationError  # noqa: PLC0415  (test-local import is fine)
 
     with pytest.raises(ValidationError):
         RulePack(

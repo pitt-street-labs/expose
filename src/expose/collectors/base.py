@@ -25,7 +25,7 @@ two are deliberately distinct; do not collapse them.
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -55,7 +55,7 @@ class StrictModel(BaseModel):
 
 
 # === Seeds ====================================================================
-class SeedType(str, Enum):
+class SeedType(StrEnum):
     """Operator-provided seed types (per SPEC §10.1 ``seeds:`` config key).
 
     ``ENTITY`` is for downstream pivots — when the dispatcher feeds an existing
@@ -89,7 +89,7 @@ class Seed(StrictModel):
 
 
 # === Observations =============================================================
-class ObservationType(str, Enum):
+class ObservationType(StrEnum):
     """Categories of evidence a collector emits.
 
     Observation types are a flat enumeration; the dispatcher converts each one
@@ -247,7 +247,7 @@ class CollectorRateLimitError(CollectorError):
     """
 
 
-class CollectorSourceUnreachable(CollectorError):
+class CollectorSourceUnreachableError(CollectorError):
     """Source DNS / TLS / HTTP failures past the configured timeout."""
 
 
@@ -342,7 +342,7 @@ __all__ = [
     "CollectorError",
     "CollectorHealthCheck",
     "CollectorRateLimitError",
-    "CollectorSourceUnreachable",
+    "CollectorSourceUnreachableError",
     "Observation",
     "ObservationSubject",
     "ObservationType",

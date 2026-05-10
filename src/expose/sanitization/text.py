@@ -31,7 +31,7 @@ rather than collector-by-collector to keep the policy auditable.
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 # === Length caps (SPEC §7.1) =================================================
 # Each cap is documented with its provenance. Caps are byte-counts on the
@@ -49,7 +49,7 @@ CAP_BYTES_WHOIS_ORGANIZATION = 1024  # RFC 9082 doesn't limit; pragmatic cap
 CAP_BYTES_GENERIC_FIELD = 4096  # Default when a more specific cap doesn't apply
 
 
-class SanitizationFieldKind(str, Enum):
+class SanitizationFieldKind(StrEnum):
     """Named field kinds with their own length cap.
 
     Concrete collectors pass the kind to ``sanitize_field`` so the right cap
@@ -89,7 +89,7 @@ def cap_for_kind(kind: SanitizationFieldKind) -> int:
 
 
 # === Suspicious-content flags (SPEC §7.1) ===================================
-class SuspiciousFlag(str, Enum):
+class SuspiciousFlag(StrEnum):
     """Named flags surfaced in the canonical observation's metadata.
 
     These are flags, not refusals. The graph still stores the sanitized

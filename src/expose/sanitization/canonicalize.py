@@ -30,7 +30,7 @@ adapter lands (see ``tests/test_fips_crypto_gate.py``).
 
 import ipaddress
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # Match canonical lowercase hex SHA-256 (no `sha256:` prefix per
 # canonical-artifact-v1 schema CertFingerprintSha256 type).
@@ -170,10 +170,7 @@ def canonicalize_timestamp(ts: datetime) -> str:
     consistently.
     """
 
-    if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
-    else:
-        ts = ts.astimezone(timezone.utc)
+    ts = ts.replace(tzinfo=UTC) if ts.tzinfo is None else ts.astimezone(UTC)
     # isoformat() yields '+00:00' for UTC; replace with 'Z' for the canonical form.
     iso = ts.isoformat()
     if iso.endswith("+00:00"):
@@ -202,7 +199,9 @@ def canonicalize_service_id(host: str, port: int, protocol: str) -> str:
     if proto not in {"tcp", "udp"}:
         msg = f"Unsupported service protocol {protocol!r}; expected 'tcp' or 'udp'."
         raise CanonicalizationError(msg)
-    if not (1 <= port <= 65535):
+    # IANA TCP/UDP port range is 1-65535 (16-bit unsigned). Inline literal here
+    # because hoisting it to a constant would obscure the intent.
+    if not (1 <= port <= 65535):  # noqa: PLR2004
         msg = f"Service port {port} out of range (1-65535)."
         raise CanonicalizationError(msg)
 

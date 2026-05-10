@@ -26,17 +26,21 @@ from expose.types.canonical import (
     PrimaryIdentifier,
     Provenance,
     QuotaWarning,
-    Run as CanonicalRun,
     Target,
     TechStack,
+)
+from expose.types.canonical import (
+    Run as CanonicalRun,
+)
+from expose.types.canonical import (
     Tenant as CanonicalTenant,
 )
 from expose.types.manifest import (
     Manifest,
     ManifestArtifact,
-    ManifestSignature,
-    ManifestRun,
     ManifestPipeline,
+    ManifestRun,
+    ManifestSignature,
 )
 from expose.types.rulepack import (
     Action,
@@ -46,8 +50,8 @@ from expose.types.rulepack import (
     LeadScoreModifier,
     LeadScoreWeights,
     NotCondition,
-    Outcome,
     OrCondition,
+    Outcome,
     Predicate,
     PredicateCondition,
     RuleCategory,
@@ -86,8 +90,8 @@ __all__ = [
     "ManifestRun",
     "ManifestSignature",
     "NotCondition",
-    "Outcome",
     "OrCondition",
+    "Outcome",
     "OutsideAuthorizedScopeSummary",
     "Predicate",
     "PredicateCondition",

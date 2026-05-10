@@ -17,7 +17,7 @@ Coverage:
 """
 
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
@@ -35,11 +35,11 @@ from expose.collectors import (
     Seed,
     SeedType,
     TenantAuthorizationScope,
-    Tier3DispatchDenied,
+    Tier3DispatchDeniedError,
     assert_tier_3_dispatch_allowed,
     is_tier_3_dispatch_allowed,
 )
-from expose.collectors.registry import CollectorAlreadyRegistered, CollectorNotRegistered
+from expose.collectors.registry import CollectorAlreadyRegisteredError, CollectorNotRegisteredError
 from expose.sanitization import (
     CAP_BYTES_CERT_SAN,
     LLM_SYSTEM_PROMPT_PREFIX,
@@ -97,7 +97,7 @@ class _DummyCollector(Collector):
                 identifier_type=ExtendedIdentifierType.DOMAIN,
                 identifier_value=seed.value,
             ),
-            observed_at=datetime(2026, 5, 9, tzinfo=timezone.utc),
+            observed_at=datetime(2026, 5, 9, tzinfo=UTC),
         )
 
     async def health_check(self) -> CollectorHealthCheck:
@@ -105,7 +105,7 @@ class _DummyCollector(Collector):
             collector_id=self.collector_id,
             collector_version=self.collector_version,
             status=CollectorStatus.SUCCESS,
-            checked_at=datetime(2026, 5, 9, tzinfo=timezone.utc),
+            checked_at=datetime(2026, 5, 9, tzinfo=UTC),
             latency_ms=1.0,
         )
 
@@ -207,12 +207,12 @@ class TestTier3Gating:
         assert is_tier_3_dispatch_allowed(entity, scope)
 
     def test_assert_helper_raises_with_descriptive_message(self) -> None:
-        """The ``assert_`` form raises ``Tier3DispatchDenied`` with context."""
+        """The ``assert_`` form raises ``Tier3DispatchDeniedError`` with context."""
         entity = EntityAttributionView(
             entity_identifier="rejected.example",
             attribution_tier=AttributionTier.MEDIUM,
         )
-        with pytest.raises(Tier3DispatchDenied) as excinfo:
+        with pytest.raises(Tier3DispatchDeniedError) as excinfo:
             assert_tier_3_dispatch_allowed(entity, self._scope())
         # Identifier surfaces in message so audit logs can grep for it.
         assert "rejected.example" in str(excinfo.value)
@@ -239,12 +239,12 @@ class TestRegistry:
         """Re-registering the same ID is a programming error."""
         registry = CollectorRegistry()
         registry.register(_DummyCollector)
-        with pytest.raises(CollectorAlreadyRegistered):
+        with pytest.raises(CollectorAlreadyRegisteredError):
             registry.register(_DummyCollector)
 
     def test_get_unknown_raises(self) -> None:
         registry = CollectorRegistry()
-        with pytest.raises(CollectorNotRegistered):
+        with pytest.raises(CollectorNotRegisteredError):
             registry.get("never-registered")
 
     def test_by_tier_filters_correctly(self) -> None:
@@ -384,7 +384,7 @@ class TestSanitizationCanonicalize:
             normalize_cert_fingerprint("too-short")
 
     def test_canonicalize_timestamp_aware_utc(self) -> None:
-        ts = datetime(2026, 5, 9, 12, 30, 45, tzinfo=timezone.utc)
+        ts = datetime(2026, 5, 9, 12, 30, 45, tzinfo=UTC)
         assert canonicalize_timestamp(ts) == "2026-05-09T12:30:45Z"
 
     def test_canonicalize_timestamp_naive_assumed_utc(self) -> None:

@@ -10,21 +10,21 @@ reader can pivot between schema and code line-for-line.
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 # Reuse the regex-constrained string types from the manifest module.
-from expose.types.manifest import GitSha1, Sha256Ref  # noqa: F401  (re-export below)
+from expose.types.manifest import GitSha1, Sha256Ref
 
 # Cert fingerprint regex: lowercase hex SHA-256 (no `sha256:` prefix per schema).
 CertFingerprintSha256 = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
 
 
 # === Enums ===================================================================
-class IdentifierType(str, Enum):
+class IdentifierType(StrEnum):
     DOMAIN = "domain"
     SUBDOMAIN = "subdomain"
     IP = "ip"
@@ -33,7 +33,7 @@ class IdentifierType(str, Enum):
     URL = "url"
 
 
-class ExtendedIdentifierType(str, Enum):
+class ExtendedIdentifierType(StrEnum):
     DOMAIN = "domain"
     SUBDOMAIN = "subdomain"
     IP = "ip"
@@ -44,14 +44,14 @@ class ExtendedIdentifierType(str, Enum):
     ASN = "asn"
 
 
-class AttributionTier(str, Enum):
+class AttributionTier(StrEnum):
     CONFIRMED = "confirmed"
     HIGH = "high"
     MEDIUM = "medium"
     REQUIRES_REVIEW = "requires_review"
 
 
-class AttributionRuleOutcome(str, Enum):
+class AttributionRuleOutcome(StrEnum):
     MATCHED_PROMOTE = "matched_promote"
     MATCHED_DEMOTE = "matched_demote"
     MATCHED_NEUTRAL = "matched_neutral"
@@ -59,7 +59,7 @@ class AttributionRuleOutcome(str, Enum):
     ERROR = "error"
 
 
-class ReviewReason(str, Enum):
+class ReviewReason(StrEnum):
     AMBIGUOUS_ATTRIBUTION = "ambiguous_attribution"
     NOVEL_CORRELATION_PATTERN = "novel_correlation_pattern"
     LLM_LOW_SELF_CONFIDENCE = "llm_low_self_confidence"
@@ -69,12 +69,12 @@ class ReviewReason(str, Enum):
     HIGH_VALUE_TARGET_LOW_CONFIDENCE = "high_value_target_low_confidence"
 
 
-class Protocol(str, Enum):
+class Protocol(StrEnum):
     TCP = "tcp"
     UDP = "udp"
 
 
-class DNSRecordType(str, Enum):
+class DNSRecordType(StrEnum):
     A = "A"
     AAAA = "AAAA"
     CNAME = "CNAME"
@@ -86,7 +86,7 @@ class DNSRecordType(str, Enum):
     CAA = "CAA"
 
 
-class TechFingerprintMethod(str, Enum):
+class TechFingerprintMethod(StrEnum):
     WAPPALYZER_RULES = "wappalyzer_rules"
     JA3_MATCH = "ja3_match"
     FAVICON_HASH = "favicon_hash"
@@ -95,7 +95,7 @@ class TechFingerprintMethod(str, Enum):
     COMBINED = "combined"
 
 
-class TechCategory(str, Enum):
+class TechCategory(StrEnum):
     WEB_SERVER = "web_server"
     APPLICATION_SERVER = "application_server"
     FRAMEWORK = "framework"
@@ -110,7 +110,7 @@ class TechCategory(str, Enum):
     OTHER = "other"
 
 
-class CloudProvider(str, Enum):
+class CloudProvider(StrEnum):
     AWS = "aws"
     AZURE = "azure"
     GCP = "gcp"
@@ -118,7 +118,7 @@ class CloudProvider(str, Enum):
     UNKNOWN = "unknown"
 
 
-class CloudServiceCategory(str, Enum):
+class CloudServiceCategory(StrEnum):
     COMPUTE = "compute"
     LOAD_BALANCER = "load_balancer"
     CDN = "cdn"
@@ -132,7 +132,7 @@ class CloudServiceCategory(str, Enum):
     UNKNOWN = "unknown"
 
 
-class LeadScoreCategory(str, Enum):
+class LeadScoreCategory(StrEnum):
     INFORMATIONAL = "informational"
     LOW_PRIORITY = "low_priority"
     MEDIUM_PRIORITY = "medium_priority"
@@ -140,14 +140,14 @@ class LeadScoreCategory(str, Enum):
     CRITICAL_PRIORITY = "critical_priority"
 
 
-class LLMEnrichmentProvider(str, Enum):
+class LLMEnrichmentProvider(StrEnum):
     OLLAMA = "ollama"
     ANTHROPIC_DIRECT = "anthropic_direct"
     OPENAI = "openai"
     GEMINI = "gemini"
 
 
-class IndicatorSeverity(str, Enum):
+class IndicatorSeverity(StrEnum):
     INFO = "info"
     LOW = "low"
     MEDIUM = "medium"
@@ -155,7 +155,7 @@ class IndicatorSeverity(str, Enum):
     CRITICAL = "critical"
 
 
-class CollectorStatus(str, Enum):
+class CollectorStatus(StrEnum):
     SUCCESS = "success"
     PARTIAL_SUCCESS = "partial_success"
     FAILURE = "failure"
@@ -163,8 +163,8 @@ class CollectorStatus(str, Enum):
     RATE_LIMITED = "rate_limited"
 
 
-class QuotaType(str, Enum):
-    LLM_TOKEN_BUDGET = "llm_token_budget"
+class QuotaType(StrEnum):
+    LLM_TOKEN_BUDGET = "llm_token_budget"  # noqa: S105 (enum value, not a credential)
     LLM_DOLLAR_BUDGET = "llm_dollar_budget"
     COLLECTOR_API_RATE_LIMIT = "collector_api_rate_limit"
     COLLECTOR_API_DAILY_QUOTA = "collector_api_daily_quota"
@@ -173,19 +173,19 @@ class QuotaType(str, Enum):
     CONCURRENT_RUNS = "concurrent_runs"
 
 
-class QuotaSeverity(str, Enum):
+class QuotaSeverity(StrEnum):
     INFO = "info"
     WARNING = "warning"
     LIMIT_REACHED = "limit_reached"
 
 
-class ScopeEnforcementMode(str, Enum):
+class ScopeEnforcementMode(StrEnum):
     SOFT = "soft"
     MEDIUM = "medium"
     HARD = "hard"
 
 
-class DeltaRemovalReason(str, Enum):
+class DeltaRemovalReason(StrEnum):
     NO_LONGER_OBSERVED = "no_longer_observed"
     ATTRIBUTION_DOWNGRADED_BELOW_THRESHOLD = "attribution_downgraded_below_threshold"
     ANALYST_REJECTED = "analyst_rejected"
@@ -194,7 +194,7 @@ class DeltaRemovalReason(str, Enum):
     TENANT_DATA_SUBJECT_REQUEST = "tenant_data_subject_request"
 
 
-class DeltaChangeType(str, Enum):
+class DeltaChangeType(StrEnum):
     ATTRIBUTION_TIER_PROMOTED = "attribution_tier_promoted"
     ATTRIBUTION_TIER_DEMOTED = "attribution_tier_demoted"
     EXPOSURE_ADDED = "exposure_added"

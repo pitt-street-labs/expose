@@ -10,7 +10,7 @@ mirrored in `schemas/manifest-v1.json` (or vice versa).
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -23,7 +23,7 @@ GitSha1 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{40}$")]
 Sha256Ref = Annotated[str, StringConstraints(pattern=r"^sha256:[a-f0-9]{64}$")]
 
 
-class EnforcementMode(str, Enum):
+class EnforcementMode(StrEnum):
     """Authorization scope enforcement mode (per ADR-008 layer 2)."""
 
     SOFT = "soft"
@@ -31,7 +31,7 @@ class EnforcementMode(str, Enum):
     HARD = "hard"
 
 
-class LLMProvider(str, Enum):
+class LLMProvider(StrEnum):
     """LLM provider used for enrichment (per ADR-005)."""
 
     OLLAMA = "ollama"
@@ -41,7 +41,7 @@ class LLMProvider(str, Enum):
     NONE = "none"
 
 
-class SignatureFormat(str, Enum):
+class SignatureFormat(StrEnum):
     """Artifact signing format (per ADR-004 §9.4)."""
 
     COSIGN_KEYLESS = "cosign-keyless"

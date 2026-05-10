@@ -22,7 +22,8 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
@@ -38,7 +39,8 @@ class Base(DeclarativeBase):
     if ever) SQLAlchemy will fall back to JSON.
     """
 
-    type_annotation_map = {
+    # SQLAlchemy convention — class-level mapping is read once and not mutated.
+    type_annotation_map = {  # noqa: RUF012
         dict[str, Any]: JSONB().with_variant(JSON(), "sqlite"),
     }
 

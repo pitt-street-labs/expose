@@ -11,17 +11,17 @@ Collectors are tiered by sensitivity:
 
 Per ADR-008 (authorized use), Tier-3 dispatch is enforced *at the collector
 dispatch layer*. Attempting to dispatch a Tier-3 job for an unattributed entity
-must raise ``Tier3DispatchDenied`` so callers fail loud rather than silently
+must raise ``Tier3DispatchDeniedError`` so callers fail loud rather than silently
 probing third-party assets.
 """
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 from expose.types.canonical import AttributionTier
 
 
-class CollectorTier(str, Enum):
+class CollectorTier(StrEnum):
     """Sensitivity tier for a collector module (SPEC §6.3).
 
     Values are stable strings used for configuration, audit logs, and the
@@ -78,7 +78,7 @@ class TenantAuthorizationScope:
         return entity_identifier in self.explicit_entity_identifiers
 
 
-class Tier3DispatchDenied(PermissionError):
+class Tier3DispatchDeniedError(PermissionError):
     """Raised when a Tier-3 collector job is dispatched for an entity that
     does not meet the attribution-or-scope gate (SPEC §6.3 / ADR-008).
 
@@ -115,7 +115,7 @@ def assert_tier_3_dispatch_allowed(
     entity: EntityAttributionView,
     tenant_scope: TenantAuthorizationScope,
 ) -> None:
-    """Raise ``Tier3DispatchDenied`` if Tier-3 dispatch is not allowed.
+    """Raise ``Tier3DispatchDeniedError`` if Tier-3 dispatch is not allowed.
 
     Convenience wrapper for dispatcher code paths where the failure mode is
     "stop the job and surface the violation" rather than "branch on a bool".
@@ -127,14 +127,14 @@ def assert_tier_3_dispatch_allowed(
             f"attribution_tier={entity.attribution_tier} and entity not in "
             "authorization scope (SPEC §6.3 / ADR-008)."
         )
-        raise Tier3DispatchDenied(msg)
+        raise Tier3DispatchDeniedError(msg)
 
 
 __all__ = [
     "CollectorTier",
     "EntityAttributionView",
     "TenantAuthorizationScope",
-    "Tier3DispatchDenied",
+    "Tier3DispatchDeniedError",
     "assert_tier_3_dispatch_allowed",
     "is_tier_3_dispatch_allowed",
 ]

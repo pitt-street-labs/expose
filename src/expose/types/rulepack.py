@@ -7,9 +7,8 @@ contract field-for-field.
 """
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Annotated, Any, Literal, Self
-from typing import Annotated as Ann
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
@@ -20,7 +19,7 @@ LowercaseSlug = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9-]*[a
 SemVer = Annotated[str, StringConstraints(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")]
 
 
-class RuleCategory(str, Enum):
+class RuleCategory(StrEnum):
     HIGH_CONFIDENCE_JOIN = "high_confidence_join"
     REGISTRANT_PIVOT = "registrant_pivot"
     INFRASTRUCTURE_CORRELATION = "infrastructure_correlation"
@@ -29,14 +28,14 @@ class RuleCategory(str, Enum):
     REJECTION_RULE = "rejection_rule"
 
 
-class Outcome(str, Enum):
+class Outcome(StrEnum):
     PROMOTE = "promote"
     DEMOTE = "demote"
     NEUTRAL = "neutral"
     REJECT = "reject"
 
 
-class Predicate(str, Enum):
+class Predicate(StrEnum):
     """Closed predicate vocabulary per SPEC §8.2.
 
     New predicates are added via engine updates, not rule pack changes. This
@@ -77,19 +76,19 @@ class AndCondition(BaseModel):
 
     model_config = ConfigDict(extra="allow", frozen=True)
 
-    all_of: list["Condition"] = Field(min_length=1)
+    all_of: list[Condition] = Field(min_length=1)
 
 
 class OrCondition(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
 
-    any_of: list["Condition"] = Field(min_length=1)
+    any_of: list[Condition] = Field(min_length=1)
 
 
 class NotCondition(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
 
-    not_: "Condition" = Field(alias="not")
+    not_: Condition = Field(alias="not")
 
 
 # `oneOf` from schema — discriminated by which key is present.
