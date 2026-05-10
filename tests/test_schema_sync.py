@@ -80,17 +80,6 @@ def test_rulepack_schema_parses(schemas_dir: Path) -> None:
     assert schema["$id"].endswith("rulepack-v1.json")
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Pre-existing bug: examples/rulepacks/example-baseline.json includes a "
-        "top-level `$schema` property (editor/IDE convention pointing at the "
-        "published schema URL), but schemas/rulepack-v1.json sets "
-        "additionalProperties: false. Either the example needs `$schema` removed "
-        "or the schema needs to allow it. Tracked separately so the bug is "
-        "fixed in a deliberate session, not silently as part of Sprint 1-2."
-    ),
-    strict=True,
-)
 def test_example_rulepack_validates_against_schema(
     schemas_dir: Path,
     examples_dir: Path,
