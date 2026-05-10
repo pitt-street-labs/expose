@@ -19,6 +19,10 @@ All tests use in-process OTel SDK components (``SimpleSpanProcessor``,
 
 from __future__ import annotations
 
+import pytest
+
+pytestmark = pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
+
 import json
 from io import StringIO
 from uuid import UUID
@@ -74,6 +78,9 @@ def _reset_meter_provider() -> None:
     """Reset the global meter provider between tests."""
     from opentelemetry.metrics import _internal as metrics_internal  # noqa: PLC0415
 
+    provider = metrics.get_meter_provider()
+    if isinstance(provider, MeterProvider):
+        provider.shutdown()
     metrics_internal._METER_PROVIDER = None  # type: ignore[attr-defined]
     metrics_internal._METER_PROVIDER_SET_ONCE._done = False  # type: ignore[attr-defined]
 

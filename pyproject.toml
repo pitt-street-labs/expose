@@ -158,6 +158,9 @@ filterwarnings = [
     "error",
     # Allow deprecation warnings from third-party libs but fail on our own
     "default::DeprecationWarning:expose.*",
+    # testcontainers leaves sockets unclosed; OTel background threads raise on teardown
+    "default::ResourceWarning",
+    "default::pytest.PytestUnraisableExceptionWarning",
 ]
 
 # === Coverage ===============================================================
