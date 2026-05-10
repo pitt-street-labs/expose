@@ -1,0 +1,69 @@
+# =============================================================================
+# Example authorization scope — hard enforcement (regulated / contracted)
+# =============================================================================
+#
+# Use case: Regulated-industry deployments (financial services with regulator
+# oversight, healthcare with HIPAA exposure, defense contractors with CUI
+# obligations) and scope-contracted engagements (boutique red team work where
+# the engagement contract enumerates exact authorized assets).
+#
+# In hard mode:
+#   - Active probing (DNS resolution, TLS handshake, HTTP fingerprint, port
+#     surface) REFUSES TO EXECUTE against any asset that is not in
+#     `confirmed` or `high` attribution tier OR explicitly in this scope.
+#   - Passive collection (CT logs, passive DNS, scan APIs, RDAP, cloud IP
+#     manifests) remains broad — that is necessary for attribution quality.
+#   - Scope mismatches are flagged in the artifact AND the active-probing
+#     refusal is recorded with structured reasoning in collector_health.
+#
+# Hard mode is the strictest posture available in v1. Use it when:
+#   - The engagement contract enumerates exact assets and you must be able
+#     to demonstrate, in client review, that nothing outside that list was
+#     actively probed.
+#   - Regulator or compliance posture requires demonstrable scope discipline.
+#   - You are building a reference deployment for a control framework that
+#     measures scope enforcement (NIST RA-5 boundary discipline, etc.).
+#
+# Drop into the `authorization_scope:` block of your tenant config.
+#
+# Reference: docs/adr/ADR-008-authorized-use-and-ethics.md §"Layer 2"
+# All values are FAKE. Replace with your own when adapting.
+
+authorization_scope:
+
+  # hard: active probing refuses out-of-scope; passive remains broad.
+  enforcement_mode: hard
+
+  # Apex domains the engagement / regulator authorizes. Be exact; under hard
+  # mode, an apex you forget to list does not get actively probed.
+  apex_domains:
+    - client-corp.example
+    - client-products.example
+
+  # Cloud accounts the engagement / regulator authorizes. Each ID should be
+  # traceable to an authorization record (contract clause, regulator letter,
+  # internal authorization memo).
+  cloud_accounts:
+    - provider: aws
+      account_id: "123456789012"
+    - provider: aws
+      account_id: "234567890123"
+
+  # Registrant patterns — keep tight. Under hard mode, a too-broad
+  # registrant pattern does NOT loosen probing (active probing is gated on
+  # apex_domains and cloud_accounts membership, not on registrant pattern),
+  # but it can still increase scope-warning noise.
+  registrant_patterns:
+    - "Client Corporation"
+
+  # ASN ranges in scope — typically empty for SaaS-native orgs.
+  asn_ranges: []
+
+  # Exclusions are critical in hard mode — use them to carve out partner
+  # services that share apex with the in-scope organization but are NOT
+  # part of the authorized engagement.
+  exclusions:
+    - type: domain
+      value: vendor-portal.client-corp.example
+    - type: subdomain
+      value: third-party-managed.client-corp.example

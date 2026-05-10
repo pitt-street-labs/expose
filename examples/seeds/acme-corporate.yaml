@@ -1,0 +1,70 @@
+# =============================================================================
+# Example seeds — Fortune-500-style enterprise (Acme Corporation)
+# =============================================================================
+#
+# Use case: A large, multi-business-unit enterprise with multiple apex domains,
+# multiple cloud accounts across two providers, several brand variants in
+# WHOIS/RDAP registrant fields, and on-prem network presence behind owned ASNs.
+#
+# Drop into the `seeds:` block of your tenant config (see
+# `examples/tenant-config.yaml.template`). Pair with
+# `examples/scope/medium-default.yaml` for the matching scope shape.
+#
+# All values are FAKE. Replace with your own when adapting.
+
+seeds:
+
+  # Primary corporate apex domains. List the production-facing ones first;
+  # secondary marketing/event domains can follow.
+  - type: domain
+    value: acme.example
+  - type: domain
+    value: acmecorp.example
+  - type: domain
+    value: acme-internal.example
+
+  # Subsidiary / acquired-entity apexes still in scope. Keep the list tight;
+  # divested entities should NOT be here.
+  - type: domain
+    value: acme-labs.example     # internal R&D org
+  - type: domain
+    value: northstar-systems.example  # acquired 2024, still operating brand
+
+  # Brand-related domains used for marketing campaigns or product brands.
+  # These often share registrant patterns with the primary org.
+  - type: domain
+    value: acme-cloud.example    # SaaS product brand
+  - type: domain
+    value: getacme.example       # marketing landing-page brand
+
+  # Organization names — drive WHOIS/RDAP registrant pivots. Include legal-
+  # entity-name variants; WHOIS data is inconsistent across registrars.
+  - type: organization
+    value: "Acme Corporation"
+  - type: organization
+    value: "Acme Corp"
+  - type: organization
+    value: "Acme Corporation, Inc."
+  - type: organization
+    value: "Northstar Systems Inc."   # acquired entity registrant
+
+  # Cloud accounts — multiple AWS accounts (production, staging, sandbox)
+  # plus an Azure subscription for the inherited Northstar workload.
+  - type: cloud_account
+    provider: aws
+    account_id: "123456789012"        # acme-prod
+  - type: cloud_account
+    provider: aws
+    account_id: "234567890123"        # acme-staging
+  - type: cloud_account
+    provider: aws
+    account_id: "345678901234"        # acme-sandbox
+  - type: cloud_account
+    provider: aws
+    account_id: "456789012345"        # acme-data-platform
+  - type: cloud_account
+    provider: azure
+    account_id: "11111111-2222-3333-4444-555555555555"  # northstar inherited
+  - type: cloud_account
+    provider: gcp
+    account_id: "acme-ml-prod-555555"  # data-science org GCP project

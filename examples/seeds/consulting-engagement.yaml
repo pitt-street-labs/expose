@@ -1,0 +1,53 @@
+# =============================================================================
+# Example seeds — boutique red team per-client engagement
+# =============================================================================
+#
+# Use case: A boutique red-team consultancy running EXPOSE for a single
+# client engagement. The seeds are sourced verbatim from the engagement
+# scope contract. The tenant lives only for the duration of the engagement
+# and is torn down (or archived) at engagement close.
+#
+# Pair this seed file with `examples/scope/hard-mode-regulated.yaml` —
+# scope-contracted engagements should run in hard mode so the engine
+# refuses active probing of anything not in the scope contract.
+#
+# OPERATOR DISCIPLINE for engagement work:
+#   - The seeds and scope MUST match the engagement scope contract exactly.
+#   - Never silently extend scope mid-engagement; record every change with a
+#     `scope_version` bump and the contractual basis in the audit log.
+#   - Tear the tenant down at engagement close per your retention policy and
+#     contract requirements.
+#   - Engagement artifacts (canonical.json.gz, scope contract, audit log
+#     extracts) are the audit trail your client expects and your insurer
+#     requires. Keep them.
+#
+# Drop into the `seeds:` block of your tenant config. All values are FAKE.
+
+seeds:
+
+  # Apex domains the engagement scope contract explicitly authorizes.
+  # Quote the exact strings from the contract; do NOT add brand variants
+  # the contract does not list.
+  - type: domain
+    value: client-corp.example
+  - type: domain
+    value: client-products.example
+
+  # If the contract authorizes specific subdomains (rather than apex), seed
+  # those instead as `subdomain` placeholders represented as `domain` here
+  # and use `apex_domains` exclusion in scope to keep the rest of the apex
+  # out of probing.
+
+  # Organization name from the contract registrant clause. Use the legal
+  # entity name exactly as the contract states it.
+  - type: organization
+    value: "Client Corporation"
+
+  # Cloud accounts the contract authorizes. Each cloud account ID belongs
+  # in the contract; if it isn't in the contract, do not seed it.
+  - type: cloud_account
+    provider: aws
+    account_id: "123456789012"   # client production AWS account
+  - type: cloud_account
+    provider: aws
+    account_id: "234567890123"   # client staging AWS account

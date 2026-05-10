@@ -1,0 +1,260 @@
+# =============================================================================
+# EXPOSE — Tenant configuration TEMPLATE
+# =============================================================================
+#
+# This is a TEMPLATE. Copy to tenant-config.yaml, edit values, never commit
+# your real config:
+#
+#     cp examples/tenant-config.yaml.template tenant-config.yaml
+#     $EDITOR tenant-config.yaml
+#
+# tenant-config.yaml is in the project .gitignore. If you remove it from
+# .gitignore, you are committing seeds, scope, and infrastructure references
+# you almost certainly do not intend to publish.
+#
+# Schema reference: docs/SPEC.md §10.1
+# Authorization-scope semantics: docs/adr/ADR-008-authorized-use-and-ethics.md
+# Multi-tenancy notes: docs/adr/ADR-007-multi-tenancy.md
+#
+# All values below are PLAUSIBLE-BUT-FAKE. Replace `acme.example`, the AWS
+# account `123456789012`, and credential placeholder strings with real values
+# for your tenant. Do not commit collector API keys; reference them by name
+# in your secrets backend (see `collectors.credentials_secret_ref`).
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Tenant identity
+# -----------------------------------------------------------------------------
+
+# tenant_id: stable UUID for this tenant. Used as the directory prefix in
+# object storage (`runs/{tenant_id}/{run_id}/`) and as the FK in every
+# tenant-scoped row (per ADR-007). Do not change after first run; use the
+# zero-UUID for the v1 single-tenant default deployment.
+tenant_id: "00000000-0000-0000-0000-000000000000"
+
+# name: human-readable identifier, surfaced in dashboards and audit logs.
+# Not guaranteed unique across deployments.
+name: "default"
+
+# -----------------------------------------------------------------------------
+# Seeds — entry points for the seed-expansion stage (SPEC §2.2 Stage 1)
+# -----------------------------------------------------------------------------
+#
+# Seeds bootstrap the seed graph. Three seed types are supported in v1:
+#   - domain         : an apex domain you own
+#   - organization   : a registrant or organization name (free text)
+#   - cloud_account  : a cloud account / subscription / project ID
+#
+# More seeds = more recall, more cost, more incidental data. Keep tight; add
+# as needed. See `examples/seeds/` for canonical starting points.
+seeds:
+  # Apex domains — primary anchors for CT logs, passive DNS, RDAP pivots.
+  - type: domain
+    value: acme.example
+  - type: domain
+    value: acme-internal.example
+
+  # Organization names — drive WHOIS / RDAP registrant pivots.
+  # Use the legal-entity name as it appears in domain registrations.
+  - type: organization
+    value: "Acme Corporation"
+
+  # Cloud accounts — drive cloud-provider IP-range manifest pivots and
+  # cloud-resource attribution.
+  - type: cloud_account
+    provider: aws
+    account_id: "123456789012"
+  - type: cloud_account
+    provider: azure
+    account_id: "11111111-2222-3333-4444-555555555555"  # subscription ID
+  - type: cloud_account
+    provider: gcp
+    account_id: "acme-prod-555555"  # project ID
+
+# -----------------------------------------------------------------------------
+# Authorization scope (ADR-008)
+# -----------------------------------------------------------------------------
+#
+# The scope defines what EXPOSE is authorized to attribute to your tenant.
+# Out-of-scope attributions appear in `outside_authorized_scope_summary` in
+# the artifact and on per-target `review_reasons` for analyst follow-up.
+authorization_scope:
+
+  # enforcement_mode: how strictly the engine enforces scope at runtime.
+  #   soft   - log scope mismatches in audit log only (operator-honor system).
+  #   medium - flag scope mismatches in artifact (v1 default; recommended
+  #            for most defensive CTEM deployments).
+  #   hard   - active probing refuses to execute against any asset not
+  #            confirmed/high tier or explicitly in scope. Passive collection
+  #            stays broad. Recommended for regulated industries and
+  #            scope-contracted engagements.
+  # See `examples/scope/` for example scope shapes per mode.
+  enforcement_mode: medium
+
+  # apex_domains: domains you authorize EXPOSE to attribute to your tenant.
+  # Subdomains beneath these are inherited automatically.
+  apex_domains:
+    - acme.example
+    - acme-internal.example
+
+  # cloud_accounts: provider + account/subscription/project IDs you own.
+  # Cloud-account-authoritative observations (per the rule pack) are the
+  # strongest attribution signal in the engine.
+  cloud_accounts:
+    - provider: aws
+      account_id: "123456789012"
+    - provider: azure
+      account_id: "11111111-2222-3333-4444-555555555555"
+    - provider: gcp
+      account_id: "acme-prod-555555"
+
+  # registrant_patterns: free-text patterns matched against WHOIS / RDAP
+  # registrant fields. Useful when domains are registered under brand variants
+  # the seed list doesn't cover (e.g., "ACME Corp", "Acme, Inc.").
+  registrant_patterns:
+    - "Acme Corporation"
+    - "Acme Corp"
+
+  # asn_ranges: ASNs you own or operate. Useful for organizations with
+  # significant on-prem network presence in addition to cloud.
+  # Format: integer ASN numbers, no AS prefix.
+  asn_ranges: []
+  # Example:
+  # asn_ranges:
+  #   - 64512   # ACME Corp internal AS (private-use range example)
+
+  # exclusions: explicit exclusions that override broader scope inclusion.
+  # Use this for assets that look like they should be in scope but are not
+  # yours (acquired-and-divested entities, partner subdomains under your
+  # apex, etc.).
+  exclusions:
+    - type: domain
+      value: not-ours.acme.example
+    - type: subdomain
+      value: vendor-tools.acme.example
+
+# -----------------------------------------------------------------------------
+# Collectors (SPEC §6)
+# -----------------------------------------------------------------------------
+#
+# Enable only the collectors you want to run. Tier 1 (free, broad) is
+# recommended baseline; Tier 2 (paid, targeted) fills passive-DNS and
+# scan-data gaps; Tier 3 (active probing) is gated by attribution tier
+# regardless of what you enable here.
+#
+# Credentials are NEVER inlined here. Reference your secrets-backend secret
+# by name in `credentials_secret_ref`; the secret content is a JSON map of
+# `<collector_id>_api_key` -> credential.
+collectors:
+
+  enabled:
+    # Tier 1: free, broad query
+    - ct-crtsh                # Certificate Transparency: crt.sh
+    - ct-certstream           # Certificate Transparency: certstream WebSocket
+    - cloud-aws-ranges        # AWS public IP-range manifest
+    - cloud-azure-ranges      # Azure service tags
+    - cloud-gcp-ranges        # GCP _cloud-netblocks
+    - bgp-he-toolkit          # Hurricane Electric BGP toolkit (free, scrape)
+    - whois-rdap              # RDAP queries (free)
+
+    # Tier 2: paid, targeted (commented; uncomment after populating credentials)
+    # - pdns-securitytrails   # SecurityTrails passive DNS
+    # - iwide-shodan          # Shodan internet-wide scan API
+    # - iwide-censys          # Censys Search API
+
+    # Tier 3: active probing (attribution-tier-gated per SPEC §6.3)
+    - active-dns-resolve      # DNS resolution against discovered names
+    - active-tls-handshake    # TLS handshake to discovered IP+port
+    - active-http-fingerprint # HTTP request/response analysis
+
+  # Reference to a secret in your configured secrets backend. The secret's
+  # JSON payload is a map of credential keys, e.g.:
+  #   {
+  #     "securitytrails_api_key": "<<your-securitytrails-api-key>>",
+  #     "shodan_api_key":         "<<your-shodan-api-key>>",
+  #     "censys_api_id":          "<<your-censys-api-id>>",
+  #     "censys_api_secret":      "<<your-censys-api-secret>>"
+  #   }
+  # See SPEC §6.4 for credential-fetching semantics.
+  credentials_secret_ref: tenant-default-collectors
+
+# -----------------------------------------------------------------------------
+# Rule pack (SPEC §8.2)
+# -----------------------------------------------------------------------------
+#
+# Rule packs are data, not code. The engine consumes them and never executes
+# arbitrary code from them. Reference an existing pack by ID + version.
+# Custom packs live in your own repo (or the private rule-pack repository
+# per ADR-006); see `examples/rulepacks/example-baseline.json` for the
+# starting point.
+rule_pack:
+  pack_id: example-baseline
+  pack_version: "0.1.0"
+
+# -----------------------------------------------------------------------------
+# LLM enrichment (SPEC §8.4)
+# -----------------------------------------------------------------------------
+#
+# Phase 1 v1 default: LLM enrichment OFF (llmWorker disabled in chart).
+# Phase 2 introduces bounded structured-output enrichment.
+llm:
+
+  # provider: ollama | anthropic | openai | gemini
+  # ollama is the v1-lab default — local, free, sufficient for most
+  # enrichment tasks. Frontier providers via configuration only.
+  provider: ollama
+
+  # Provider-specific model identifier.
+  # Ollama:  "qwen2.5:7b-instruct-q4_K_M" (recommended), "llama3.1:8b-instruct-q4_K_M"
+  # Anthropic: "claude-opus-4-7" (primary), "claude-sonnet-4-6" (bulk)
+  # OpenAI:    "gpt-5.5" (primary), "gpt-5.4-mini" (bulk)
+  # Gemini:    "gemini-2.5-pro" (primary), "gemini-2.5-flash" (bulk)
+  model: "qwen2.5:7b-instruct-q4_K_M"
+
+  # endpoint: provider URL. For ollama-in-cluster, use the in-cluster service
+  # name. For frontier providers, leave default; SDK uses provider URL.
+  endpoint: "http://ollama:11434"
+
+  # cost_ceiling_usd: hard per-run dollar ceiling. Breach halts further LLM
+  # enrichment for the run with a warning in the artifact (SPEC §8.5).
+  # Default $5/run is comfortable for daily defensive ops; tighten or widen
+  # per workload. For ollama (free), this is informational.
+  cost_ceiling_usd: 5.00
+
+  # enrichment_policy: which candidates go through LLM enrichment.
+  #   medium_and_review_only - only `medium` and `requires_review` tier
+  #                            (recommended; cost-disciplined)
+  #   all_tiers              - every target (expensive; only for evaluation)
+  #   none                   - skip LLM entirely
+  enrichment_policy: medium_and_review_only
+
+  # tie_breaker: optional escalation to a second provider for ambiguous
+  # cases (schema-validation failure, low self-confidence, rule disagreement).
+  tie_breaker:
+    enabled: false
+    provider: null   # if enabled, set to one of the provider strings above
+
+# -----------------------------------------------------------------------------
+# Retention (SPEC §5.5)
+# -----------------------------------------------------------------------------
+#
+# incidental_days: how long non-yours observations are kept in the graph
+# before pruning. 30 is the default and is sensible for most deployments.
+# Tighten for compliance-bound deployments; widen if you have analysts who
+# rely on long-term cohort context.
+retention:
+  incidental_days: 30
+
+# -----------------------------------------------------------------------------
+# Run schedule (SPEC §10.3)
+# -----------------------------------------------------------------------------
+#
+# cron: when scheduled runs fire. Default 02:00 UTC daily — picked for low
+# external-API contention and to land in your morning analyst review window
+# regardless of timezone. Manual runs via `expose run trigger` are always
+# available regardless of schedule.
+#
+# Failed runs do not auto-retry (SPEC §10.3) — operators trigger reruns
+# manually after diagnosing.
+run_schedule:
+  cron: "0 2 * * *"

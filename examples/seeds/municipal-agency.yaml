@@ -1,0 +1,49 @@
+# =============================================================================
+# Example seeds — small municipal IT shop
+# =============================================================================
+#
+# Use case: A municipal or county IT shop with one primary domain, mostly
+# hosted services (Google Workspace, Microsoft 365, vendor-hosted apps), and
+# a small footprint of cloud assets they directly control. The bulk of their
+# external surface is vendor-managed, so seeds are tight and the engagement
+# model is "what is OURS that we should know about" rather than "map every
+# subdomain we can reach."
+#
+# Drop into the `seeds:` block of your tenant config (see
+# `examples/tenant-config.yaml.template`). Pair with
+# `examples/scope/medium-default.yaml` or `hard-mode-regulated.yaml`.
+#
+# All values are FAKE. Replace with your own when adapting.
+
+seeds:
+
+  # Primary apex — typically a .gov, .us, or municipal-tld domain.
+  - type: domain
+    value: city-of-acmeville.example
+
+  # Optional service-specific subdomains some agencies treat as separate
+  # apex equivalents for tracking purposes (utilities, transit, parks).
+  - type: domain
+    value: acmeville-utilities.example
+  - type: domain
+    value: acmeville-transit.example
+
+  # Organization name — the legal-entity name as it appears in WHOIS.
+  # Municipal agencies often have boilerplate registrant strings.
+  - type: organization
+    value: "City of Acmeville"
+  - type: organization
+    value: "Acmeville Municipal Government"
+
+  # Cloud accounts — usually one or two AWS accounts (or Azure subscription
+  # via state-government framework agreement). Keep this list complete; for
+  # small shops the cloud-account-authoritative attribution is the strongest
+  # signal you have.
+  - type: cloud_account
+    provider: aws
+    account_id: "123456789012"
+
+  # NOTE: vendor-hosted services (Google Workspace, Microsoft 365, hosted
+  # CMS, vendor SIEM) are NOT seeds. Those are vendor surface, not yours.
+  # The pipeline will surface them as `not_yours` with structured reasoning,
+  # which is the correct outcome.

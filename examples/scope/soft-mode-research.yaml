@@ -1,0 +1,59 @@
+# =============================================================================
+# Example authorization scope — soft enforcement (research / methodology)
+# =============================================================================
+#
+# Use case: Research and methodology-development scenarios where the operator
+# wants the audit log of scope events but does NOT want artifact-level
+# annotations adding noise to the dataset under study. Examples include:
+#   - Attribution-accuracy methodology papers
+#   - Eval-dataset construction where the artifact is the dataset
+#   - Tool benchmarking where scope-warning behavior is the variable
+#
+# In soft mode:
+#   - Scope mismatches are logged to the audit log only.
+#   - The artifact's `outside_authorized_scope_summary` is emitted, but
+#     per-target `outside_authorized_scope` review reasons are NOT added.
+#   - Active probing is NOT scope-gated (still gated by attribution tier per
+#     SPEC §6.3, however).
+#
+# Soft mode is appropriate ONLY when you have an alternative authorization
+# story — research scenarios with operator-owned synthetic targets, internal
+# evaluation runs against your own infrastructure, etc. **Do not use soft
+# mode for production CTEM, regulated-industry, or scope-contracted
+# engagements** — medium or hard is correct there.
+#
+# Drop into the `authorization_scope:` block of your tenant config.
+#
+# Reference: docs/adr/ADR-008-authorized-use-and-ethics.md §"Layer 2"
+# All values are FAKE. Replace with your own when adapting.
+
+authorization_scope:
+
+  # soft: scope mismatches logged in audit log only, no artifact annotations.
+  # Honor-system mode — appropriate for research only.
+  enforcement_mode: soft
+
+  # Researcher-owned apex domains — the test bed.
+  apex_domains:
+    - research-test-bed.example
+    - easm-eval.example
+    - attribution-methodology.example
+
+  # Researcher-controlled cloud account dedicated to the test bed.
+  cloud_accounts:
+    - provider: aws
+      account_id: "123456789012"
+
+  # Researcher institutional registrant pattern.
+  registrant_patterns:
+    - "Acme University Security Research Lab"
+
+  # ASN ranges the test bed uses — typically empty.
+  asn_ranges: []
+
+  # Exclusions for any test-bed subdomains explicitly outside the scope of
+  # the current methodology study (e.g., reserved for next paper, used for
+  # control-condition data).
+  exclusions:
+    - type: subdomain
+      value: control-condition.research-test-bed.example

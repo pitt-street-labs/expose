@@ -1,0 +1,62 @@
+# =============================================================================
+# Example authorization scope — medium enforcement (v1 default)
+# =============================================================================
+#
+# Use case: A typical defensive CTEM tenant — a security team mapping its own
+# organization's external surface for prioritization and response. Scope
+# mismatches are flagged in the artifact (`outside_authorized_scope_summary`
+# at top level, `outside_authorized_scope` on per-target review reasons), but
+# the engine does not block. Operators with external authorization can
+# extend scope deliberately as needed.
+#
+# This is the recommended starting posture for most deployments.
+#
+# Drop into the `authorization_scope:` block of your tenant config (see
+# `examples/tenant-config.yaml.template`).
+#
+# Reference: docs/adr/ADR-008-authorized-use-and-ethics.md §"Layer 2"
+# All values are FAKE. Replace with your own when adapting.
+
+authorization_scope:
+
+  # medium: scope mismatches flagged in artifact, no blocking. v1 default.
+  enforcement_mode: medium
+
+  # The apex domains you authorize EXPOSE to attribute to this tenant.
+  # Subdomains beneath these are inherited automatically.
+  apex_domains:
+    - acme.example
+    - acme-internal.example
+    - acmecorp.example
+
+  # Cloud accounts you operate. Cloud-account-authoritative observations are
+  # the strongest attribution signal the engine has.
+  cloud_accounts:
+    - provider: aws
+      account_id: "123456789012"
+    - provider: aws
+      account_id: "234567890123"
+    - provider: azure
+      account_id: "11111111-2222-3333-4444-555555555555"
+    - provider: gcp
+      account_id: "acme-prod-555555"
+
+  # Free-text patterns matched against WHOIS / RDAP registrant fields.
+  # Use legal-entity-name variants to catch domains registered under brand
+  # alternatives.
+  registrant_patterns:
+    - "Acme Corporation"
+    - "Acme Corp"
+    - "Acme Corporation, Inc."
+
+  # ASN ranges you own/operate. Empty for cloud-only orgs.
+  asn_ranges: []
+
+  # Explicit exclusions override broader scope inclusion. Use for assets
+  # that look like they should be in scope but are not yours (vendor-managed
+  # subdomains under your apex, divested entities still in WHOIS records).
+  exclusions:
+    - type: domain
+      value: vendor-tools.acme.example
+    - type: subdomain
+      value: hosted-by-vendor.acme.example

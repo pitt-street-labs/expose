@@ -1,0 +1,57 @@
+# =============================================================================
+# Example seeds — research test bed (operator-owned synthetic targets)
+# =============================================================================
+#
+# Use case: A security researcher evaluating attribution methodology, building
+# eval datasets, or benchmarking EXPOSE against alternative tools. All seeds
+# are operator-owned domains and cloud accounts; no third-party assets appear
+# in the seed list.
+#
+# This pattern pairs with `examples/scope/soft-mode-research.yaml` — research
+# work often wants the scope-warning information for methodology study,
+# logged in the audit log only, without artifact-level annotations cluttering
+# the dataset.
+#
+# RESEARCHER DISCIPLINE:
+#   - Seeds are YOUR domains and YOUR cloud accounts. Never seed a third-
+#     party org for "what would EXPOSE do?" experiments — that is
+#     unauthorized reconnaissance regardless of intent (per ETHICS.md).
+#   - Synthetic-target test domains should be visibly research-related
+#     (e.g., subdomains under your university lab's apex) so observers can
+#     trust the methodology.
+#   - Eval datasets you publish derived from EXPOSE output should be
+#     CC-BY-4.0 or compatible (per ADR-006), and should include the
+#     `pipeline_version` and `rule_pack_version` for reproducibility.
+#
+# Drop into the `seeds:` block of your tenant config. All values are FAKE.
+
+seeds:
+
+  # Researcher-owned apex domains used as test surface.
+  - type: domain
+    value: research-test-bed.example
+  - type: domain
+    value: easm-eval.example
+  - type: domain
+    value: attribution-methodology.example
+
+  # Optional: registered for synthetic-cohort experiments (e.g., domains
+  # registered under a deliberately-distinct registrant pattern to test
+  # registrant-pivot rule behavior).
+  - type: domain
+    value: synthetic-cohort-a.example
+  - type: domain
+    value: synthetic-cohort-b.example
+
+  # Researcher institutional affiliation (university lab, vendor research
+  # arm, FFRDC). Use ONLY the legal-entity name your test-bed domains are
+  # actually registered under.
+  - type: organization
+    value: "Acme University Security Research Lab"
+
+  # Researcher-controlled cloud account dedicated to the test bed. Do not
+  # mix this with production lab infrastructure that is in scope of other
+  # protections; keep the test-bed account separate.
+  - type: cloud_account
+    provider: aws
+    account_id: "123456789012"   # acme-univ-easm-research
