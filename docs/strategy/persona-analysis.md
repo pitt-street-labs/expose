@@ -130,10 +130,73 @@ The three personas are mostly right. The strongest fit is **Security Director at
 
 ---
 
+## Voice samples — buyer testimonials (draft)
+
+Polished testimonial-style voice samples per persona, for future reuse in README, federal-customer pitch decks, marketing materials. Each variant is technically accurate against the locked spec — vetted not to claim real-time / dynamic / streaming behavior (EXPOSE is daily batch per ADR-004), and uses term-of-art language ("external attack surface" rather than "endpoints" which is overloaded with EDR meaning).
+
+### Source material caveat
+
+The original raw testimonial draft (project lead, 2026-05-10) read:
+
+> "Before EXPOSE, I had little idea as to the edges and corners of my digital landscape exposure. Now, with EXPOSE, I can determine dynamically and in real time which endpoints are concerning and warrant further analysis."
+
+The "edges and corners" framing is excellent — preserved across the variants below. Three accuracy fixes were applied: (1) "in real time" replaced with cadence-accurate language (EXPOSE is daily batch per SPEC.md §1.2 explicit non-goals and ADR-004); (2) "dynamically" softened to continuous / nightly / scheduled framing; (3) "endpoints" replaced with "external attack surface" / "exposed assets" / "internet-facing surface" — "endpoints" is overloaded with EDR meaning in security usage and confuses technical readers.
+
+### Variant A — Light edit (preserves original voice and metaphor)
+
+> "Before EXPOSE, I had little visibility into the edges and corners of my organization's external attack surface. Now, with EXPOSE, I get a fresh signed artifact every day showing exactly which exposed assets warrant further analysis — with the evidence trail to back every claim."
+
+Best for: README hero section, casual-conversation pitch (positioning.md §5.1 register).
+
+### Variant B — Corporate Security Director / CISO board-report register
+
+> "Before EXPOSE, my external attack surface inventory was a slide deck someone updated quarterly. Now it's a signed JSON artifact every morning, with attribution confidence on every asset and a delta from yesterday — defensible enough for a board report, structured enough for our SIEM."
+
+Best for: federal-buyer pitch decks, Federal Customer Deployment Guide (Session G) opening narrative, the strongest buyer persona per §3 verdict.
+
+### Variant C — Analyst / Security Engineer voice (lands the speed-with-rigor pitch)
+
+> "Before EXPOSE, I was correlating Censys, passive DNS, and WHOIS by hand to attribute one cloud asset. Now the pipeline runs nightly, hands me a signed artifact with confidence tiers, and tells me what changed since yesterday — and *why* every claim is justified."
+
+Best for: technical evaluation conversations, analyst-targeted marketing, conference talks aimed at security engineers (RSA technical track, Black Hat).
+
+### Variant D — Threat Researcher voice (for academic / federal-research credibility)
+
+> "Before EXPOSE, building a reproducible attack-surface attribution dataset for our research meant ad-hoc Jupyter notebooks against rate-limited APIs. Now there's a signed reference artifact, an Apache 2.0 engine I can fork, and CC BY 4.0 datasets I can cite. The provenance chain on every claim makes this the first EASM tool I'd actually publish a methodology paper on."
+
+Best for: academic conference submissions, FF6K Research dataset launch material, vendor-research outreach.
+
+### Variant E — Authorized Red Team voice (dual-audience differentiator)
+
+> "I've been on engagements where the recon phase consumed three days of manual Censys / passive DNS / WHOIS correlation before I could defend my scope decisions. EXPOSE produces a signed scope-confirmation artifact in hours that I can hand the client — same engine my customer's defensive team uses, so we're talking about the same attack surface in the same language."
+
+Best for: red-team-consultancy outreach, Bishop Fox / IOActive / SpecterOps / TrustedSec-style boutique pitches, the dual-audience differentiator that no incumbent commercial EASM offers.
+
+### Phrases to avoid in any future testimonial / marketing material
+
+| Avoid | Why | Use instead |
+|---|---|---|
+| "real time" / "real-time" | EXPOSE is daily batch (SPEC.md §1.2; ADR-004). Hard claim, fact-checkable. | "every day" / "nightly" / "on a daily cadence" / "continuous (daily run)" |
+| "dynamically" / "dynamic" | Implies event-driven; EXPOSE is scheduled batch. | "continuously" / "on a scheduled cadence" |
+| "endpoints" (when meaning external-facing assets) | In security, "endpoint" means user device (EDR). EXPOSE is EASM, not EDR. | "external assets" / "exposed assets" / "external attack surface" / "internet-facing surfaces" |
+| "automated everything" / "no human in loop" | Overstates; rules + LLM enrichment + analyst review per SPEC.md §8 | "structured leads for analyst review" / "evidence-backed decisions" |
+| "AI-powered" (as primary framing) | Buyer fatigue; EXPOSE's AI is bounded enrichment per SPEC.md §8.4 / ADR-005, not the headline | Lead with attribution rigor / signed artifacts; mention LLM enrichment as a feature, not a banner |
+| "complete coverage" / "everything" | No EASM tool delivers complete coverage; over-claiming destroys credibility | "comprehensive view" / "the surface you can defensibly enumerate" |
+| "next-generation" / "revolutionary" | Marketing register; conflicts with positioning's plain-language register | Concrete capability claims with evidence |
+
+### How to use these variants
+
+- **Don't** drop these into customer-facing materials verbatim until they're attributable to a real customer (testimonials require real attribution).
+- **Do** use them as the registered voice for first-person pitch sections — speak in this register about the product without putting it in someone else's mouth.
+- **Do** reuse the structural patterns (before/after, specific competitor task replaced, signed-artifact framing) when Korlogos's own marketing voice is needed.
+- **Do** revise as the product evolves — Phase 2 LLM enrichment, Phase 3 production hardening, the commercial modules will all give rise to new voice samples.
+
+---
+
 ## Recommended follow-on work
 
 - Session B (competitive analysis): use this document as input. The competitor matrix in `positioning.md` §3 is a starting point; persona-by-persona competitor positioning is the next layer.
 - Session C (module specifications): use the Identity Surface persona-fit notes (§3 verdict + recommendation 3) as scope-shaping input.
 - Session F (SDLP): the Federal CDM Engineer persona affects audit-log requirements; surface that in SDLP scope.
-- Session G (Federal Customer Deployment Guide): incorporate the buyer/user persona distinction (Security Director / CDM Engineer) as a documented section.
-- A discrete "go-to-market session" not currently in the queue: address packaging, pricing decision tree, and dual-audience sales separation. May warrant its own session timeslot post-Session-G.
+- Session G (Federal Customer Deployment Guide): incorporate the buyer/user persona distinction (Security Director / CDM Engineer) as a documented section. Variant B testimonial framing fits the opening narrative.
+- A discrete "go-to-market session" not currently in the queue: address packaging, pricing decision tree, and dual-audience sales separation. May warrant its own session timeslot post-Session-G. The voice samples above are raw GTM input.

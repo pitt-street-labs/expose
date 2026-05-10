@@ -1,0 +1,214 @@
+[project]
+name = "expose"
+version = "0.1.0.dev0"
+description = "EXPOSE — continuous, attributed, cryptographically signed external attack surface intelligence"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.12"
+authors = [
+    { name = "Korlogos / Pitt Street Labs" },
+]
+keywords = ["easm", "security", "attack-surface", "ctem", "fedramp"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+]
+
+dependencies = [
+    # Data modeling — central per ADR-001
+    "pydantic>=2.9,<3",
+    "pydantic-settings>=2.6,<3",
+    # HTTP service surface
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.32,<1",
+    # HTTP client for collectors (asyncio + httpx per ADR-001)
+    "httpx>=0.27,<1",
+    # Postgres data layer (ADR-002)
+    "asyncpg>=0.30,<1",
+    "psycopg[binary]>=3.2,<4",
+    "sqlalchemy>=2.0,<3",
+    "alembic>=1.14,<2",
+    # FIPS-validated crypto everywhere (ADR-010)
+    "cryptography>=43,<44",
+    # Observability — OpenTelemetry per ADR-003
+    "opentelemetry-api>=1.28,<2",
+    "opentelemetry-sdk>=1.28,<2",
+    "opentelemetry-instrumentation-fastapi>=0.49b,<1",
+    "opentelemetry-instrumentation-httpx>=0.49b,<1",
+    "opentelemetry-instrumentation-sqlalchemy>=0.49b,<1",
+    "opentelemetry-exporter-otlp>=1.28,<2",
+    "structlog>=24.4,<25",
+    # JSON Schema validation (verify Pydantic stays in sync with schemas/)
+    "jsonschema>=4.23,<5",
+    # UUIDv7 for run_id and entity ids (per canonical-artifact-v1 spec)
+    "uuid-utils>=0.10,<1",
+    # YAML for tenant configuration
+    "pyyaml>=6.0,<7",
+    # CLI surface (placeholder; will land in Sprint 3+)
+    "click>=8.1,<9",
+]
+
+[project.optional-dependencies]
+# LLM provider SDKs — multi-provider abstraction per ADR-005
+llm-anthropic = ["anthropic>=0.40,<1"]
+llm-openai    = ["openai>=1.55,<2"]
+llm-gemini    = ["google-genai>=0.3,<1"]
+llm-ollama    = []  # uses httpx directly to local Ollama endpoint
+llm-all       = ["expose[llm-anthropic,llm-openai,llm-gemini,llm-ollama]"]
+
+# DNS-specific collectors
+collectors-dns = ["dnspython>=2.7,<3"]
+
+# All optional collectors + LLM providers in one install
+all = ["expose[llm-all,collectors-dns]"]
+
+[project.scripts]
+expose = "expose.cli:main"
+
+[project.urls]
+Homepage    = "https://github.com/korlogos/expose"
+Repository  = "https://github.com/korlogos/expose"
+Issues      = "https://github.com/korlogos/expose/issues"
+Security    = "https://github.com/korlogos/expose/security/advisories/new"
+
+[dependency-groups]
+dev = [
+    # Test runner
+    "pytest>=8.3,<9",
+    "pytest-asyncio>=0.24,<1",
+    "pytest-cov>=6.0,<7",
+    # HTTP mocking
+    "respx>=0.21,<1",
+    # Real Postgres for integration tests (testcontainers per CONTRIBUTING.md)
+    "testcontainers[postgres]>=4.8,<5",
+    # Type checking — mypy in strict mode per ADR-001
+    "mypy>=1.13,<2",
+    "types-pyyaml>=6.0,<7",
+    # Linting and formatting — ruff per CONTRIBUTING.md
+    "ruff>=0.8,<1",
+    # Schema validation tooling
+    "check-jsonschema>=0.30,<1",
+    # Pre-commit
+    "pre-commit>=4.0,<5",
+]
+
+[build-system]
+requires = ["hatchling>=1.25,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/expose"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/schemas",
+    "/examples",
+    "/docs",
+    "/README.md",
+    "/LICENSE",
+    "/SECURITY.md",
+    "/ETHICS.md",
+    "/CONTRIBUTING.md",
+    "/CODE_OF_CONDUCT.md",
+]
+
+# === Mypy — strict mode per ADR-001 negative-consequence mitigation ==========
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+warn_unused_ignores = true
+disallow_untyped_decorators = true
+disallow_any_unimported = true
+no_implicit_reexport = true
+plugins = ["pydantic.mypy"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+# === Pytest =================================================================
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=expose",
+    "--cov-report=term-missing",
+    "--cov-fail-under=0",  # Will tighten as suite grows; Sprint 1-2 has scaffold-only coverage.
+]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "isolation: cross-tenant isolation tests (per ADR-007 v1 deliverable, issue #28)",
+    "schema_sync: tests that verify Pydantic models match the JSON schemas in schemas/",
+    "integration: tests requiring external services (Postgres via testcontainers, etc.)",
+    "slow: tests slower than ~1s",
+]
+filterwarnings = [
+    "error",
+    # Allow deprecation warnings from third-party libs but fail on our own
+    "default::DeprecationWarning:expose.*",
+]
+
+# === Coverage ===============================================================
+[tool.coverage.run]
+branch = true
+source = ["expose"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+
+# === Ruff — lint + format per CONTRIBUTING.md ===============================
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",   # pycodestyle + pyflakes
+    "I",             # isort
+    "N",             # pep8-naming
+    "UP",            # pyupgrade
+    "ASYNC",         # async-specific
+    "S",             # flake8-bandit (security)
+    "B",             # flake8-bugbear
+    "A",             # flake8-builtins
+    "C4",            # comprehensions
+    "RET",           # return statements
+    "SIM",           # simplification
+    "PTH",           # pathlib
+    "PL",            # pylint
+    "RUF",           # ruff-specific
+]
+ignore = [
+    "E501",          # line too long (handled by formatter)
+    "PLR0913",       # too many arguments (we pass tenant context everywhere; necessary)
+    "S101",          # use of assert (fine in tests)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "PLR2004"]  # asserts and magic numbers are fine in tests
+"src/expose/types/*.py" = ["A003"]      # Pydantic field names may shadow builtins
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+# === uv =====================================================================
+[tool.uv]
+package = true
