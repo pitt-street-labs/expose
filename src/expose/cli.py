@@ -3,6 +3,7 @@
 Subcommands:
 
 - ``expose serve`` — start the FastAPI HTTP server
+- ``expose demo`` — run a quick end-to-end demo against a running API
 - ``expose db upgrade`` — run Alembic migrations forward
 - ``expose db downgrade`` — run Alembic migrations backward
 - ``expose db current`` — show current migration revision
@@ -199,8 +200,16 @@ async def _execute_stub_run(
 # === Live pipeline execution (real Postgres + dispatcher) =====================
 
 _LIVE_DB_ERROR = (
-    "ERROR: Cannot connect to Postgres. Set EXPOSE_DB_* environment "
-    "variables or use --live with a running database."
+    "ERROR: Cannot connect to Postgres.\n"
+    "\n"
+    "Set the following environment variables (or rely on defaults):\n"
+    "  EXPOSE_DB_HOST      (default: localhost)\n"
+    "  EXPOSE_DB_PORT      (default: 5432)\n"
+    "  EXPOSE_DB_DATABASE   (default: expose)\n"
+    "  EXPOSE_DB_USER      (default: expose)\n"
+    "  EXPOSE_DB_PASSWORD   (default: empty)\n"
+    "\n"
+    "Then ensure the database is running and accessible."
 )
 
 
@@ -542,6 +551,72 @@ def run_list(tenant: UUID) -> None:
             f"{r.total_dispatches:>10} {r.total_observations:>4} "
             f"{r.duration_ms:>8.1f}ms"
         )
+
+
+# --- ``expose demo`` command --------------------------------------------------
+
+
+@main.command()
+@click.option("--host", default="localhost", help="API host.")
+@click.option("--port", default=8090, type=int, help="API port.")
+def demo(host: str, port: int) -> None:
+    """Run a quick demo: create tenant, scan example.com, show results.
+
+    Requires a running EXPOSE API server (``expose serve``).
+    """
+    import httpx  # noqa: PLC0415
+
+    base = f"http://{host}:{port}"
+
+    # 1. Health check
+    click.echo("Checking API...")
+    try:
+        resp = httpx.get(f"{base}/healthz", timeout=5.0)
+        resp.raise_for_status()
+    except Exception as exc:
+        click.echo(f"API not available at {base}: {exc}", err=True)
+        click.echo("Start the server first: expose serve", err=True)
+        raise SystemExit(1) from exc
+
+    click.echo(f"API ready at {base}")
+
+    # 2. Create tenant
+    click.echo("\nCreating demo tenant...")
+    tenant_name = f"demo-{uuid.uuid4().hex[:8]}"
+    resp = httpx.post(f"{base}/v1/tenants/", json={"name": tenant_name})
+    resp.raise_for_status()
+    tenant_id = resp.json()["id"]
+    click.echo(f"  Tenant: {tenant_id} ({tenant_name})")
+
+    # 3. Trigger scan
+    click.echo("\nScanning example.com...")
+    resp = httpx.post(
+        f"{base}/v1/tenants/{tenant_id}/runs",
+        json={"seeds": ["example.com"]},
+    )
+    resp.raise_for_status()
+    run_id = resp.json()["run_id"]
+    click.echo(f"  Run: {run_id}")
+
+    # 4. Poll until terminal state (max 60 s)
+    state = "pending"
+    for _ in range(30):
+        resp = httpx.get(f"{base}/v1/tenants/{tenant_id}/runs/{run_id}")
+        resp.raise_for_status()
+        state = resp.json()["state"]
+        if state in ("completed", "partial", "failed"):
+            break
+        click.echo(f"  State: {state}...")
+        time.sleep(2)
+
+    # 5. Results
+    click.echo(f"\nFinal state: {state}")
+    resp = httpx.get(f"{base}/v1/tenants/{tenant_id}/entities")
+    resp.raise_for_status()
+    entities = resp.json()
+    count = len(entities.get("entities", entities.get("items", [])))
+    click.echo(f"Discovered entities: {count}")
+    click.echo(f"\nDashboard: http://{host}:{port}/")
 
 
 # --- ``expose serve`` command -------------------------------------------------

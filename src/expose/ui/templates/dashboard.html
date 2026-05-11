@@ -40,6 +40,26 @@
         </div>
     </header>
 
+    <!-- ===== Start Scan form ===== -->
+    <div class="card scan-form-card" x-data="scanForm()" x-show="selectedTenantId" x-cloak>
+        <h2 class="pane-title" style="margin-bottom: var(--space-sm);">Start Scan</h2>
+        <form @submit.prevent="submitScan()">
+            <div style="display: flex; gap: 1rem; align-items: end;">
+                <div style="flex: 1;">
+                    <label for="seed-input" class="sr-only">Seed (domain, IP, or CIDR)</label>
+                    <input type="text" id="seed-input" x-model="seed" placeholder="example.com"
+                           class="filter-input" style="width: 100%;">
+                </div>
+                <button type="submit" class="btn btn-primary" :disabled="scanning">
+                    <span x-show="!scanning">Scan</span>
+                    <span x-show="scanning">Scanning...</span>
+                </button>
+            </div>
+            <div x-show="statusMessage" x-text="statusMessage"
+                 style="margin-top: var(--space-sm); font-size: 0.8rem; color: var(--text-muted);"></div>
+        </form>
+    </div>
+
     <!-- ===== Split pane ===== -->
     <main class="split-pane">
 

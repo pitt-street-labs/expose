@@ -2,7 +2,7 @@
  * EXPOSE Dashboard — client-side initialization.
  *
  * Alpine.js data store for UI state, HTMX SSE configuration,
- * and D3.js observation graph placeholder.
+ * D3.js observation graph wiring, and scan trigger form.
  *
  * Progressive enhancement: the page renders meaningful content
  * without JavaScript; this script adds interactivity on top.
@@ -15,7 +15,7 @@
 /**
  * Root Alpine component for the EXPOSE dashboard.
  * Manages tenant selection, active run tracking, entity filtering,
- * and graph layout state.
+ * graph layout state, and graph data polling.
  */
 function exposeApp() {
     return {
@@ -32,14 +32,32 @@ function exposeApp() {
         // Graph layout mode
         graphLayout: "force",
 
+        // Graph polling interval handle
+        _graphPollHandle: null,
+
+        // Graph initialization flag
+        _graphInitialized: false,
+
         /**
          * Handle tenant selection change.
-         * Updates HTMX polling targets and resets graph state.
+         * Updates HTMX polling targets, resets graph state, and starts
+         * graph data polling for the selected tenant.
          */
         onTenantChange() {
+            // Stop any existing graph poll
+            if (this._graphPollHandle) {
+                clearInterval(this._graphPollHandle);
+                this._graphPollHandle = null;
+            }
+
             if (!this.selectedTenantId) {
                 this.entityCount = 0;
                 this.activeRunId = null;
+                // Destroy graph when no tenant is selected
+                if (typeof ExposeGraph !== "undefined" && this._graphInitialized) {
+                    ExposeGraph.destroy();
+                    this._graphInitialized = false;
+                }
                 return;
             }
 
@@ -51,12 +69,51 @@ function exposeApp() {
                     swap: "innerHTML",
                 });
             }
+
+            // Initialize graph and start polling
+            this._initGraphAndPoll();
+        },
+
+        /**
+         * Initialize the D3 graph renderer and start polling the graph
+         * API endpoint every 5 seconds.
+         */
+        _initGraphAndPoll() {
+            var self = this;
+            var containerId = "observation-graph";
+            var container = document.getElementById(containerId);
+
+            if (!container || typeof ExposeGraph === "undefined" || typeof d3 === "undefined") {
+                return;
+            }
+
+            // Initialize graph if not yet done (or re-init on tenant switch)
+            if (this._graphInitialized) {
+                ExposeGraph.destroy();
+            }
+
+            var rect = container.getBoundingClientRect();
+            ExposeGraph.init("#" + containerId, {
+                width: Math.max(rect.width, 400),
+                height: Math.max(rect.height, 300),
+            });
+            this._graphInitialized = true;
+
+            // Fetch immediately, then poll every 5 seconds
+            fetchGraphData(self.selectedTenantId);
+            this._graphPollHandle = setInterval(function () {
+                if (self.selectedTenantId) {
+                    fetchGraphData(self.selectedTenantId);
+                }
+            }, 5000);
         },
 
         /**
          * Initialize on mount — read any pre-set values from the DOM.
          */
         init() {
+            var self = this;
+
             // Listen for HTMX events to update entity count
             document.addEventListener("htmx:afterSwap", function (event) {
                 if (event.detail.target && event.detail.target.id === "entity-list") {
@@ -68,9 +125,179 @@ function exposeApp() {
                     }
                 }
             });
+
+            // If a tenant is already selected (e.g. page reload), kick off graph
+            if (this.selectedTenantId) {
+                // Defer to allow DOM to settle
+                setTimeout(function () {
+                    self._initGraphAndPoll();
+                }, 100);
+            }
         },
     };
 }
+
+
+/* =========================================================================
+   Scan Form — Alpine.js component
+   ========================================================================= */
+
+/**
+ * Alpine component for the scan trigger form.
+ * Posts to the runs API to start a new pipeline run.
+ */
+function scanForm() {
+    return {
+        seed: "",
+        scanning: false,
+        statusMessage: "",
+
+        /**
+         * Submit the scan request to the runs API.
+         * Reads the selected tenant ID from the parent exposeApp component.
+         */
+        async submitScan() {
+            if (!this.seed.trim()) {
+                this.statusMessage = "Enter a seed value (domain, IP, or CIDR).";
+                return;
+            }
+
+            // Read tenant ID from the tenant selector
+            var tenantSelect = document.getElementById("tenant-select");
+            var tenantId = tenantSelect ? tenantSelect.value : "";
+            if (!tenantId) {
+                this.statusMessage = "Select a tenant first.";
+                return;
+            }
+
+            this.scanning = true;
+            this.statusMessage = "Starting scan...";
+
+            try {
+                var resp = await fetch("/v1/tenants/" + tenantId + "/runs", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        seeds: [this.seed.trim()],
+                        collector_ids: null,
+                    }),
+                });
+
+                if (!resp.ok) {
+                    var errBody = await resp.text();
+                    this.statusMessage = "Error " + resp.status + ": " + errBody;
+                    this.scanning = false;
+                    return;
+                }
+
+                var data = await resp.json();
+                this.statusMessage = "Run " + data.run_id + " started (" + data.state + ")";
+
+                // Set activeRunId on the parent app component
+                var appEl = document.querySelector("[x-data]");
+                if (appEl && appEl.__x) {
+                    appEl.__x.$data.activeRunId = data.run_id;
+                }
+            } catch (e) {
+                this.statusMessage = "Error: " + e.message;
+            }
+
+            this.scanning = false;
+        },
+    };
+}
+
+
+/* =========================================================================
+   Graph Data Fetching
+   ========================================================================= */
+
+/**
+ * Fetch observation graph data from the API and feed it to the D3 renderer.
+ * Marks the node with the highest lead_score with a data attribute for
+ * downstream risk highlighting (Wave 3 Agent F1 hook).
+ *
+ * @param {string} tenantId - UUID of the tenant
+ */
+function fetchGraphData(tenantId) {
+    if (!tenantId || typeof ExposeGraph === "undefined") {
+        return;
+    }
+
+    fetch("/v1/tenants/" + tenantId + "/graph")
+        .then(function (r) {
+            if (!r.ok) {
+                console.warn("[EXPOSE] Graph fetch failed:", r.status);
+                return null;
+            }
+            return r.json();
+        })
+        .then(function (data) {
+            if (!data) {
+                return;
+            }
+
+            var nodes = data.nodes || [];
+            var edges = data.edges || [];
+
+            // --- Highest-risk node marking ---
+            // Find the node with the highest lead_score (or attribution_confidence
+            // as fallback). Mark it with a data attribute so Wave 3 Agent F1 can
+            // apply red highlighting via CSS [data-highest-risk="true"].
+            var highestIdx = -1;
+            var highestScore = -1;
+
+            for (var i = 0; i < nodes.length; i++) {
+                var score = nodes[i].lead_score != null
+                    ? nodes[i].lead_score
+                    : (nodes[i].attribution_confidence || 0);
+                if (score > highestScore) {
+                    highestScore = score;
+                    highestIdx = i;
+                }
+            }
+
+            // Reset all, then mark the winner
+            for (var j = 0; j < nodes.length; j++) {
+                nodes[j].highest_risk = false;
+            }
+            if (highestIdx >= 0 && nodes.length > 0) {
+                nodes[highestIdx].highest_risk = true;
+            }
+
+            // Feed data to D3 renderer
+            try {
+                ExposeGraph.updateData({ nodes: nodes, edges: edges });
+            } catch (e) {
+                console.error("[EXPOSE] Graph update error:", e.message);
+            }
+
+            // Apply data-highest-risk attribute to the corresponding SVG circle
+            // after a short delay to let D3 render the enter selection.
+            setTimeout(function () {
+                var graphContainer = document.getElementById("observation-graph");
+                if (!graphContainer) return;
+                var circles = graphContainer.querySelectorAll("circle");
+                circles.forEach(function (circle) {
+                    circle.removeAttribute("data-highest-risk");
+                });
+                if (highestIdx >= 0 && nodes[highestIdx]) {
+                    // D3 keyed by id — find the circle whose __data__.id matches
+                    circles.forEach(function (circle) {
+                        if (circle.__data__ && circle.__data__.id === nodes[highestIdx].id) {
+                            circle.setAttribute("data-highest-risk", "true");
+                        }
+                    });
+                }
+            }, 100);
+        })
+        .catch(function (err) {
+            console.error("[EXPOSE] Graph fetch error:", err.message);
+        });
+}
+
+// Store reference globally so graph.js and other scripts can call it
+window.fetchGraphData = fetchGraphData;
 
 
 /* =========================================================================
@@ -97,84 +324,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
 
 /* =========================================================================
-   D3.js Observation Graph — placeholder
-   ========================================================================= */
-
-/**
- * Initialize the observation graph within the given container element.
- * This is a placeholder that draws the empty SVG canvas with grid lines;
- * the full force-directed graph renderer is handled by a separate agent.
- *
- * @param {string} containerId - DOM id of the graph container
- */
-function initObservationGraph(containerId) {
-    var container = document.getElementById(containerId);
-    if (!container || typeof d3 === "undefined") {
-        return;
-    }
-
-    var rect = container.getBoundingClientRect();
-    var width = rect.width;
-    var height = rect.height;
-
-    // Clear any existing SVG
-    d3.select("#" + containerId).select("svg").remove();
-
-    var svg = d3
-        .select("#" + containerId)
-        .append("svg")
-        .attr("width", width)
-        .attr("height", height)
-        .attr("viewBox", [0, 0, width, height])
-        .style("background", "transparent");
-
-    // Subtle grid pattern
-    var defs = svg.append("defs");
-
-    var gridPattern = defs
-        .append("pattern")
-        .attr("id", "grid")
-        .attr("width", 40)
-        .attr("height", 40)
-        .attr("patternUnits", "userSpaceOnUse");
-
-    gridPattern
-        .append("path")
-        .attr("d", "M 40 0 L 0 0 0 40")
-        .attr("fill", "none")
-        .attr("stroke", "rgba(30, 32, 53, 0.5)")
-        .attr("stroke-width", "0.5");
-
-    svg.append("rect").attr("width", width).attr("height", height).attr("fill", "url(#grid)");
-
-    // Center crosshair — faint reference point
-    var centerGroup = svg
-        .append("g")
-        .attr("transform", "translate(" + width / 2 + "," + height / 2 + ")")
-        .attr("opacity", 0.15);
-
-    centerGroup
-        .append("circle")
-        .attr("r", 60)
-        .attr("fill", "none")
-        .attr("stroke", "#6366f1")
-        .attr("stroke-width", 0.5)
-        .attr("stroke-dasharray", "4,4");
-
-    centerGroup
-        .append("circle")
-        .attr("r", 3)
-        .attr("fill", "#6366f1");
-
-    // Store svg reference for the full graph renderer to use
-    container._exposeSvg = svg;
-    container._exposeWidth = width;
-    container._exposeHeight = height;
-}
-
-
-/* =========================================================================
-   Resize observer — keeps the graph SVG in sync with container size
+   Resize observer — reinitializes graph on container resize
    ========================================================================= */
 
 document.addEventListener("DOMContentLoaded", function () {
@@ -185,7 +335,13 @@ document.addEventListener("DOMContentLoaded", function () {
             // Debounce to avoid excessive redraws
             clearTimeout(resizeTimer);
             resizeTimer = setTimeout(function () {
-                initObservationGraph("observation-graph");
+                // Only reinitialize if ExposeGraph is active; the old
+                // placeholder initObservationGraph is no longer needed
+                // since ExposeGraph.init handles the full renderer.
+                var appEl = document.querySelector("[x-data]");
+                if (appEl && appEl.__x && appEl.__x.$data._graphInitialized) {
+                    appEl.__x.$data._initGraphAndPoll();
+                }
             }, 200);
         });
         observer.observe(graphContainer);
