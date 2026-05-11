@@ -132,6 +132,18 @@ class EntityRepository:
         if not entities:
             return []
 
+        seen: dict[tuple, dict] = {}
+        for e in entities:
+            key = (str(e["tenant_id"]), e["entity_type"], e["canonical_identifier"])
+            if key in seen:
+                merged_props = {**seen[key]["properties"], **e["properties"]}
+                seen[key]["properties"] = merged_props
+                if e.get("attribution_confidence", 0) > seen[key].get("attribution_confidence", 0):
+                    seen[key]["attribution_status"] = e["attribution_status"]
+                    seen[key]["attribution_confidence"] = e["attribution_confidence"]
+            else:
+                seen[key] = dict(e)
+
         values = [
             {
                 "id": uuid4(),
@@ -142,7 +154,7 @@ class EntityRepository:
                 "attribution_status": e["attribution_status"],
                 "attribution_confidence": e["attribution_confidence"],
             }
-            for e in entities
+            for e in seen.values()
         ]
 
         insert_stmt = pg_insert(Entity).values(values)
