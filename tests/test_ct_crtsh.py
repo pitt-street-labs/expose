@@ -8,7 +8,9 @@ JSON responses.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
+from unittest.mock import patch
 from uuid import UUID
 
 import httpx
@@ -24,7 +26,13 @@ from expose.collectors.base import (
     Seed,
     SeedType,
 )
-from expose.collectors.builtin.ct_crtsh import CrtShCollector
+from expose.collectors.builtin.ct_crtsh import (
+    CrtShCollector,
+    _CACHE_TTL_SECONDS,
+    _domain_cache,
+    _org_cache,
+    clear_crt_sh_cache,
+)
 from expose.collectors.registry import DEFAULT_REGISTRY
 from expose.collectors.tiers import CollectorTier
 from expose.types.canonical import CollectorStatus, ExtendedIdentifierType
@@ -33,6 +41,12 @@ TENANT_ID = UUID("018f1f00-0000-7000-8000-00000000ca01")
 RUN_ID = UUID("018f1f00-0000-7000-8000-00000000ca02")
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "collectors" / "ct_crtsh"
+
+
+@pytest.fixture(autouse=True)
+def _clear_crtsh_cache() -> None:
+    """Clear crt.sh response cache before each test to prevent leakage."""
+    clear_crt_sh_cache()
 
 
 def _load_fixture(name: str) -> str:
@@ -490,6 +504,135 @@ class TestCrtShExpandOrganization:
         seed = Seed(seed_type=SeedType.ORGANIZATION, value="Acme Corp")
         with pytest.raises(CollectorSourceUnreachableError, match="unreachable"):
             await _collect_all(collector, seed)
+
+
+class TestCrtShResponseCache:
+    """Test 10: in-memory TTL cache for crt.sh responses."""
+
+    @respx.mock
+    async def test_domain_cache_hit_skips_network(self) -> None:
+        """Second call for same domain returns cached data, no HTTP request."""
+        fixture = _load_fixture("happy_path.json")
+        route = respx.get("https://crt.sh/", params__contains={"output": "json"}).mock(
+            return_value=httpx.Response(200, text=fixture),
+        )
+
+        collector = CrtShCollector(_make_config())
+        seed = _make_seed("cached-example.com")
+
+        # First call — hits the network.
+        results1 = await _collect_all(collector, seed)
+        assert len(results1) == 2
+        assert route.call_count == 1
+
+        # Second call — should serve from cache without network.
+        results2 = await _collect_all(collector, seed)
+        assert len(results2) == 2
+        assert route.call_count == 1  # No additional HTTP call.
+
+    @respx.mock
+    async def test_domain_cache_different_domains_not_shared(self) -> None:
+        """Cache is keyed per domain — different domains make separate calls."""
+        fixture = _load_fixture("happy_path.json")
+        route = respx.get("https://crt.sh/", params__contains={"output": "json"}).mock(
+            return_value=httpx.Response(200, text=fixture),
+        )
+
+        collector = CrtShCollector(_make_config())
+
+        await _collect_all(collector, _make_seed("domain-a.com"))
+        await _collect_all(collector, _make_seed("domain-b.com"))
+        assert route.call_count == 2
+
+    @respx.mock
+    async def test_domain_cache_expired_refetches(self) -> None:
+        """Expired cache entries cause a fresh network fetch."""
+        fixture = _load_fixture("happy_path.json")
+        route = respx.get("https://crt.sh/", params__contains={"output": "json"}).mock(
+            return_value=httpx.Response(200, text=fixture),
+        )
+
+        collector = CrtShCollector(_make_config())
+        seed = _make_seed("expiry-test.com")
+
+        # First call populates cache.
+        await _collect_all(collector, seed)
+        assert route.call_count == 1
+
+        # Simulate time passing beyond TTL by manipulating the cache timestamp.
+        domain = "expiry-test.com"
+        if domain in _domain_cache:
+            _, data = _domain_cache[domain]
+            _domain_cache[domain] = (time.monotonic() - _CACHE_TTL_SECONDS - 1, data)
+
+        # Second call — cache expired, should refetch.
+        await _collect_all(collector, seed)
+        assert route.call_count == 2
+
+    @respx.mock
+    async def test_org_cache_hit_skips_network(self) -> None:
+        """Organization search also caches responses."""
+        fixture = _load_fixture("org_search.json")
+        route = respx.get("https://crt.sh/", params__contains={"output": "json"}).mock(
+            return_value=httpx.Response(200, text=fixture),
+        )
+
+        collector = CrtShCollector(_make_config())
+        seed = Seed(seed_type=SeedType.ORGANIZATION, value="Cache Test Corp")
+
+        results1 = await _collect_all(collector, seed)
+        assert len(results1) > 0
+        assert route.call_count == 1
+
+        results2 = await _collect_all(collector, seed)
+        assert len(results2) == len(results1)
+        assert route.call_count == 1  # No second call.
+
+    @respx.mock
+    async def test_error_responses_not_cached(self) -> None:
+        """Failed requests should not populate the cache."""
+        route = respx.get("https://crt.sh/", params__contains={"output": "json"}).mock(
+            return_value=httpx.Response(500, text="Internal Server Error"),
+        )
+
+        collector = CrtShCollector(_make_config())
+        seed = _make_seed("error-test.com")
+
+        with pytest.raises(CollectorSourceUnreachableError):
+            await _collect_all(collector, seed)
+
+        # Cache should be empty — errors are not cached.
+        assert "error-test.com" not in _domain_cache
+
+    def test_clear_cache_function(self) -> None:
+        """clear_crt_sh_cache empties both domain and org caches."""
+        _domain_cache["test.com"] = (time.monotonic(), [])
+        _org_cache["Test Corp"] = (time.monotonic(), [])
+
+        clear_crt_sh_cache()
+
+        assert len(_domain_cache) == 0
+        assert len(_org_cache) == 0
+
+    @respx.mock
+    async def test_cached_results_match_fresh_results(self) -> None:
+        """Cached results produce identical observations to fresh results."""
+        fixture = _load_fixture("happy_path.json")
+        respx.get("https://crt.sh/", params__contains={"output": "json"}).mock(
+            return_value=httpx.Response(200, text=fixture),
+        )
+
+        collector = CrtShCollector(_make_config())
+        seed = _make_seed("match-test.com")
+
+        results1 = await _collect_all(collector, seed)
+        results2 = await _collect_all(collector, seed)
+
+        assert len(results1) == len(results2)
+        for r1, r2 in zip(results1, results2):
+            assert r1.subject.identifier_value == r2.subject.identifier_value
+            assert r1.structured_payload["serial_number"] == r2.structured_payload["serial_number"]
+            assert r1.structured_payload["sans"] == r2.structured_payload["sans"]
 
 
 class TestCrtShRegistration:

@@ -78,6 +78,7 @@ class TenantConfigResponse(BaseModel):
     socks5_proxy: str | None
     llm_enabled: bool
     llm_provider: str | None
+    llm_model: str | None
     llm_cost_ceiling_per_run: float
     updated_at: datetime
     updated_by: str | None
@@ -100,6 +101,7 @@ class TenantConfigUpdate(BaseModel):
     socks5_proxy: str | None = None
     llm_enabled: bool | None = None
     llm_provider: str | None = None
+    llm_model: str | None = None
     llm_cost_ceiling_per_run: float | None = None
 
 
@@ -127,10 +129,21 @@ def _default_config(tenant_id: UUID) -> dict[str, object]:
         "socks5_proxy": None,
         "llm_enabled": False,
         "llm_provider": None,
+        "llm_model": None,
         "llm_cost_ceiling_per_run": 0.0,
         "updated_at": datetime.now(UTC),
         "updated_by": None,
     }
+
+
+def get_tenant_config_data(tenant_id: UUID) -> dict[str, object]:
+    """Return the raw config dict for a tenant (or defaults if unset).
+
+    This is the public accessor for non-API callers (e.g. the pipeline
+    background runner) that need tenant config without going through the
+    HTTP layer.  Returns a **copy** so callers cannot corrupt the store.
+    """
+    return dict(_configs.get(tenant_id, _default_config(tenant_id)))
 
 
 def _to_response(cfg: dict[str, object]) -> TenantConfigResponse:
@@ -256,6 +269,8 @@ async def replace_tenant_config(
         new_cfg["llm_enabled"] = body.llm_enabled
     if body.llm_provider is not None:
         new_cfg["llm_provider"] = body.llm_provider
+    if body.llm_model is not None:
+        new_cfg["llm_model"] = body.llm_model
     if body.llm_cost_ceiling_per_run is not None:
         new_cfg["llm_cost_ceiling_per_run"] = body.llm_cost_ceiling_per_run
 
@@ -313,6 +328,8 @@ async def patch_tenant_config(
         merged["llm_enabled"] = body.llm_enabled
     if body.llm_provider is not None:
         merged["llm_provider"] = body.llm_provider
+    if body.llm_model is not None:
+        merged["llm_model"] = body.llm_model
     if body.llm_cost_ceiling_per_run is not None:
         merged["llm_cost_ceiling_per_run"] = body.llm_cost_ceiling_per_run
 

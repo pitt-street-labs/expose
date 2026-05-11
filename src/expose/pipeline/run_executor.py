@@ -309,6 +309,16 @@ class RunExecutor:
                 pass_stats["observations"] - pass_stats["upsert_failures"]
             )
 
+            # --- Update attribution scores based on collector diversity -------
+            try:
+                await self._entity_repo.update_attribution_scores(
+                    tenant_id=TenantId(tenant_id),
+                )
+            except Exception:
+                logger.exception(
+                    "Attribution scoring failed after pass %d", pass_number
+                )
+
             # --- Check for more passes ---------------------------------------
             if pass_number >= max_passes:
                 break

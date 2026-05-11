@@ -9,6 +9,7 @@ import expose.collectors.builtin.bgp_ripestat
 import expose.collectors.builtin.bgp_team_cymru
 import expose.collectors.builtin.cloud_ranges
 import expose.collectors.builtin.ct_certstream
+import expose.collectors.builtin.ct_censys
 import expose.collectors.builtin.ct_crtsh
 import expose.collectors.builtin.email_auth
 import expose.collectors.builtin.favicon_hash
@@ -31,3 +32,6 @@ import expose.collectors.builtin.wayback_machine
 import expose.collectors.builtin.sip_discovery
 import expose.collectors.builtin.waf_detection  # noqa: F401
 import expose.collectors.builtin.wikipedia_edits  # noqa: F401
+import expose.collectors.builtin.git_commit_emails  # noqa: F401
+import expose.collectors.builtin.paste_monitor  # noqa: F401
+import expose.collectors.builtin.mail_header_analyzer  # noqa: F401

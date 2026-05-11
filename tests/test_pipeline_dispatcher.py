@@ -843,3 +843,302 @@ class MockUnreachableThenOkCollector(Collector):
             checked_at=_NOW,
             latency_ms=1.0,
         )
+
+
+# === Tests for egress wiring (_build_socks5_fallback + tenant config) =========
+
+
+class TestBuildSocks5Fallback:
+    """Tests for the _build_socks5_fallback helper in runs.py."""
+
+    def test_returns_empty_when_socksio_missing(self) -> None:
+        """When socksio is not installed, return [] and log a warning."""
+        from unittest.mock import patch  # noqa: PLC0415
+
+        from expose.api.runs import _build_socks5_fallback  # noqa: PLC0415
+
+        with patch("importlib.util.find_spec", return_value=None):
+            result = _build_socks5_fallback("socks5://127.0.0.1:9050")
+
+        assert result == []
+
+    def test_returns_profile_with_explicit_proxy(self) -> None:
+        """When socksio is available and proxy URL is explicit, use it."""
+        from unittest.mock import MagicMock, patch  # noqa: PLC0415
+
+        from expose.api.runs import _build_socks5_fallback  # noqa: PLC0415
+        from expose.egress.socks5 import Socks5EgressProfile  # noqa: PLC0415
+
+        # Mock find_spec to report socksio as available
+        mock_spec = MagicMock()
+        with patch("importlib.util.find_spec", return_value=mock_spec):
+            result = _build_socks5_fallback("socks5://10.0.0.1:1080")
+
+        assert len(result) == 1
+        assert isinstance(result[0], Socks5EgressProfile)
+        assert result[0].proxy_url == "socks5://10.0.0.1:1080"
+
+    def test_defaults_to_tor_proxy_when_no_url(self) -> None:
+        """When socks5_proxy is empty/None, default to localhost:9050 (Tor)."""
+        from unittest.mock import MagicMock, patch  # noqa: PLC0415
+
+        from expose.api.runs import _DEFAULT_TOR_PROXY, _build_socks5_fallback  # noqa: PLC0415
+        from expose.egress.socks5 import Socks5EgressProfile  # noqa: PLC0415
+
+        mock_spec = MagicMock()
+        with patch("importlib.util.find_spec", return_value=mock_spec):
+            result = _build_socks5_fallback(None)
+
+        assert len(result) == 1
+        assert isinstance(result[0], Socks5EgressProfile)
+        assert result[0].proxy_url == _DEFAULT_TOR_PROXY
+        assert result[0].proxy_url == "socks5://localhost:9050"
+
+    def test_defaults_to_tor_proxy_when_empty_string(self) -> None:
+        """Empty string socks5_proxy also defaults to Tor."""
+        from unittest.mock import MagicMock, patch  # noqa: PLC0415
+
+        from expose.api.runs import _build_socks5_fallback  # noqa: PLC0415
+        from expose.egress.socks5 import Socks5EgressProfile  # noqa: PLC0415
+
+        mock_spec = MagicMock()
+        with patch("importlib.util.find_spec", return_value=mock_spec):
+            result = _build_socks5_fallback("")
+
+        assert len(result) == 1
+        assert isinstance(result[0], Socks5EgressProfile)
+        assert result[0].proxy_url == "socks5://localhost:9050"
+
+
+class TestGetTenantConfigData:
+    """Tests for the get_tenant_config_data accessor."""
+
+    def test_returns_defaults_for_unknown_tenant(self) -> None:
+        """Unknown tenant gets sensible defaults."""
+        from uuid import uuid4  # noqa: PLC0415
+
+        from expose.api.tenant_config import get_tenant_config_data  # noqa: PLC0415
+
+        cfg = get_tenant_config_data(uuid4())
+        assert cfg["egress_fallbacks"] == []
+        assert cfg["socks5_proxy"] is None
+        assert cfg["egress_profile"] == "direct"
+
+    def test_returns_stored_config(self) -> None:
+        """When config is stored, it is returned correctly."""
+        from uuid import uuid4  # noqa: PLC0415
+
+        from expose.api.tenant_config import (  # noqa: PLC0415
+            _configs,
+            _default_config,
+            get_tenant_config_data,
+        )
+
+        tid = uuid4()
+        stored = _default_config(tid)
+        stored["egress_fallbacks"] = ["socks5"]
+        stored["socks5_proxy"] = "socks5://tor-exit:9050"
+        _configs[tid] = stored
+
+        try:
+            cfg = get_tenant_config_data(tid)
+            assert cfg["egress_fallbacks"] == ["socks5"]
+            assert cfg["socks5_proxy"] == "socks5://tor-exit:9050"
+        finally:
+            # Clean up the in-memory store
+            _configs.pop(tid, None)
+
+    def test_returns_copy_not_reference(self) -> None:
+        """Mutations to the returned dict must not affect the store."""
+        from uuid import uuid4  # noqa: PLC0415
+
+        from expose.api.tenant_config import (  # noqa: PLC0415
+            _configs,
+            _default_config,
+            get_tenant_config_data,
+        )
+
+        tid = uuid4()
+        stored = _default_config(tid)
+        _configs[tid] = stored
+
+        try:
+            cfg = get_tenant_config_data(tid)
+            cfg["egress_fallbacks"] = ["socks5", "wireguard"]
+
+            # The store must be unaffected
+            original = _configs[tid]
+            assert original["egress_fallbacks"] == []
+        finally:
+            _configs.pop(tid, None)
+
+
+class TestSocks5EgressProfileConfigure:
+    """Tests for Socks5EgressProfile.configure_httpx_client compatibility."""
+
+    def test_configure_returns_proxy_kwarg(self) -> None:
+        """configure_httpx_client returns a dict with 'proxy' key."""
+        from unittest.mock import MagicMock, patch  # noqa: PLC0415
+
+        from expose.egress.socks5 import Socks5EgressProfile  # noqa: PLC0415
+
+        profile = Socks5EgressProfile(
+            proxy_url="socks5://127.0.0.1:9050",
+            dns_through_proxy=True,
+        )
+
+        # Mock socksio as available
+        with patch("expose.egress.socks5._socksio_available", return_value=True):
+            kwargs = profile.configure_httpx_client()
+
+        assert "proxy" in kwargs
+        # dns_through_proxy=True should rewrite to socks5h://
+        assert kwargs["proxy"] == "socks5h://127.0.0.1:9050"
+
+    def test_configure_without_dns_proxy_keeps_socks5(self) -> None:
+        """Without dns_through_proxy, the scheme stays socks5://."""
+        from unittest.mock import patch  # noqa: PLC0415
+
+        from expose.egress.socks5 import Socks5EgressProfile  # noqa: PLC0415
+
+        profile = Socks5EgressProfile(
+            proxy_url="socks5://127.0.0.1:9050",
+            dns_through_proxy=False,
+        )
+
+        with patch("expose.egress.socks5._socksio_available", return_value=True):
+            kwargs = profile.configure_httpx_client()
+
+        assert kwargs["proxy"] == "socks5://127.0.0.1:9050"
+
+    def test_configure_raises_when_socksio_missing(self) -> None:
+        """configure_httpx_client raises RuntimeError without socksio."""
+        from unittest.mock import patch  # noqa: PLC0415
+
+        from expose.egress.socks5 import Socks5EgressProfile  # noqa: PLC0415
+
+        profile = Socks5EgressProfile(proxy_url="socks5://127.0.0.1:9050")
+
+        with patch("expose.egress.socks5._socksio_available", return_value=False):
+            with pytest.raises(RuntimeError, match="socksio"):
+                profile.configure_httpx_client()
+
+    def test_is_anonymizing_with_dns_proxy(self) -> None:
+        """SOCKS5 profile is anonymizing when DNS goes through proxy."""
+        from expose.egress.socks5 import Socks5EgressProfile  # noqa: PLC0415
+
+        profile = Socks5EgressProfile(
+            proxy_url="socks5://127.0.0.1:9050",
+            dns_through_proxy=True,
+        )
+        assert profile.is_anonymizing is True
+
+    def test_not_anonymizing_without_dns_proxy(self) -> None:
+        """SOCKS5 profile is NOT anonymizing when DNS leaks."""
+        from expose.egress.socks5 import Socks5EgressProfile  # noqa: PLC0415
+
+        profile = Socks5EgressProfile(
+            proxy_url="socks5://127.0.0.1:9050",
+            dns_through_proxy=False,
+        )
+        assert profile.is_anonymizing is False
+
+
+class TestEgressFallbackEndToEnd:
+    """End-to-end: tenant config -> dispatcher with SOCKS5 fallback."""
+
+    @pytest.mark.asyncio
+    async def test_fallback_with_socks5_from_tenant_config(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """Dispatcher with SOCKS5 fallback (built from tenant config) retries on unreachable."""
+        from unittest.mock import MagicMock, patch  # noqa: PLC0415
+
+        from expose.api.runs import _build_socks5_fallback  # noqa: PLC0415
+
+        registry.register(MockUnreachableThenOkCollector)
+        MockUnreachableThenOkCollector.call_count = 0
+
+        from expose.egress.direct import DirectEgressProfile  # noqa: PLC0415
+
+        # Simulate socksio being available
+        mock_spec = MagicMock()
+        with patch("importlib.util.find_spec", return_value=mock_spec):
+            fallbacks = _build_socks5_fallback("socks5://127.0.0.1:9050")
+
+        assert len(fallbacks) == 1
+
+        dispatcher = PipelineDispatcher(
+            registry, scope_empty, TENANT_ID,
+            egress_profile=DirectEgressProfile(),
+            egress_fallbacks=fallbacks,
+        )
+        result = await dispatcher.dispatch(_make_job("mock-unreachable-then-ok", seed))
+
+        assert result.status == DispatchStatus.SUCCESS
+        assert MockUnreachableThenOkCollector.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_no_fallback_when_socksio_missing(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """When socksio is missing, no fallback is configured; unreachable becomes error."""
+        from unittest.mock import patch  # noqa: PLC0415
+
+        from expose.api.runs import _build_socks5_fallback  # noqa: PLC0415
+
+        registry.register(MockSourceUnreachableCollector)
+
+        from expose.egress.direct import DirectEgressProfile  # noqa: PLC0415
+
+        with patch("importlib.util.find_spec", return_value=None):
+            fallbacks = _build_socks5_fallback("socks5://127.0.0.1:9050")
+
+        assert fallbacks == []
+
+        dispatcher = PipelineDispatcher(
+            registry, scope_empty, TENANT_ID,
+            egress_profile=DirectEgressProfile(),
+            egress_fallbacks=fallbacks,
+        )
+        result = await dispatcher.dispatch(_make_job("mock-unreachable", seed))
+
+        assert result.status == DispatchStatus.COLLECTOR_ERROR
+        assert "source unreachable" in (result.error_message or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_socks5_fallback_egress_anonymized_flag(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """When fallback succeeds via SOCKS5, egress_anonymized is True."""
+        from unittest.mock import MagicMock, patch  # noqa: PLC0415
+
+        from expose.api.runs import _build_socks5_fallback  # noqa: PLC0415
+        from expose.egress.direct import DirectEgressProfile  # noqa: PLC0415
+
+        registry.register(MockUnreachableThenOkCollector)
+        MockUnreachableThenOkCollector.call_count = 0
+
+        mock_spec = MagicMock()
+        with patch("importlib.util.find_spec", return_value=mock_spec):
+            fallbacks = _build_socks5_fallback("socks5://127.0.0.1:9050")
+
+        dispatcher = PipelineDispatcher(
+            registry, scope_empty, TENANT_ID,
+            egress_profile=DirectEgressProfile(),
+            egress_fallbacks=fallbacks,
+        )
+        result = await dispatcher.dispatch(_make_job("mock-unreachable-then-ok", seed))
+
+        assert result.status == DispatchStatus.SUCCESS
+        # SOCKS5 with dns_through_proxy=True (default) is anonymizing
+        assert result.egress_anonymized is True

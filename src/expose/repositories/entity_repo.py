@@ -20,12 +20,24 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, text
+from sqlalchemy import distinct, func, select, text, union_all, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from expose.db.models import Entity
+from expose.db.models import Entity, Relationship
 from expose.types.shared import EntityId, TenantId
+
+# Attribution tier thresholds — maps from distinct-collector count to
+# (attribution_status, attribution_confidence).  Evaluated in order; the
+# first matching predicate wins.
+_ATTRIBUTION_TIERS: list[tuple[int, str, str]] = [
+    # (min_collectors, status, confidence)
+    (4, "confirmed", "0.900"),
+    (3, "high", "0.700"),
+    (2, "medium", "0.400"),
+]
+_DEFAULT_STATUS = "unattributed"
+_DEFAULT_CONFIDENCE = "0.000"
 
 
 class EntityRepository:
@@ -158,6 +170,102 @@ class EntityRepository:
         stmt = stmt.order_by(Entity.last_observed_at.desc()).limit(limit)
         result = await self._session.execute(stmt)
         return result.scalars().all()
+
+    async def update_attribution_scores(
+        self,
+        *,
+        tenant_id: TenantId,
+    ) -> int:
+        """Re-evaluate attribution scores for all entities in a tenant.
+
+        Queries the ``relationships`` table to count distinct ``collector_id``
+        values referencing each entity (as either endpoint), then bulk-updates
+        ``attribution_status`` and ``attribution_confidence`` according to the
+        tier thresholds defined in SPEC.md:
+
+        - 0-1 collectors -> ``unattributed``, confidence 0.0
+        - 2 collectors   -> ``medium``, confidence 0.4
+        - 3 collectors   -> ``high``, confidence 0.7
+        - 4+ collectors  -> ``confirmed``, confidence 0.9
+
+        Returns the number of entities whose attribution was updated (changed
+        from their previous value). The caller controls transaction boundaries.
+        """
+        # --- Subquery: distinct collector_ids per entity -----------------------
+        outgoing = select(
+            Relationship.from_entity_id.label("entity_id"),
+            Relationship.collector_id.label("collector_id"),
+        ).where(Relationship.tenant_id == tenant_id)
+
+        incoming = select(
+            Relationship.to_entity_id.label("entity_id"),
+            Relationship.collector_id.label("collector_id"),
+        ).where(Relationship.tenant_id == tenant_id)
+
+        all_refs = union_all(outgoing, incoming).subquery("all_refs")
+
+        collector_counts = (
+            select(
+                all_refs.c.entity_id,
+                func.count(distinct(all_refs.c.collector_id)).label(
+                    "collector_count"
+                ),
+            )
+            .group_by(all_refs.c.entity_id)
+            .subquery("collector_counts")
+        )
+
+        # --- Fetch entities with their collector counts -----------------------
+        stmt = (
+            select(
+                Entity.id,
+                Entity.attribution_status,
+                Entity.attribution_confidence,
+                func.coalesce(collector_counts.c.collector_count, 0).label(
+                    "collector_count"
+                ),
+            )
+            .outerjoin(
+                collector_counts, Entity.id == collector_counts.c.entity_id
+            )
+            .where(Entity.tenant_id == tenant_id)
+        )
+        result = await self._session.execute(stmt)
+        rows = list(result.all())
+
+        updated = 0
+        for entity_id, current_status, current_confidence, count in rows:
+            # Determine the new tier
+            new_status = _DEFAULT_STATUS
+            new_confidence = _DEFAULT_CONFIDENCE
+            for min_collectors, status, confidence in _ATTRIBUTION_TIERS:
+                if count >= min_collectors:
+                    new_status = status
+                    new_confidence = confidence
+                    break
+
+            # Skip if unchanged
+            if (
+                current_status == new_status
+                and str(current_confidence) == new_confidence
+            ):
+                continue
+
+            # Update the entity
+            upd = (
+                update(Entity)
+                .where(Entity.id == entity_id)
+                .values(
+                    attribution_status=new_status,
+                    attribution_confidence=Decimal(new_confidence),
+                )
+            )
+            await self._session.execute(upd)
+            updated += 1
+
+        if updated > 0:
+            await self._session.flush()
+        return updated
 
 
 __all__ = ["EntityRepository"]

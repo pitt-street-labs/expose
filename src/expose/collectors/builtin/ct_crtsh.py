@@ -31,6 +31,7 @@ PEM is available.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
@@ -68,6 +69,45 @@ _SAN_BYTE_CAP = 255
 # crt.sh can return thousands of certs for large CAs; cap to avoid flooding
 # the pipeline with low-value seeds.
 _ORG_SEARCH_DOMAIN_CAP = 200
+
+# === In-memory TTL cache =====================================================
+# Caches successful crt.sh responses so repeated scans for the same domain
+# within the TTL window do not depend on crt.sh availability.
+_CACHE_TTL_SECONDS = 3600  # 1 hour
+
+# Cache entry: (timestamp_monotonic, response_entries)
+_domain_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+_org_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+
+
+def _cache_get(
+    cache: dict[str, tuple[float, list[dict[str, Any]]]],
+    key: str,
+) -> list[dict[str, Any]] | None:
+    """Return cached entries if present and not expired, else None."""
+    entry = cache.get(key)
+    if entry is None:
+        return None
+    ts, data = entry
+    if (time.monotonic() - ts) > _CACHE_TTL_SECONDS:
+        del cache[key]
+        return None
+    return data
+
+
+def _cache_put(
+    cache: dict[str, tuple[float, list[dict[str, Any]]]],
+    key: str,
+    data: list[dict[str, Any]],
+) -> None:
+    """Store entries in the cache with the current monotonic timestamp."""
+    cache[key] = (time.monotonic(), data)
+
+
+def clear_crt_sh_cache() -> None:
+    """Clear all cached crt.sh responses. Useful for testing."""
+    _domain_cache.clear()
+    _org_cache.clear()
 
 
 def _parse_sans(name_value: str) -> list[str]:
@@ -175,43 +215,52 @@ class CrtShCollector(Collector):
     async def _expand_domain(self, seed: Seed) -> AsyncIterator[Observation]:
         """Query crt.sh by domain wildcard (``?q=%25.domain.com``)."""
         domain = seed.value.strip()
-        url = _CRT_SH_JSON_URL
-        params = {"q": f"%.{domain}", "output": "json"}
 
-        try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(self.config.request_timeout_seconds),
-                headers={"User-Agent": self.config.user_agent},
-            ) as client:
-                response = await client.get(url, params=params)
-                # 404 means "no certificates for this domain" — valid empty result
-                if response.status_code == 404:
-                    return
-                response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            msg = (
-                f"crt.sh returned HTTP {exc.response.status_code} "
-                f"for domain {domain!r}"
-            )
-            raise CollectorSourceUnreachableError(msg) from exc
-        except httpx.HTTPError as exc:
-            msg = f"crt.sh unreachable for domain {domain!r}: {exc}"
-            raise CollectorSourceUnreachableError(msg) from exc
+        # Check cache first — return cached results without hitting crt.sh.
+        cached = _cache_get(_domain_cache, domain)
+        if cached is not None:
+            logger.debug("ct-crtsh: cache hit for domain %r (%d entries)", domain, len(cached))
+            entries = cached
+        else:
+            url = _CRT_SH_JSON_URL
+            params = {"q": f"%.{domain}", "output": "json"}
 
-        try:
-            raw: Any = response.json()
-        except Exception as exc:
-            msg = f"crt.sh returned malformed JSON for domain {domain!r}: {exc}"
-            raise CollectorSourceUnreachableError(msg) from exc
+            try:
+                async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(self.config.request_timeout_seconds),
+                    headers={"User-Agent": self.config.user_agent},
+                ) as client:
+                    response = await client.get(url, params=params)
+                    # 404 means "no certificates for this domain" — valid empty result
+                    if response.status_code == 404:
+                        return
+                    response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                msg = (
+                    f"crt.sh returned HTTP {exc.response.status_code} "
+                    f"for domain {domain!r}"
+                )
+                raise CollectorSourceUnreachableError(msg) from exc
+            except httpx.HTTPError as exc:
+                msg = f"crt.sh unreachable for domain {domain!r}: {exc}"
+                raise CollectorSourceUnreachableError(msg) from exc
 
-        if not isinstance(raw, list):
-            msg = (
-                f"crt.sh returned {type(raw).__name__} instead of "
-                f"JSON array for domain {domain!r}"
-            )
-            raise CollectorSourceUnreachableError(msg)
+            try:
+                raw: Any = response.json()
+            except Exception as exc:
+                msg = f"crt.sh returned malformed JSON for domain {domain!r}: {exc}"
+                raise CollectorSourceUnreachableError(msg) from exc
 
-        entries: list[dict[str, Any]] = raw
+            if not isinstance(raw, list):
+                msg = (
+                    f"crt.sh returned {type(raw).__name__} instead of "
+                    f"JSON array for domain {domain!r}"
+                )
+                raise CollectorSourceUnreachableError(msg)
+
+            entries = raw
+            # Cache successful responses.
+            _cache_put(_domain_cache, domain, entries)
 
         seen_serials: set[str] = set()
         for entry in entries:
@@ -250,45 +299,53 @@ class CrtShCollector(Collector):
         if not org_name:
             return
 
-        url = _CRT_SH_JSON_URL
-        params = {"O": org_name, "output": "json"}
+        # Check cache first.
+        cached = _cache_get(_org_cache, org_name)
+        if cached is not None:
+            logger.debug("ct-crtsh: cache hit for org %r (%d entries)", org_name, len(cached))
+            entries = cached
+        else:
+            url = _CRT_SH_JSON_URL
+            params = {"O": org_name, "output": "json"}
 
-        try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(self.config.request_timeout_seconds),
-                headers={"User-Agent": self.config.user_agent},
-            ) as client:
-                response = await client.get(url, params=params)
-                if response.status_code == 404:
-                    return
-                response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            msg = (
-                f"crt.sh returned HTTP {exc.response.status_code} "
-                f"for organization {org_name!r}"
-            )
-            raise CollectorSourceUnreachableError(msg) from exc
-        except httpx.HTTPError as exc:
-            msg = f"crt.sh unreachable for organization {org_name!r}: {exc}"
-            raise CollectorSourceUnreachableError(msg) from exc
+            try:
+                async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(self.config.request_timeout_seconds),
+                    headers={"User-Agent": self.config.user_agent},
+                ) as client:
+                    response = await client.get(url, params=params)
+                    if response.status_code == 404:
+                        return
+                    response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                msg = (
+                    f"crt.sh returned HTTP {exc.response.status_code} "
+                    f"for organization {org_name!r}"
+                )
+                raise CollectorSourceUnreachableError(msg) from exc
+            except httpx.HTTPError as exc:
+                msg = f"crt.sh unreachable for organization {org_name!r}: {exc}"
+                raise CollectorSourceUnreachableError(msg) from exc
 
-        try:
-            raw: Any = response.json()
-        except Exception as exc:
-            msg = (
-                f"crt.sh returned malformed JSON for organization "
-                f"{org_name!r}: {exc}"
-            )
-            raise CollectorSourceUnreachableError(msg) from exc
+            try:
+                raw: Any = response.json()
+            except Exception as exc:
+                msg = (
+                    f"crt.sh returned malformed JSON for organization "
+                    f"{org_name!r}: {exc}"
+                )
+                raise CollectorSourceUnreachableError(msg) from exc
 
-        if not isinstance(raw, list):
-            msg = (
-                f"crt.sh returned {type(raw).__name__} instead of "
-                f"JSON array for organization {org_name!r}"
-            )
-            raise CollectorSourceUnreachableError(msg)
+            if not isinstance(raw, list):
+                msg = (
+                    f"crt.sh returned {type(raw).__name__} instead of "
+                    f"JSON array for organization {org_name!r}"
+                )
+                raise CollectorSourceUnreachableError(msg)
 
-        entries: list[dict[str, Any]] = raw
+            entries = raw
+            # Cache successful responses.
+            _cache_put(_org_cache, org_name, entries)
 
         # Extract unique domain names from SANs and common_name fields.
         unique_domains: set[str] = set()

@@ -99,6 +99,45 @@ def _get_tier1_collector_ids() -> list[str]:
     return [cls.collector_id for cls in DEFAULT_REGISTRY.by_tier(CollectorTier.TIER_1)]
 
 
+# Default Tor SOCKS5 proxy address used when "socks5" is in egress_fallbacks
+# but no explicit socks5_proxy URL is configured.
+_DEFAULT_TOR_PROXY = "socks5://localhost:9050"
+
+
+def _build_socks5_fallback(
+    socks5_proxy: object,
+) -> list:
+    """Build a SOCKS5 egress fallback profile list.
+
+    Returns a single-element list containing a ``Socks5EgressProfile`` if the
+    ``socksio`` package is installed, or an empty list (with a warning) if it
+    is not.  Callers should pass the result directly as ``egress_fallbacks``
+    to ``PipelineDispatcher``.
+
+    Args:
+        socks5_proxy: The configured SOCKS5 proxy URL (str or None/empty).
+            Falls back to ``socks5://localhost:9050`` (default Tor) when absent.
+    """
+    import importlib.util  # noqa: PLC0415
+
+    if importlib.util.find_spec("socksio") is None:
+        logger.warning(
+            "Tenant config requests socks5 egress fallback but the "
+            "'socksio' package is not installed — skipping SOCKS5 fallback. "
+            "Install with: pip install socksio"
+        )
+        return []
+
+    from expose.egress.socks5 import Socks5EgressProfile  # noqa: PLC0415
+
+    proxy_url = str(socks5_proxy) if socks5_proxy else _DEFAULT_TOR_PROXY
+    logger.info(
+        "SOCKS5 egress fallback configured: proxy_url=%s",
+        proxy_url,
+    )
+    return [Socks5EgressProfile(proxy_url=proxy_url)]
+
+
 async def _run_pipeline_background(
     *,
     run_id: UUID,
@@ -113,10 +152,15 @@ async def _run_pipeline_background(
     The request session is closed by the time this runs, so we create a
     fresh session from the factory stored on ``app.state``.
     """
+    from expose.api.tenant_config import get_tenant_config_data  # noqa: PLC0415
     from expose.collectors.registry import DEFAULT_REGISTRY  # noqa: PLC0415
     from expose.collectors.tiers import TenantAuthorizationScope  # noqa: PLC0415
+    from expose.egress.base import EgressProfile  # noqa: PLC0415
     from expose.egress.direct import DirectEgressProfile  # noqa: PLC0415
+    from expose.llm.client import SafeLLMClient  # noqa: PLC0415
+    from expose.llm.providers import create_llm_provider  # noqa: PLC0415
     from expose.pipeline.dispatcher import PipelineDispatcher  # noqa: PLC0415
+    from expose.pipeline.enrichment import EnrichmentPipeline  # noqa: PLC0415
     from expose.pipeline.run_executor import RunExecutor  # noqa: PLC0415
     from expose.repositories.entity_repo import EntityRepository  # noqa: PLC0415
     from expose.repositories.relationship_repo import RelationshipRepository  # noqa: PLC0415
@@ -134,18 +178,74 @@ async def _run_pipeline_background(
                     explicit_entity_identifiers=seed_identifiers,
                 )
 
+                # --- Resolve egress fallbacks from tenant config ---
+                egress_fallbacks: list[EgressProfile] = []
+                tenant_cfg = get_tenant_config_data(tenant_id)
+                cfg_fallbacks = tenant_cfg.get("egress_fallbacks") or []
+                cfg_socks5_proxy = tenant_cfg.get("socks5_proxy")
+
+                if "socks5" in cfg_fallbacks:
+                    egress_fallbacks = _build_socks5_fallback(
+                        cfg_socks5_proxy,
+                    )
+
                 dispatcher = PipelineDispatcher(
                     registry=DEFAULT_REGISTRY,
                     tenant_scope=scope,
                     tenant_id=tenant_id,
                     egress_profile=DirectEgressProfile(),
+                    egress_fallbacks=egress_fallbacks,
                 )
+
+                # --- Stage 4b: LLM enrichment pipeline (opt-in per tenant) ---
+                enrichment_pipeline: EnrichmentPipeline | None = None
+                llm_enabled = bool(tenant_cfg.get("llm_enabled", False))
+                llm_provider_id = tenant_cfg.get("llm_provider")
+
+                if llm_enabled and llm_provider_id:
+                    try:
+                        llm_model = tenant_cfg.get("llm_model") or None
+                        cost_ceiling = float(
+                            tenant_cfg.get("llm_cost_ceiling_per_run", 10.0)
+                        )
+
+                        provider = create_llm_provider(
+                            str(llm_provider_id),
+                            model=str(llm_model) if llm_model else None,
+                        )
+                        llm_client = SafeLLMClient(
+                            primary_provider=provider,
+                            cost_ceiling_per_run=cost_ceiling,
+                        )
+                        enrichment_pipeline = EnrichmentPipeline(
+                            llm_client=llm_client,
+                        )
+                        logger.info(
+                            "LLM enrichment enabled: provider=%s model=%s "
+                            "cost_ceiling=%.2f run_id=%s tenant_id=%s",
+                            llm_provider_id,
+                            llm_model or "(default)",
+                            cost_ceiling,
+                            run_id,
+                            tenant_id,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to initialize LLM enrichment pipeline "
+                            "(run will proceed without enrichment): "
+                            "provider=%s run_id=%s tenant_id=%s",
+                            llm_provider_id,
+                            run_id,
+                            tenant_id,
+                            exc_info=True,
+                        )
 
                 executor = RunExecutor(
                     dispatcher=dispatcher,  # type: ignore[arg-type]
                     run_repo=run_repo,
                     entity_repo=entity_repo,
                     relationship_repo=relationship_repo,
+                    enrichment_pipeline=enrichment_pipeline,
                 )
 
                 await executor.execute(

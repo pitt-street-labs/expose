@@ -689,13 +689,35 @@ def db() -> None:
 
 
 def _alembic_config() -> Any:
-    """Build an Alembic ``Config`` pointing at the project's alembic.ini."""
+    """Build an Alembic ``Config`` pointing at the project's alembic.ini.
+
+    Resolution order:
+      1. Source-tree relative (``cli.py`` -> ``src/expose/`` -> 3x parent =
+         project root) — works during development.
+      2. ``$PWD/alembic.ini`` — works in the Docker container where WORKDIR is
+         ``/app`` and alembic.ini is copied there.
+      3. ``/app/alembic.ini`` — absolute fallback for container deployments
+         where CWD might differ from ``/app``.
+
+    Raises ``FileNotFoundError`` if none of the candidates exist, with a
+    diagnostic message listing the paths tried.
+    """
     from pathlib import Path  # noqa: PLC0415
 
     from alembic.config import Config  # noqa: PLC0415
 
-    ini_path = Path(__file__).resolve().parent.parent.parent / "alembic.ini"
-    return Config(str(ini_path))
+    candidates = [
+        Path(__file__).resolve().parent.parent.parent / "alembic.ini",
+        Path.cwd() / "alembic.ini",
+        Path("/app/alembic.ini"),
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return Config(str(candidate))
+
+    tried = ", ".join(str(c) for c in candidates)
+    msg = f"alembic.ini not found; searched: {tried}"
+    raise FileNotFoundError(msg)
 
 
 @db.command()
