@@ -65,13 +65,13 @@ This repository (`pitt-street-labs/ff6k` on internal Gitea — repo path retains
 | Init script (already executed) | `init-and-push-to-gitea.sh` (committed as genesis record; token redacted) |
 | Advisory strategy documents | `docs/strategy/` — non-locked analyses: `persona-analysis.md`, `competitive-analysis.md` (Session B), `framework-annotation.md` (Session E), `sdlp.md` (Session F), `federal-customer-deployment-guide.md` (Session G), `critical-path.md`, plus session-driven additions |
 | Architecture diagrams | `docs/architecture/` — mermaid diagrams of pipeline stages, two-environment model, deployment topology, observation graph, multi-tenancy, scanner egress, attribution flow, product surfaces, federal deployment pattern |
-| Engine source code | `src/expose/` — 111 Python source files across 18 sub-packages: `api/`, `broker/`, `cli.py`, `collectors/` (framework + 14 builtin), `compliance/`, `crypto/`, `db/`, `egress/`, `eval/`, `import_/`, `llm/` (SafeLLMClient + 4 provider adapters), `maintenance/`, `observability/`, `pipeline/` (dispatcher + executor + seed expansion + artifact generator + credential resolver + enforcement), `quotas/`, `repositories/`, `sanitization/`, `scope/`, `secrets/`, `storage/`, `types/`, `ui/` |
+| Engine source code | `src/expose/` — 120+ Python source files across 18 sub-packages: `api/`, `broker/`, `cli.py`, `collectors/` (framework + 22 builtin: active-dns, active-http, active-port, active-tls, bgp-he/ripestat/cymru, cloud-ranges/storage, ct-certstream/crtsh, dns-blacklist/chaos/passive/reverse/subdomain/zone, email-auth, favicon-hash, github-exposed, ma-discovery, rdap-whois, robots-txt, scan-binaryedge/censys/shodan, security-txt, sip-discovery, waf-detection, wayback-machine, wikipedia-edits), `compliance/`, `crypto/`, `db/`, `egress/` (direct + socks5), `eval/`, `import_/`, `llm/`, `maintenance/`, `observability/`, `pipeline/` (dispatcher + executor + seed expansion + entity-seed converter + credential resolver + enforcement + enrichment), `quotas/`, `repositories/`, `sanitization/`, `scope/`, `secrets/`, `storage/`, `types/`, `ui/` |
 | Database migrations | `alembic.ini` + `alembic/versions/` (v0001 initial_schema lands tenants/entities/relationships/runs) |
 | Container build | `Dockerfile` (multi-stage, multi-arch via buildx) + `.dockerignore` |
 | Helm chart | `deploy/helm-chart/` (skeleton — full per-component manifests land Sprint 5+) |
 | CI workflow | `.github/workflows/ci.yml` (lint + test + schema-sync + FIPS gate + helm-lint + multi-arch container build + ci-gate aggregator) |
 | Pre-commit | `.pre-commit-config.yaml` (ruff + gitleaks + check-jsonschema + helm lint) |
-| Tests | `tests/` — **1032/1033 tests passing as of cfcf188** (1 pre-existing failure: `test_findings_api::test_limit_parameter`, tracked in #73). 61 test files, 111 source files. Conftest provides `pg_container` + `nats_container` shared session fixtures. aiosqlite for fast API unit tests. |
+| Tests | `tests/` — **2472 tests passing as of 271101f** (1 pre-existing failure: `test_findings_api::test_limit_parameter`, tracked in #73). 75+ test files. Conftest provides `pg_container` + `nats_container` shared session fixtures. aiosqlite for fast API unit tests. |
 | Deploy artifacts | `deploy/helm-chart/` (NetworkPolicy + PodSecurity hardened), `deploy/cosign-keypair-setup.md`, `deploy/grafana/` (2 dashboards + README), `scripts/generate-sbom.sh` |
 | Strategy docs | `docs/strategy/` — postgres-deployment-guide, lab-to-production-runbook, network-security-guide, sbom-and-signing-guide, air-gap-deployment-guide, persona-analysis, competitive-analysis, framework-annotation, sdlp, federal-customer-deployment-guide, critical-path |
 | GitHub-launch docs | `README.md` (public-facing), `CHANGELOG.md`, `ROADMAP.md`, `GOVERNANCE.md`, `CONTRIBUTING.md` (rewritten for public), `docs/collectors.md` (14-collector catalog), `docs/quickstart.md`, `docs/why-expose.md`, `docs/use-cases.md` |
@@ -84,8 +84,9 @@ This repository (`pitt-street-labs/ff6k` on internal Gitea — repo path retains
 
 - **30+ closed / 20+ open / 73 total.** v1-tagged: all closed. All original high-priority issues closed.
 - New issues from Pre-Push session: #48 (screenshot vision), #49 (trust degradation), #50 (WAF/origin discovery), #51 (dark web indicators), #52 (legal/social mentions).
-- #72 (UI stabilization) closed 2026-05-11: D3 graph, null guards, filter, split-pane, health checks.
+- #72–#84 session 2026-05-11: 13 issues closed (#72–#78, #80–#84), 14 commits. Major: D3 graph fix, iterative multi-pass expansion, M&A org search, egress fallback, Wikipedia/SPF/security.txt/DNS-Chaos/SIP collectors, relationship creation, multi-TLD expansion.
 - #73 (test_findings_api failure) opened 2026-05-11: pre-existing, `test_limit_parameter` returns 0 findings.
+- #79 partially closed (SPF/security.txt/DNS-Chaos done; mail headers, paste sites, job postings, git commits remain).
 - Labels follow `epic:<slug>`, `area:<slug>`, `priority:<level>`, `type:<kind>`.
 - Reference issues by number in commits: `Closes #N` or `Refs #N`.
 - New work discovered during a session → file an issue immediately (Tier 3, pre-authorized) rather than letting it slip.
