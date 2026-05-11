@@ -20,4 +20,10 @@ import expose.collectors.builtin.dns_subdomain_enum
 import expose.collectors.builtin.dns_zone_transfer
 import expose.collectors.builtin.ma_discovery
 import expose.collectors.builtin.rdap_whois
+import expose.collectors.builtin.cloud_storage_exposure
+import expose.collectors.builtin.robots_txt
+import expose.collectors.builtin.scan_binaryedge
+import expose.collectors.builtin.scan_censys
+import expose.collectors.builtin.scan_shodan
+import expose.collectors.builtin.wayback_machine
 import expose.collectors.builtin.waf_detection  # noqa: F401
