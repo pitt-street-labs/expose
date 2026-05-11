@@ -232,6 +232,39 @@
         </div>
     </div>
 
+    <!-- ===== Scan Log panel ===== -->
+    <div class="card scan-log-card" x-show="selectedTenantId && (activeRunId || scanLogEntries.length > 0)" x-cloak
+         style="margin: 0 var(--space-lg); margin-bottom: var(--space-md);">
+        <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;"
+             @click="showScanLog = !showScanLog">
+            <h2 class="pane-title" style="margin: 0;">
+                Scan Log
+                <span x-show="scanLogEntries.length > 0" x-cloak
+                      style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;"
+                      x-text="scanLogEntries.length + ' entries'"></span>
+                <span x-show="activeRunId && scanLogPolling" x-cloak
+                      style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--success); margin-left: 6px; animation: pulse-dot 1.5s ease-in-out infinite;"></span>
+            </h2>
+            <span style="color: var(--text-muted); font-size: 0.8rem;"
+                  x-text="showScanLog ? '&#9650; Collapse' : '&#9660; Expand'"></span>
+        </div>
+        <div x-show="showScanLog" x-cloak x-transition>
+            <div class="scan-log-terminal" x-ref="scanLogTerminal">
+                <template x-for="(entry, idx) in scanLogEntries" :key="idx">
+                    <div class="scan-log-entry"
+                         :class="'scan-log-' + entry.level">
+                        <span class="scan-log-ts" x-text="formatLogTs(entry.ts)"></span>
+                        <span class="scan-log-msg" x-text="entry.msg"></span>
+                    </div>
+                </template>
+                <div x-show="scanLogEntries.length === 0"
+                     style="color: var(--text-dim); font-style: italic; padding: 0.5rem 0;">
+                    Waiting for pipeline activity...
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- ===== Priority Findings ===== -->
     <div class="card findings-panel" x-show="selectedTenantId && findings.length > 0" x-cloak
          style="margin: 0 var(--space-lg); margin-bottom: var(--space-md);">
@@ -551,6 +584,63 @@
 .priority-high { background: rgba(234, 179, 8, 0.2); color: var(--warning); }
 .priority-medium { background: rgba(99, 102, 241, 0.2); color: var(--accent); }
 .priority-low { background: rgba(100, 116, 139, 0.2); color: var(--text-muted); }
+
+/* Scan Log Terminal Panel */
+.scan-log-terminal {
+    margin-top: var(--space-sm);
+    background: var(--void);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-sm);
+    max-height: 280px;
+    overflow-y: auto;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.6;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) var(--void);
+}
+.scan-log-terminal::-webkit-scrollbar {
+    width: 6px;
+}
+.scan-log-terminal::-webkit-scrollbar-track {
+    background: var(--void);
+}
+.scan-log-terminal::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+}
+.scan-log-entry {
+    padding: 1px 0;
+    display: flex;
+    gap: 0.75rem;
+    animation: log-emerge 0.15s ease-out;
+}
+.scan-log-ts {
+    color: var(--text-dim);
+    flex-shrink: 0;
+    min-width: 5.5rem;
+}
+.scan-log-msg {
+    word-break: break-word;
+}
+.scan-log-info .scan-log-msg {
+    color: var(--text-muted);
+}
+.scan-log-warn .scan-log-msg {
+    color: var(--warning);
+}
+.scan-log-error .scan-log-msg {
+    color: var(--error);
+}
+@keyframes log-emerge {
+    from { opacity: 0; transform: translateY(2px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
 
 .ai-insight-row {
     padding: 0.75rem 0;

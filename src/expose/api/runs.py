@@ -152,6 +152,7 @@ async def _run_pipeline_background(
     The request session is closed by the time this runs, so we create a
     fresh session from the factory stored on ``app.state``.
     """
+    from expose.api.run_log import make_log_sink  # noqa: PLC0415
     from expose.api.tenant_config import get_tenant_config_data  # noqa: PLC0415
     from expose.collectors.registry import DEFAULT_REGISTRY  # noqa: PLC0415
     from expose.collectors.tiers import TenantAuthorizationScope  # noqa: PLC0415
@@ -189,12 +190,15 @@ async def _run_pipeline_background(
                         cfg_socks5_proxy,
                     )
 
+                log_sink = make_log_sink(run_id)
+
                 dispatcher = PipelineDispatcher(
                     registry=DEFAULT_REGISTRY,
                     tenant_scope=scope,
                     tenant_id=tenant_id,
                     egress_profile=DirectEgressProfile(),
                     egress_fallbacks=egress_fallbacks,
+                    log_sink=log_sink,
                 )
 
                 # --- Stage 4b: LLM enrichment pipeline (opt-in per tenant) ---
@@ -246,6 +250,7 @@ async def _run_pipeline_background(
                     entity_repo=entity_repo,
                     relationship_repo=relationship_repo,
                     enrichment_pipeline=enrichment_pipeline,
+                    log_sink=log_sink,
                 )
 
                 await executor.execute(

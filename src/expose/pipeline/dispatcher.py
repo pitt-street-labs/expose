@@ -31,6 +31,8 @@ from enum import StrEnum
 from typing import ClassVar
 from uuid import UUID
 
+from collections.abc import Callable
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from expose.collectors.base import (
@@ -44,6 +46,9 @@ from expose.collectors.base import (
     Seed,
     SeedType,
 )
+
+# Type alias for the log sink callable.
+LogSink = Callable[[str, str], None]
 from expose.collectors.registry import CollectorRegistry
 from expose.collectors.tiers import (
     CollectorTier,
@@ -142,6 +147,7 @@ class PipelineDispatcher:
         scope_matcher: ScopeMatcher | None = None,
         credential_resolver: CredentialResolver | None = None,
         egress_fallbacks: list[EgressProfile] | None = None,
+        log_sink: LogSink | None = None,
     ) -> None:
         self._registry = registry
         self._tenant_scope = tenant_scope
@@ -151,6 +157,12 @@ class PipelineDispatcher:
         self._scope_matcher = scope_matcher
         self._credential_resolver = credential_resolver
         self._egress_fallbacks: list[EgressProfile] = egress_fallbacks or []
+        self._log_sink = log_sink
+
+    def _log(self, level: str, msg: str) -> None:
+        """Emit a structured log entry to the log sink, if configured."""
+        if self._log_sink is not None:
+            self._log_sink(level, msg)
 
     async def dispatch(self, job: DispatchJob) -> DispatchResult:
         """Execute one dispatch job and return a structured result.
@@ -397,6 +409,10 @@ class PipelineDispatcher:
                     "Retrying collector %s via %s egress fallback",
                     job.collector_id,
                     fb_name,
+                )
+                self._log(
+                    "info",
+                    f"Retrying {job.collector_id} via {fb_name} fallback",
                 )
                 # Temporarily swap the egress profile for the fallback so
                 # _run_expand (and any egress-aware code it calls) sees the

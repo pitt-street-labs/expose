@@ -29,6 +29,8 @@ from decimal import Decimal
 from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
+from collections.abc import Callable
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from expose.collectors.base import Observation, Seed
@@ -44,6 +46,10 @@ from expose.repositories.entity_repo import EntityRepository
 from expose.repositories.relationship_repo import RelationshipRepository
 from expose.repositories.run_repo import RunRepository
 from expose.types.shared import EntityId, RunId, TenantId
+
+# Type alias for the log sink callable used by the executor and dispatcher.
+# Signature: (level, msg) -> None where level is "info", "warn", or "error".
+LogSink = Callable[[str, str], None]
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +171,7 @@ class RunExecutor:
         quota_tracker: QuotaTracker | None = None,
         misuse_detector: MisuseDetector | None = None,
         enrichment_pipeline: EnrichmentPipeline | None = None,
+        log_sink: LogSink | None = None,
     ) -> None:
         self._dispatcher = dispatcher
         self._run_repo = run_repo
@@ -173,6 +180,12 @@ class RunExecutor:
         self._quota_tracker = quota_tracker
         self._misuse_detector = misuse_detector
         self._enrichment = enrichment_pipeline
+        self._log_sink = log_sink
+
+    def _log(self, level: str, msg: str) -> None:
+        """Emit a structured log entry to the log sink, if configured."""
+        if self._log_sink is not None:
+            self._log_sink(level, msg)
 
     async def execute(  # noqa: PLR0912, PLR0915
         self,
@@ -250,10 +263,12 @@ class RunExecutor:
             self._quota_tracker.record_run_start(tenant_id)
 
         total_seeds = len(seeds)
+        self._log("info", f"Run started: {total_seeds} seed(s)")
 
         # === Stage 1: Seed expansion ==========================================
         expanded = expand_seeds(seeds)
         expanded_count = len(expanded)
+        self._log("info", f"Seed expansion: {total_seeds} -> {expanded_count} seeds")
 
         # === Multi-pass dispatch loop =========================================
         #
@@ -282,13 +297,21 @@ class RunExecutor:
             pass_number += 1
 
             if pass_number > 1:
+                prev_entities = (
+                    entities_discovered_per_pass[-1]
+                    if entities_discovered_per_pass
+                    else 0
+                )
                 logger.info(
                     "Pass %d: %d new seeds from %d entities",
                     pass_number,
                     len(current_seeds),
-                    len(entities_discovered_per_pass)
-                    and entities_discovered_per_pass[-1]
-                    or 0,
+                    prev_entities,
+                )
+                self._log(
+                    "info",
+                    f"Pass {pass_number}: {len(current_seeds)} new seeds "
+                    f"from {prev_entities} entities",
                 )
 
             # --- Dispatch all (seed, collector) pairs for this pass -----------
@@ -397,6 +420,12 @@ class RunExecutor:
 
         duration_ms = (time.monotonic_ns() - start_ns) / 1_000_000
 
+        self._log(
+            "info",
+            f"Run {final_state}: {total_observations} observation(s), "
+            f"{pass_number} pass(es) in {duration_ms / 1000:.1f}s",
+        )
+
         return RunResult(
             run_id=run_id,
             tenant_id=tenant_id,
@@ -456,6 +485,7 @@ class RunExecutor:
                     run_id=run_id,
                     tenant_id=tenant_id,
                 )
+                self._log("info", f"Dispatching {collector_id} for {seed.value}")
                 try:
                     result = await self._dispatcher.dispatch(job)
                 except Exception:
@@ -464,11 +494,22 @@ class RunExecutor:
                         collector_id,
                         seed.value,
                     )
+                    self._log(
+                        "error",
+                        f"{collector_id} raised exception for {seed.value}",
+                    )
                     failed += 1
                     continue
 
                 if result.status == "success":
                     successful += 1
+                    obs_count = len(result.observations)
+                    duration_s = result.duration_ms / 1000
+                    self._log(
+                        "info",
+                        f"{collector_id} completed: "
+                        f"{obs_count} observation(s) in {duration_s:.1f}s",
+                    )
                     batch.extend(result.observations)
                     all_observations.extend(result.observations)
                     # Flush when batch reaches threshold (Stage 3+4+4b)
@@ -482,8 +523,16 @@ class RunExecutor:
                         batch = []
                 elif result.status == "denied":
                     denied += 1
+                    self._log(
+                        "warn",
+                        f"{collector_id} denied: {result.error_message or 'scope gate'}",
+                    )
                 else:
                     failed += 1
+                    self._log(
+                        "warn",
+                        f"{collector_id} failed: {result.error_message or 'unknown error'}",
+                    )
 
         # Flush remaining observations after the dispatch loop
         if batch:
@@ -530,11 +579,20 @@ class RunExecutor:
                     attribution_status="unattributed",
                     attribution_confidence=Decimal("0.000"),
                 )
+                self._log(
+                    "info",
+                    f"New entity: {obs.subject.identifier_type.value} "
+                    f"{obs.subject.identifier_value}",
+                )
             except Exception:
                 logger.exception(
                     "Entity upsert failed for %s/%s",
                     obs.subject.identifier_type.value,
                     obs.subject.identifier_value,
+                )
+                self._log(
+                    "error",
+                    f"Entity upsert failed: {obs.subject.identifier_value}",
                 )
                 upsert_failures += 1
                 continue

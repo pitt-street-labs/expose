@@ -77,6 +77,13 @@ function exposeApp() {
         sfImportText: "",
         bundleImportText: "",
 
+        // Scan log panel
+        showScanLog: true,
+        scanLogEntries: [],
+        scanLogPolling: false,
+        _scanLogPollHandle: null,
+        _scanLogSince: 0,
+
         // Priority findings from lead scoring
         showFindingsPanel: true,
         findings: [],
@@ -105,6 +112,11 @@ function exposeApp() {
 
             // Disconnect SSE from previous tenant/run
             this.disconnectSSE();
+
+            // Stop scan log polling and clear entries
+            this.stopScanLogPolling();
+            this.scanLogEntries = [];
+            this._scanLogSince = 0;
 
             // Reset config panel
             this.showConfigPanel = false;
@@ -238,6 +250,10 @@ function exposeApp() {
                 self.sseConnected = true;
                 self._sseRetryCount = 0;
                 console.info("[EXPOSE] SSE connected:", url);
+                // Start scan log polling if not already active
+                if (!self.scanLogPolling) {
+                    self.startScanLogPolling();
+                }
             };
 
             // --- Typed event handlers ---
@@ -342,6 +358,10 @@ function exposeApp() {
          */
         _onRunCompleted: function (evt) {
             console.info("[EXPOSE] SSE: run_completed — final refresh");
+
+            // Final scan log fetch before stopping polling
+            this._pollScanLog();
+            this.stopScanLogPolling();
 
             // Final data refresh
             this._refreshEntityTable();
@@ -900,6 +920,90 @@ function exposeApp() {
             );
         },
 
+        /* ==================================================================
+           Scan Log Polling
+           ================================================================== */
+
+        /**
+         * Start polling the scan log endpoint for new entries.
+         * Called when a run starts (from scanForm.submitScan or connectSSE).
+         */
+        startScanLogPolling() {
+            this.stopScanLogPolling();
+            this.scanLogEntries = [];
+            this._scanLogSince = 0;
+            this.scanLogPolling = true;
+            this.showScanLog = true;
+
+            var self = this;
+            this._pollScanLog();
+            this._scanLogPollHandle = setInterval(function () {
+                self._pollScanLog();
+            }, 2000);
+        },
+
+        /**
+         * Stop scan log polling.
+         */
+        stopScanLogPolling() {
+            if (this._scanLogPollHandle) {
+                clearInterval(this._scanLogPollHandle);
+                this._scanLogPollHandle = null;
+            }
+            this.scanLogPolling = false;
+        },
+
+        /**
+         * Fetch new log entries from the API since the last known offset.
+         * Appends new entries to scanLogEntries and auto-scrolls the terminal.
+         */
+        async _pollScanLog() {
+            if (!this.selectedTenantId || !this.activeRunId) return;
+            try {
+                var url = "/v1/tenants/" + this.selectedTenantId +
+                          "/runs/" + this.activeRunId +
+                          "/log?since=" + this._scanLogSince;
+                var resp = await fetch(url);
+                if (!resp.ok) return;
+                var data = await resp.json();
+                if (data.entries && data.entries.length > 0) {
+                    for (var i = 0; i < data.entries.length; i++) {
+                        this.scanLogEntries.push(data.entries[i]);
+                    }
+                    this._scanLogSince = data.total;
+
+                    // Auto-scroll to bottom
+                    var self = this;
+                    this.$nextTick(function () {
+                        var terminal = self.$refs.scanLogTerminal;
+                        if (terminal) {
+                            terminal.scrollTop = terminal.scrollHeight;
+                        }
+                    });
+                }
+            } catch (e) {
+                console.warn("[EXPOSE] Scan log poll failed:", e);
+            }
+        },
+
+        /**
+         * Format an ISO timestamp to HH:MM:SS for the scan log.
+         * @param {string} ts - ISO 8601 timestamp string
+         * @returns {string} Formatted time string
+         */
+        formatLogTs(ts) {
+            if (!ts) return "";
+            try {
+                var d = new Date(ts);
+                var h = String(d.getHours()).padStart(2, "0");
+                var m = String(d.getMinutes()).padStart(2, "0");
+                var s = String(d.getSeconds()).padStart(2, "0");
+                return h + ":" + m + ":" + s;
+            } catch (_e) {
+                return ts.substring(11, 19) || "";
+            }
+        },
+
         /**
          * Initialize on mount — read any pre-set values from the DOM.
          */
@@ -1016,6 +1120,8 @@ function scanForm() {
                 var appEl = document.querySelector("[x-data]");
                 if (appEl && appEl.__x) {
                     appEl.__x.$data.activeRunId = data.run_id;
+                    // Start scan log polling immediately (SSE may take a moment)
+                    appEl.__x.$data.startScanLogPolling();
                     // Connect SSE for real-time event streaming
                     appEl.__x.$data.connectSSE();
                 }

@@ -22,6 +22,7 @@ from expose.api.export import router as export_router
 from expose.api.findings import router as findings_router
 from expose.api.graph import router as graph_router
 from expose.api.rbac import router as rbac_router
+from expose.api.run_log import router as run_log_router
 from expose.api.runs import router as runs_router
 from expose.api.tenant_config import router as tenant_config_router
 from expose.api.tenants import get_session
@@ -124,6 +125,7 @@ def create_app(
     # -- Routers ---------------------------------------------------------------
     app.include_router(tenant_router)
     app.include_router(runs_router)
+    app.include_router(run_log_router)
     app.include_router(graph_router)
     app.include_router(events_router)
     app.include_router(tenant_config_router)
