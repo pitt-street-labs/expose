@@ -64,7 +64,7 @@
     <div class="card" x-show="selectedTenantId" x-cloak
          style="margin: 0 var(--space-lg); margin-top: 0;">
         <div style="display: flex; align-items: center; justify-content: space-between; cursor: pointer;"
-             @click="showConfigPanel = !showConfigPanel; if (showConfigPanel && !tenantConfig) loadTenantConfig();">
+             @click="showConfigPanel = !showConfigPanel; if (showConfigPanel && !_configLoaded) loadTenantConfig();">
             <h2 class="pane-title" style="margin: 0;">Tenant Config</h2>
             <span style="color: var(--text-muted); font-size: 0.8rem;"
                   x-text="showConfigPanel ? '&#9650; Collapse' : '&#9660; Expand'"></span>
@@ -78,10 +78,10 @@
     <div class="card" x-show="selectedTenantId" x-cloak
          style="margin: 0 var(--space-lg); margin-top: 0;">
         <div style="display: flex; align-items: center; justify-content: space-between; cursor: pointer;"
-             @click="showCredentialsPanel = !showCredentialsPanel; if (showCredentialsPanel && !credentialSlots) loadCredentials();">
+             @click="showCredentialsPanel = !showCredentialsPanel; if (showCredentialsPanel && !_credentialsLoaded) loadCredentials();">
             <h2 class="pane-title" style="margin: 0;">
                 API Keys
-                <span x-show="credentialSlots" x-cloak
+                <span x-show="_credentialsLoaded" x-cloak
                       style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;"
                       x-text="credentialConfiguredCount + '/' + credentialTotalCount + ' configured'"></span>
             </h2>
@@ -92,12 +92,12 @@
             <div style="margin-top: var(--space-md);">
 
                 <!-- Loading state -->
-                <div x-show="!credentialSlots" style="color: var(--text-muted); font-size: 0.8rem; padding: var(--space-sm) 0;">
+                <div x-show="!_credentialsLoaded" style="color: var(--text-muted); font-size: 0.8rem; padding: var(--space-sm) 0;">
                     Loading credentials...
                 </div>
 
                 <!-- Credential slots table -->
-                <div x-show="credentialSlots" x-cloak>
+                <div x-show="_credentialsLoaded" x-cloak>
                     <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem;">
                         <thead>
                             <tr style="border-bottom: 1px solid var(--border); text-align: left;">
@@ -127,7 +127,7 @@
                                     <td style="padding: 0.5rem; font-family: monospace; font-size: 0.75rem; color: var(--text-muted);"
                                         x-text="slot.masked_value || '---'"></td>
                                     <td style="padding: 0.5rem; font-size: 0.7rem; color: var(--text-muted);"
-                                        x-text="slot.collector_ids.length > 0 ? slot.collector_ids.join(', ') : 'none'"></td>
+                                        x-text="(slot.collector_ids || []).length > 0 ? (slot.collector_ids || []).join(', ') : 'none'"></td>
                                     <td style="padding: 0.5rem;">
                                         <button class="btn btn-ghost"
                                                 style="padding: 2px 8px; font-size: 0.7rem;"
@@ -230,11 +230,16 @@
     <!-- ===== Priority Findings ===== -->
     <div class="card findings-panel" x-show="selectedTenantId && findings.length > 0" x-cloak
          style="margin: 0 var(--space-lg); margin-bottom: var(--space-md);">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-sm);">
-            <h2 class="pane-title">Priority Findings</h2>
-            <span class="badge" x-text="findings.length + ' findings'" style="font-size: 0.75rem;"></span>
+        <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;"
+             @click="showFindingsPanel = !showFindingsPanel">
+            <h2 class="pane-title" style="margin: 0;">
+                Priority Findings
+                <span class="badge" x-text="findings.length + ' findings'" style="font-size: 0.75rem; margin-left: 0.5rem;"></span>
+            </h2>
+            <span style="color: var(--text-muted); font-size: 0.8rem;"
+                  x-text="showFindingsPanel ? '&#9650; Collapse' : '&#9660; Expand'"></span>
         </div>
-        <table class="findings-table">
+        <table class="findings-table" x-show="showFindingsPanel" x-cloak x-transition>
             <thead>
                 <tr>
                     <th style="width: 3rem;">#</th>
@@ -324,6 +329,9 @@
             </div>
         </section>
 
+        <!-- Drag handle -->
+        <div class="split-handle" id="split-handle" title="Drag to resize"></div>
+
         <!-- Right pane: entity table -->
         <section class="pane pane-right" aria-label="Entity table">
             <div class="pane-header">
@@ -336,6 +344,7 @@
                            class="filter-input"
                            placeholder="Filter..."
                            x-model="entityFilter"
+                           @input="applyEntityFilter()"
                            aria-label="Filter entities">
                 </div>
             </div>
@@ -346,7 +355,7 @@
                  x-cloak
                  hx-get="/partials/entities"
                  hx-vals='js:{"tenant_id": document.getElementById("tenant-select")?.value || ""}'
-                 hx-trigger="load, every 5s"
+                 hx-trigger="every 5s[document.getElementById('tenant-select')?.value]"
                  hx-swap="innerHTML"
                  hx-indicator="#entity-spinner">
                 <!-- HTMX fills this -->

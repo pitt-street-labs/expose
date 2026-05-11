@@ -11,6 +11,7 @@ directory adjacent to this module.
 from __future__ import annotations
 
 import math
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
@@ -28,6 +29,33 @@ _TEMPLATES_DIR = _UI_DIR / "templates"
 _STATIC_DIR = _UI_DIR / "static"
 
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+
+
+def _format_datetime(value: str | datetime | None) -> str:
+    if not value:
+        return "—"
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return value
+    now = datetime.now(tz=timezone.utc)
+    diff = now - value.replace(tzinfo=timezone.utc) if value.tzinfo is None else now - value
+    minutes = int(diff.total_seconds() / 60)
+    if minutes < 1:
+        return "just now"
+    if minutes < 60:
+        return f"{minutes}m ago"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours}h ago"
+    days = hours // 24
+    if days < 7:
+        return f"{days}d ago"
+    return value.strftime("%Y-%m-%d %H:%M")
+
+
+templates.env.filters["format_dt"] = _format_datetime
 
 # ---------------------------------------------------------------------------
 # Router

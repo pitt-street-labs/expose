@@ -10,7 +10,9 @@
     </thead>
     <tbody>
         {% for entity in entities %}
-        <tr class="entity-row" data-entity-id="{{ entity.id }}">
+        <tr class="entity-row"
+            data-entity-id="{{ entity.id }}"
+            data-search-text="{{ entity.canonical_identifier|lower }} {{ entity.entity_type|lower }} {{ entity.attribution_status|lower }}">
             <td class="col-type">
                 <span class="entity-type-badge entity-type-{{ entity.entity_type }}">
                     {{ entity.entity_type }}
@@ -25,8 +27,9 @@
                 </span>
             </td>
             <td class="col-observed">
-                <time datetime="{{ entity.last_observed_at }}">
-                    {{ entity.last_observed_at }}
+                <time datetime="{{ entity.last_observed_at }}"
+                      title="{{ entity.last_observed_at }}">
+                    {{ entity.last_observed_at | format_dt }}
                 </time>
             </td>
         </tr>

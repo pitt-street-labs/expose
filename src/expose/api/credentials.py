@@ -28,11 +28,13 @@ Security:
 from __future__ import annotations
 
 import logging
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict
 
+from expose.collectors.base import CollectorConfig, CollectorCredential
+from expose.collectors.registry import DEFAULT_REGISTRY
 from expose.import_.credential_bundle import (
     export_bundle,
     mask_value,
@@ -458,11 +460,12 @@ async def export_bundle_endpoint(tenant_id: UUID) -> BundleExportResponse:
 
 @router.post("/{credential_id}/test", response_model=CredentialTestResult)
 async def test_credential(tenant_id: UUID, credential_id: str) -> CredentialTestResult:
-    """Test a credential by verifying it exists and is non-empty.
+    """Test a credential by running the associated collector's health check.
 
-    Phase 1 performs a basic presence check. Future phases will call
-    the associated collector's health-check endpoint to verify the
-    credential is accepted by the upstream service.
+    Instantiates the first registered collector that uses this credential
+    and calls its ``health_check()`` method, which probes the upstream API
+    for reachability and key validity.  Falls back to a presence check if
+    no collector is registered for the slot.
     """
     slot_def = _SLOTS_BY_ID.get(credential_id)
     if slot_def is None:
@@ -487,12 +490,55 @@ async def test_credential(tenant_id: UUID, credential_id: str) -> CredentialTest
             message=f"{slot_def.display_name} is stored but empty.",
         )
 
-    # Phase 1: basic presence check passes.
-    # Future: call the collector's health-check endpoint here.
+    if not slot_def.collector_ids:
+        return CredentialTestResult(
+            credential_id=credential_id,
+            status="ok",
+            message=f"{slot_def.display_name} is configured (no collector mapped for live test).",
+        )
+
+    collector_id = slot_def.collector_ids[0]
+    if not DEFAULT_REGISTRY.is_registered(collector_id):
+        return CredentialTestResult(
+            credential_id=credential_id,
+            status="ok",
+            message=f"{slot_def.display_name} is configured (collector {collector_id!r} not loaded).",
+        )
+
+    cred_key = slot_def.backend_key.rsplit(".", 1)[-1]
+    config = CollectorConfig(
+        tenant_id=tenant_id,
+        run_id=uuid4(),
+        request_timeout_seconds=15.0,
+        credentials={
+            cred_key: CollectorCredential(name=cred_key, secret_value=value),
+        },
+    )
+
+    try:
+        collector_cls = DEFAULT_REGISTRY.get(collector_id)
+        collector = collector_cls(config)
+        result = await collector.health_check()
+    except Exception as exc:
+        logger.warning("Health check failed for %s: %s", credential_id, exc)
+        return CredentialTestResult(
+            credential_id=credential_id,
+            status="failed",
+            message=f"{slot_def.display_name} health check error: {exc}",
+        )
+
+    if result.status.value == "success":
+        latency = f" ({result.latency_ms:.0f}ms)" if result.latency_ms else ""
+        return CredentialTestResult(
+            credential_id=credential_id,
+            status="ok",
+            message=f"{slot_def.display_name} — upstream healthy{latency}",
+        )
+
     return CredentialTestResult(
         credential_id=credential_id,
-        status="ok",
-        message=f"{slot_def.display_name} is configured (health check not yet implemented).",
+        status="failed",
+        message=f"{slot_def.display_name} — {result.error_message or 'upstream unreachable'}",
     )
 
 

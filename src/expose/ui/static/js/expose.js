@@ -46,6 +46,7 @@ function exposeApp() {
 
         // Tenant config panel
         showConfigPanel: false,
+        _configLoaded: false,
         tenantConfig: {
             scope_rules: [],
             enabled_collectors: [],
@@ -64,6 +65,7 @@ function exposeApp() {
 
         // Credential management panel
         showCredentialsPanel: false,
+        _credentialsLoaded: false,
         credentialSlots: [],
         credentialConfiguredCount: 0,
         credentialTotalCount: 0,
@@ -74,6 +76,7 @@ function exposeApp() {
         bundleImportText: "",
 
         // Priority findings from lead scoring
+        showFindingsPanel: true,
         findings: [],
 
         // Summary stats for at-a-glance risk posture
@@ -103,12 +106,22 @@ function exposeApp() {
 
             // Reset config panel
             this.showConfigPanel = false;
-            this.tenantConfig = null;
+            this._configLoaded = false;
+            this.tenantConfig = {
+                scope_rules: [],
+                enabled_collectors: [],
+                schedule_cron: "",
+                egress_profile: "direct",
+                llm_enabled: false,
+                llm_provider: "",
+                llm_cost_ceiling_per_run: 10.0,
+            };
             this.configMessage = "";
 
             // Reset credentials panel
             this.showCredentialsPanel = false;
-            this.credentialSlots = null;
+            this._credentialsLoaded = false;
+            this.credentialSlots = [];
             this.credentialMessage = "";
             this.showSfImportModal = false;
             this.showBundleImportModal = false;
@@ -412,6 +425,7 @@ function exposeApp() {
                     llm_provider: data.llm_provider || "",
                     llm_cost_ceiling_per_run: data.llm_cost_ceiling_per_run || 0,
                 };
+                this._configLoaded = true;
             } catch (e) {
                 this.configMessage = "Error loading config: " + e.message;
                 console.error("[EXPOSE] Config load error:", e);
@@ -570,6 +584,7 @@ function exposeApp() {
                 this.credentialSlots = data.slots || [];
                 this.credentialConfiguredCount = data.configured_count || 0;
                 this.credentialTotalCount = data.total_count || 0;
+                this._credentialsLoaded = true;
             } catch (e) {
                 this.credentialMessage = "Error loading credentials: " + e.message;
                 console.error("[EXPOSE] Credentials load error:", e);
@@ -867,24 +882,34 @@ function exposeApp() {
         /**
          * Initialize on mount — read any pre-set values from the DOM.
          */
+        applyEntityFilter() {
+            var filter = (this.entityFilter || "").toLowerCase().trim();
+            var rows = document.querySelectorAll("#entity-list .entity-row");
+            var visible = 0;
+            for (var i = 0; i < rows.length; i++) {
+                var text = rows[i].getAttribute("data-search-text") || "";
+                var match = !filter || text.indexOf(filter) >= 0;
+                rows[i].style.display = match ? "" : "none";
+                if (match) visible++;
+            }
+            this.entityCount = visible;
+        },
+
         init() {
             var self = this;
 
-            // Listen for HTMX events to update entity count
             document.addEventListener("htmx:afterSwap", function (event) {
                 if (event.detail.target && event.detail.target.id === "entity-list") {
                     var rows = event.detail.target.querySelectorAll(".entity-row");
-                    // Update entity count via Alpine's reactivity
                     var appEl = document.querySelector("[x-data]");
                     if (appEl && appEl.__x) {
                         appEl.__x.$data.entityCount = rows.length;
+                        appEl.__x.$data.applyEntityFilter();
                     }
                 }
             });
 
-            // If a tenant is already selected (e.g. page reload), kick off graph + stats
             if (this.selectedTenantId) {
-                // Defer to allow DOM to settle
                 setTimeout(function () {
                     self._initGraphAndPoll();
                     self.loadStats();
@@ -1091,12 +1116,8 @@ document.addEventListener("DOMContentLoaded", function () {
     if (graphContainer && typeof ResizeObserver !== "undefined") {
         var resizeTimer = null;
         var observer = new ResizeObserver(function () {
-            // Debounce to avoid excessive redraws
             clearTimeout(resizeTimer);
             resizeTimer = setTimeout(function () {
-                // Only reinitialize if ExposeGraph is active; the old
-                // placeholder initObservationGraph is no longer needed
-                // since ExposeGraph.init handles the full renderer.
                 var appEl = document.querySelector("[x-data]");
                 if (appEl && appEl.__x && appEl.__x.$data._graphInitialized) {
                     appEl.__x.$data._initGraphAndPoll();
@@ -1105,4 +1126,44 @@ document.addEventListener("DOMContentLoaded", function () {
         });
         observer.observe(graphContainer);
     }
+});
+
+
+/* =========================================================================
+   Split-pane drag handle
+   ========================================================================= */
+
+document.addEventListener("DOMContentLoaded", function () {
+    var handle = document.getElementById("split-handle");
+    var paneLeft = document.querySelector(".pane-left");
+    var splitPane = document.querySelector(".split-pane");
+    if (!handle || !paneLeft || !splitPane) return;
+
+    var dragging = false;
+
+    handle.addEventListener("mousedown", function (e) {
+        e.preventDefault();
+        dragging = true;
+        handle.classList.add("dragging");
+        document.body.style.cursor = "col-resize";
+        document.body.style.userSelect = "none";
+    });
+
+    document.addEventListener("mousemove", function (e) {
+        if (!dragging) return;
+        var rect = splitPane.getBoundingClientRect();
+        var offset = e.clientX - rect.left;
+        var pct = (offset / rect.width) * 100;
+        pct = Math.max(25, Math.min(pct, 75));
+        paneLeft.style.flex = "0 0 " + pct + "%";
+        paneLeft.style.maxWidth = pct + "%";
+    });
+
+    document.addEventListener("mouseup", function () {
+        if (!dragging) return;
+        dragging = false;
+        handle.classList.remove("dragging");
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+    });
 });

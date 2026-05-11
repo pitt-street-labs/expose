@@ -328,12 +328,37 @@ code, pre, .code-block, .api-key,
 .pane-left {
     flex: 0 0 var(--graph-pane-ratio);
     max-width: var(--graph-pane-ratio);
-    border-right: 1px solid var(--border);
 }
 
 .pane-right {
-    flex: 0 0 var(--table-pane-ratio);
-    max-width: var(--table-pane-ratio);
+    flex: 1 1 auto;
+    min-width: 200px;
+}
+
+.split-handle {
+    flex: 0 0 5px;
+    background: var(--border);
+    cursor: col-resize;
+    position: relative;
+    transition: background var(--transition-fast);
+    z-index: 5;
+}
+
+.split-handle:hover,
+.split-handle.dragging {
+    background: var(--accent);
+}
+
+.split-handle::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 3px;
+    height: 32px;
+    border-left: 1px solid var(--text-dim);
+    border-right: 1px solid var(--text-dim);
 }
 
 .pane-header {
@@ -878,11 +903,14 @@ code, pre, .code-block, .api-key,
         flex-direction: column;
     }
 
+    .split-handle {
+        display: none;
+    }
+
     .pane-left,
     .pane-right {
         flex: 0 0 auto;
         max-width: 100%;
-        border-right: none;
     }
 
     .pane-left {
