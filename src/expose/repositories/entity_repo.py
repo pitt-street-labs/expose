@@ -144,6 +144,22 @@ class EntityRepository:
             else:
                 seen[key] = dict(e)
 
+        deduped = list(seen.values())
+        all_results: list[Entity] = []
+        _CHUNK_SIZE = 500
+
+        for chunk_start in range(0, len(deduped), _CHUNK_SIZE):
+            chunk = deduped[chunk_start : chunk_start + _CHUNK_SIZE]
+            chunk_results = await self._batch_upsert_chunk(chunk)
+            all_results.extend(chunk_results)
+
+        return all_results
+
+    async def _batch_upsert_chunk(
+        self,
+        chunk: list[dict[str, Any]],
+    ) -> list[Entity]:
+        """Upsert a single chunk (max 500 entities) to stay within Postgres parameter limits."""
         values = [
             {
                 "id": uuid4(),
@@ -154,7 +170,7 @@ class EntityRepository:
                 "attribution_status": e["attribution_status"],
                 "attribution_confidence": e["attribution_confidence"],
             }
-            for e in seen.values()
+            for e in chunk
         ]
 
         insert_stmt = pg_insert(Entity).values(values)
