@@ -71,7 +71,7 @@ This repository (`pitt-street-labs/ff6k` on internal Gitea — repo path retains
 | Helm chart | `deploy/helm-chart/` (skeleton — full per-component manifests land Sprint 5+) |
 | CI workflow | `.github/workflows/ci.yml` (lint + test + schema-sync + FIPS gate + helm-lint + multi-arch container build + ci-gate aggregator) |
 | Pre-commit | `.pre-commit-config.yaml` (ruff + gitleaks + check-jsonschema + helm lint) |
-| Tests | `tests/` — **3617+ tests as of edf445f.** 100+ test files. Conftest provides `pg_container` + `nats_container` shared session fixtures. aiosqlite for fast API unit tests. #73 fixed. |
+| Tests | `tests/` — **3679+ tests as of 7b45a0c.** 100+ test files. Conftest provides `pg_container` + `nats_container` shared session fixtures. aiosqlite for fast API unit tests. #73 fixed. |
 | Deploy artifacts | `deploy/helm-chart/` (NetworkPolicy + PodSecurity hardened), `deploy/cosign-keypair-setup.md`, `deploy/grafana/` (2 dashboards + README), `scripts/generate-sbom.sh` |
 | Strategy docs | `docs/strategy/` — postgres-deployment-guide, lab-to-production-runbook, network-security-guide, sbom-and-signing-guide, air-gap-deployment-guide, persona-analysis, competitive-analysis, framework-annotation, sdlp, federal-customer-deployment-guide, critical-path, commercial-moat-and-revenue, framework-mapping |
 | GitHub-launch docs | `README.md` (public-facing), `CHANGELOG.md` (v0.2.0), `ROADMAP.md`, `GOVERNANCE.md`, `CONTRIBUTING.md` (rewritten for public), `docs/collectors.md` (41-collector catalog), `docs/quickstart.md` (full API catalog), `docs/why-expose.md` (12-axis comparison), `docs/use-cases.md` (8 persona workflows), `docs/user-guide.md` (1298-line feature walkthrough) |
