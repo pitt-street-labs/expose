@@ -38,6 +38,60 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
 # ---------------------------------------------------------------------------
+# Predicate-to-dimension mapping (closed vocabulary per SPEC §8.2)
+# ---------------------------------------------------------------------------
+
+_PREDICATE_DIMENSION_MAP: dict[str, str] = {
+    "target_has_certificate_with_san_in_scope": "cert",
+    "target_ip_in_authorized_cloud_account_range": "cloud",
+    "target_registrant_matches_authorized_pattern": "whois",
+    "target_shares_cert_chain_with_attributed_target": "cert",
+    "target_nameserver_matches_authorized_pattern": "nameserver",
+    "target_asn_in_authorized_list": "asn",
+    "target_subdomain_of_authorized_apex": "subdomain",
+    "target_in_explicit_authorization_scope": "explicit",
+    "target_observed_by_collectors_count_gte": "observation",
+    "target_first_observed_within_days": "recency",
+    "target_has_exposure_indicator": "exposure",
+    "target_responds_with_authorized_naming_convention": "naming",
+}
+
+# Human-readable description templates keyed by dimension.
+_DIMENSION_DESCRIPTIONS: dict[str, str] = {
+    "cert": "Shares TLS certificate evidence",
+    "cloud": "IP in authorized cloud account range",
+    "whois": "WHOIS registrant matches authorized pattern",
+    "nameserver": "Nameserver matches authorized pattern",
+    "asn": "ASN in authorized list",
+    "subdomain": "Subdomain of authorized apex domain",
+    "explicit": "Explicitly in authorization scope",
+    "observation": "Observed by multiple independent collectors",
+    "recency": "First observed within recency window",
+    "exposure": "Has exposure indicator",
+    "naming": "Responds with authorized naming convention",
+}
+
+# Relationship edge-type to dimension mapping for fallback evidence.
+_EDGE_DIMENSION_MAP: dict[str, str] = {
+    "ns_for": "nameserver",
+    "certificate_for": "cert",
+    "belongs_to": "whois",
+    "hosts": "dns",
+    "resolves_to": "dns",
+    "depends_on": "cloud",
+    "cname_for": "dns",
+    "mx_for": "dns",
+    "acquired_by": "whois",
+}
+
+# The complete set of pivot dimensions checked during correlation.
+ALL_PIVOT_DIMENSIONS: set[str] = {
+    "cert", "dns", "whois", "asn", "nameserver", "subdomain",
+    "cloud", "observation", "exposure", "naming", "explicit", "recency",
+}
+
+
+# ---------------------------------------------------------------------------
 # Response models (frozen — immutable once built)
 # ---------------------------------------------------------------------------
 
@@ -62,6 +116,31 @@ class ProvenanceRelationship(BaseModel):
     target_type: str
 
 
+class CorrelationEvidence(BaseModel):
+    """A single piece of correlation evidence supporting attribution."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    dimension: str
+    description: str
+    confidence_delta: float
+    source_entity: str | None = None
+    source_status: str | None = None
+    predicate: str | None = None
+
+
+class CorrelationSummary(BaseModel):
+    """Aggregated correlation evidence for an entity's attribution."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    total_confidence: float
+    evidence: list[CorrelationEvidence]
+    llm_analysis: str | None = None
+    pivot_dimensions_checked: int
+    pivot_dimensions_matched: int
+
+
 class ProvenanceResponse(BaseModel):
     """Full provenance chain for a single entity."""
 
@@ -75,6 +154,201 @@ class ProvenanceResponse(BaseModel):
     observations: list[ProvenanceObservation]
     rules_applied: list[ProvenanceRuleApplication]
     relationships: list[ProvenanceRelationship]
+    correlation: CorrelationSummary | None = None
+
+
+# ---------------------------------------------------------------------------
+# Correlation evidence builder
+# ---------------------------------------------------------------------------
+
+
+def _build_correlation_summary(
+    *,
+    props: dict,
+    rules_applied: list[ProvenanceRuleApplication],
+    prov_relationships: list[ProvenanceRelationship],
+    other_entities: dict[UUID, Entity],
+    entity: Entity,
+    relationships: list,
+    entity_id: UUID,
+    observations: list[ProvenanceObservation],
+) -> CorrelationSummary:
+    """Build a CorrelationSummary from rules, relationships, and observations.
+
+    Strategy:
+    1. If rules were applied (_rules_applied is populated), map each rule to
+       a CorrelationEvidence entry using the predicate-to-dimension map.
+    2. If no rules were applied, fall back to relationship-derived evidence.
+    3. Always add an observation-count evidence entry when multiple collectors
+       contributed.
+    4. Include LLM analysis text if present in properties.
+    """
+    evidence: list[CorrelationEvidence] = []
+    matched_dimensions: set[str] = set()
+
+    # --- Strategy 1: Build from applied rules --------------------------------
+    raw_rules = props.get("_rules_applied", [])
+    has_rules = isinstance(raw_rules, list) and len(raw_rules) > 0
+
+    if has_rules:
+        for rule in raw_rules:
+            if not isinstance(rule, dict):
+                continue
+            rule_id = rule.get("rule_id", "unknown")
+            outcome = rule.get("outcome", "unknown")
+            delta = float(rule.get("confidence_delta", 0.0))
+            predicate = rule.get("predicate")
+
+            # Determine the dimension from the predicate or rule_id
+            dimension = None
+            if predicate:
+                dimension = _PREDICATE_DIMENSION_MAP.get(predicate)
+
+            # Fall back to scanning the predicate map for a match in rule_id
+            if dimension is None:
+                for pred_key, dim in _PREDICATE_DIMENSION_MAP.items():
+                    # Match by substring of rule_id against the predicate key
+                    # (e.g., rule_id "cert-san-match" contains "cert")
+                    if pred_key in rule_id.lower().replace("-", "_"):
+                        dimension = dim
+                        break
+
+            # Last resort: infer from rule_id keywords
+            if dimension is None:
+                dimension = _infer_dimension_from_rule_id(rule_id)
+
+            description = _DIMENSION_DESCRIPTIONS.get(
+                dimension or "observation",
+                f"Rule {rule_id} evaluated",
+            )
+            description = f"{description} ({outcome})"
+
+            matched_dimensions.add(dimension or "observation")
+            evidence.append(CorrelationEvidence(
+                dimension=dimension or "observation",
+                description=description,
+                confidence_delta=delta,
+                source_entity=None,
+                source_status=outcome,
+                predicate=predicate,
+            ))
+
+    # --- Strategy 2: Fall back to relationship-derived evidence ---------------
+    if not has_rules and prov_relationships:
+        for rel in prov_relationships:
+            dimension = _EDGE_DIMENSION_MAP.get(rel.edge_type, "dns")
+            description = f"{_edge_type_label(rel.edge_type)} {rel.target_identifier}"
+            matched_dimensions.add(dimension)
+            evidence.append(CorrelationEvidence(
+                dimension=dimension,
+                description=description,
+                confidence_delta=0.0,
+                source_entity=rel.target_identifier,
+                source_status=None,
+                predicate=None,
+            ))
+
+    # --- Strategy 3: Add observation-count evidence --------------------------
+    collector_ids: set[str] = set()
+    raw_collector_ids = props.get("_collector_ids", [])
+    if not raw_collector_ids:
+        single = props.get("_collector_id")
+        if single:
+            raw_collector_ids = [single]
+    if isinstance(raw_collector_ids, str):
+        raw_collector_ids = [raw_collector_ids]
+    collector_ids.update(str(c) for c in raw_collector_ids)
+    # Also count relationship-derived collectors
+    for obs in observations:
+        collector_ids.add(obs.collector_id)
+
+    if len(collector_ids) > 1:
+        obs_dim = "observation"
+        if obs_dim not in matched_dimensions:
+            matched_dimensions.add(obs_dim)
+        evidence.append(CorrelationEvidence(
+            dimension=obs_dim,
+            description=f"Observed by {len(collector_ids)} independent collectors",
+            confidence_delta=0.0,
+            source_entity=None,
+            source_status=None,
+            predicate=None,
+        ))
+
+    # --- LLM analysis text ---------------------------------------------------
+    llm_analysis: str | None = None
+    llm_enrichment = props.get("_llm_enrichment")
+    if isinstance(llm_enrichment, dict):
+        # Try several common keys for the LLM summary text
+        llm_analysis = (
+            llm_enrichment.get("summary")
+            or llm_enrichment.get("analysis")
+            or llm_enrichment.get("attribution", {}).get("adjustment_reasoning")
+        )
+    if not llm_analysis:
+        llm_analysis = props.get("_llm_summary")
+
+    # --- Compute totals ------------------------------------------------------
+    total_confidence = sum(e.confidence_delta for e in evidence)
+    pivot_checked = len(ALL_PIVOT_DIMENSIONS)
+    pivot_matched = len(matched_dimensions & ALL_PIVOT_DIMENSIONS)
+
+    return CorrelationSummary(
+        total_confidence=round(total_confidence, 4),
+        evidence=evidence,
+        llm_analysis=llm_analysis,
+        pivot_dimensions_checked=pivot_checked,
+        pivot_dimensions_matched=pivot_matched,
+    )
+
+
+def _infer_dimension_from_rule_id(rule_id: str) -> str:
+    """Best-effort dimension inference from a rule ID string."""
+    rid = rule_id.lower()
+    keyword_map = {
+        "cert": "cert",
+        "tls": "cert",
+        "san": "cert",
+        "cloud": "cloud",
+        "whois": "whois",
+        "registrant": "whois",
+        "org": "whois",
+        "nameserver": "nameserver",
+        "ns": "nameserver",
+        "asn": "asn",
+        "subdomain": "subdomain",
+        "apex": "subdomain",
+        "scope": "explicit",
+        "explicit": "explicit",
+        "collector": "observation",
+        "observed": "observation",
+        "recen": "recency",
+        "first": "recency",
+        "expos": "exposure",
+        "naming": "naming",
+        "convention": "naming",
+        "dns": "dns",
+    }
+    for keyword, dim in keyword_map.items():
+        if keyword in rid:
+            return dim
+    return "observation"
+
+
+def _edge_type_label(edge_type: str) -> str:
+    """Human-readable prefix for a relationship edge type."""
+    labels = {
+        "ns_for": "Shares nameserver with",
+        "certificate_for": "Shares certificate with",
+        "belongs_to": "Belongs to",
+        "hosts": "Hosted by",
+        "resolves_to": "Resolves to",
+        "depends_on": "Depends on",
+        "cname_for": "CNAME for",
+        "mx_for": "MX for",
+        "acquired_by": "Acquired by",
+    }
+    return labels.get(edge_type, f"{edge_type} relationship with")
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +498,18 @@ async def get_provenance(
                     confidence_delta=rule.get("confidence_delta", 0.0),
                 ))
 
+    # -- Build correlation evidence -----------------------------------------
+    correlation = _build_correlation_summary(
+        props=props,
+        rules_applied=rules_applied,
+        prov_relationships=prov_relationships,
+        other_entities=other_entities,
+        entity=entity,
+        relationships=relationships,
+        entity_id=entity_id,
+        observations=observations,
+    )
+
     return ProvenanceResponse(
         entity_id=str(entity.id),
         entity_identifier=entity.canonical_identifier,
@@ -233,4 +519,5 @@ async def get_provenance(
         observations=observations,
         rules_applied=rules_applied,
         relationships=prov_relationships,
+        correlation=correlation,
     )

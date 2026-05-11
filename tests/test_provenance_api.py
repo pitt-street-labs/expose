@@ -390,3 +390,285 @@ async def test_provenance_cross_tenant_404(client: AsyncClient) -> None:
         f"/v1/tenants/{OTHER_TENANT_ID}/entities/{ENTITY_A_ID}/provenance"
     )
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# 8. Correlation evidence populated from rules_applied
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_correlation_evidence_from_rules(client: AsyncClient) -> None:
+    """Correlation evidence should be populated from _rules_applied
+    in entity properties. Entity A has 2 rules applied."""
+    resp = await client.get(
+        f"/v1/tenants/{TENANT_ID}/entities/{ENTITY_A_ID}/provenance"
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert "correlation" in data
+    correlation = data["correlation"]
+    assert correlation is not None
+    assert isinstance(correlation["evidence"], list)
+    # Entity A has 2 rules, so at least 2 evidence items from rules.
+    # May also have an observation-count entry.
+    assert len(correlation["evidence"]) >= 2
+    assert isinstance(correlation["total_confidence"], float)
+    assert isinstance(correlation["pivot_dimensions_checked"], int)
+    assert isinstance(correlation["pivot_dimensions_matched"], int)
+    assert correlation["pivot_dimensions_checked"] == 12  # all dimensions checked
+
+
+# ---------------------------------------------------------------------------
+# 9. Correlation evidence populated from relationships when no rules
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_correlation_evidence_from_relationships(client: AsyncClient) -> None:
+    """Entity B has no rules_applied but has a relationship. Correlation
+    evidence should fall back to relationship-derived entries."""
+    resp = await client.get(
+        f"/v1/tenants/{TENANT_ID}/entities/{ENTITY_B_ID}/provenance"
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    correlation = data["correlation"]
+    assert correlation is not None
+    # Entity B has a resolves_to relationship (incoming from A)
+    # which maps to dimension "dns"
+    assert len(correlation["evidence"]) >= 1
+    dimensions = [ev["dimension"] for ev in correlation["evidence"]]
+    assert "dns" in dimensions
+
+    # The relationship-derived evidence should reference entity A
+    dns_evidence = [ev for ev in correlation["evidence"] if ev["dimension"] == "dns"]
+    assert len(dns_evidence) >= 1
+    assert dns_evidence[0]["source_entity"] == "example.com"
+
+
+# ---------------------------------------------------------------------------
+# 10. Dimension mapping covers all 12 predicates
+# ---------------------------------------------------------------------------
+
+
+def test_predicate_dimension_mapping_complete() -> None:
+    """Every predicate in the closed vocabulary should have a dimension
+    mapping in the provenance API."""
+    from expose.api.provenance import _PREDICATE_DIMENSION_MAP
+    from expose.types.rulepack import Predicate
+
+    for pred in Predicate:
+        assert pred.value in _PREDICATE_DIMENSION_MAP, (
+            f"Predicate {pred.value} has no dimension mapping"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 11. LLM analysis included when present
+# ---------------------------------------------------------------------------
+
+ENTITY_LLM_ID = UUID("ffffffff-ffff-ffff-ffff-ffffffffffff")
+
+
+@pytest_asyncio.fixture
+async def client_with_llm(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[AsyncClient]:
+    """Client with an entity that has _llm_enrichment in properties."""
+    app = _make_app()
+
+    async def _override_session() -> AsyncIterator[AsyncSession]:
+        async with session_factory() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+
+    app.dependency_overrides[get_session] = _override_session
+
+    now = datetime(2026, 5, 11, 13, 0, 0, tzinfo=UTC)
+    async with session_factory() as session:
+        # Ensure tenant exists (may already from other fixtures sharing engine)
+        from sqlalchemy import select as sel
+        result = await session.execute(sel(Tenant).where(Tenant.id == TENANT_ID))
+        if result.scalar_one_or_none() is None:
+            session.add(Tenant(
+                id=TENANT_ID,
+                name="test-tenant",
+                created_at=now,
+                config_jsonb={"state": "active"},
+            ))
+
+        entity_llm = Entity(
+            id=ENTITY_LLM_ID,
+            tenant_id=TENANT_ID,
+            entity_type="domain",
+            canonical_identifier="llm-test.example.com",
+            properties={
+                "_collector_id": "dns-brute",
+                "_observed_at": "2026-05-11T13:00:00Z",
+                "_llm_enrichment": {
+                    "summary": "This domain appears to be a staging environment for acme-corp.com based on certificate and DNS overlap.",
+                    "attribution": {
+                        "adjustment_reasoning": "High confidence due to shared infrastructure",
+                        "original_confidence": 0.5,
+                        "adjusted_confidence": 0.8,
+                    },
+                },
+                "_rules_applied": [
+                    {
+                        "rule_id": "cert-san-match",
+                        "outcome": "match",
+                        "confidence_delta": 0.3,
+                        "predicate": "target_has_certificate_with_san_in_scope",
+                    },
+                ],
+            },
+            attribution_status="high",
+            attribution_confidence=Decimal("0.800"),
+            first_observed_at=now,
+            last_observed_at=now,
+        )
+        session.add(entity_llm)
+        await session.commit()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as c:
+        yield c
+
+
+@pytest.mark.anyio
+async def test_correlation_llm_analysis(client_with_llm: AsyncClient) -> None:
+    """LLM analysis text should appear in the correlation summary when
+    _llm_enrichment is present in entity properties."""
+    resp = await client_with_llm.get(
+        f"/v1/tenants/{TENANT_ID}/entities/{ENTITY_LLM_ID}/provenance"
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    correlation = data["correlation"]
+    assert correlation is not None
+    assert correlation["llm_analysis"] is not None
+    assert "staging environment" in correlation["llm_analysis"]
+
+
+# ---------------------------------------------------------------------------
+# 12. Pivot dimension counts are correct
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_correlation_pivot_dimension_counts(client: AsyncClient) -> None:
+    """pivot_dimensions_checked should be 12 (all dimensions). matched
+    should equal the number of distinct dimensions in evidence."""
+    resp = await client.get(
+        f"/v1/tenants/{TENANT_ID}/entities/{ENTITY_A_ID}/provenance"
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    correlation = data["correlation"]
+    assert correlation is not None
+    assert correlation["pivot_dimensions_checked"] == 12
+
+    # matched should equal distinct dimensions in evidence (may also include
+    # observation if collectors > 1)
+    evidence_dims = {ev["dimension"] for ev in correlation["evidence"]}
+    assert correlation["pivot_dimensions_matched"] == len(evidence_dims)
+    assert correlation["pivot_dimensions_matched"] > 0
+    assert correlation["pivot_dimensions_matched"] <= 12
+
+
+# ---------------------------------------------------------------------------
+# 13. Predicate field propagated from rules
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_correlation_predicate_propagated(client_with_llm: AsyncClient) -> None:
+    """When a rule has a predicate field, it should appear in the
+    CorrelationEvidence entry."""
+    resp = await client_with_llm.get(
+        f"/v1/tenants/{TENANT_ID}/entities/{ENTITY_LLM_ID}/provenance"
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    correlation = data["correlation"]
+    assert correlation is not None
+    # Find the cert evidence (from the predicate)
+    cert_evidence = [
+        ev for ev in correlation["evidence"]
+        if ev["dimension"] == "cert"
+    ]
+    assert len(cert_evidence) >= 1
+    assert cert_evidence[0]["predicate"] == "target_has_certificate_with_san_in_scope"
+
+
+# ---------------------------------------------------------------------------
+# 14. Observation count evidence when multiple collectors
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_correlation_observation_count(client: AsyncClient) -> None:
+    """Entity A has collector 'dns-brute' in properties and 'active-dns'
+    from the relationship — should produce an observation evidence entry."""
+    resp = await client.get(
+        f"/v1/tenants/{TENANT_ID}/entities/{ENTITY_A_ID}/provenance"
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    correlation = data["correlation"]
+    assert correlation is not None
+
+    obs_evidence = [
+        ev for ev in correlation["evidence"]
+        if ev["dimension"] == "observation"
+        and "collectors" in ev["description"].lower()
+    ]
+    # Entity A has 2 distinct collectors (dns-brute + active-dns)
+    assert len(obs_evidence) >= 1
+    assert "2" in obs_evidence[0]["description"]
+
+
+# ---------------------------------------------------------------------------
+# 15. Correlation structure has all required fields
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_correlation_response_structure(client: AsyncClient) -> None:
+    """Verify the correlation field includes all expected sub-fields."""
+    resp = await client.get(
+        f"/v1/tenants/{TENANT_ID}/entities/{ENTITY_A_ID}/provenance"
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert "correlation" in data
+    correlation = data["correlation"]
+    assert "total_confidence" in correlation
+    assert "evidence" in correlation
+    assert "llm_analysis" in correlation
+    assert "pivot_dimensions_checked" in correlation
+    assert "pivot_dimensions_matched" in correlation
+
+    # Evidence items structure
+    for ev in correlation["evidence"]:
+        assert "dimension" in ev
+        assert "description" in ev
+        assert "confidence_delta" in ev
+        # Optional fields should be present (even if null)
+        assert "source_entity" in ev
+        assert "source_status" in ev
+        assert "predicate" in ev

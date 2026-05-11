@@ -1068,6 +1068,83 @@ function exposeApp() {
         },
 
         /**
+         * Return the CSS color for a correlation evidence dimension.
+         * Each dimension in the 12-predicate vocabulary has a distinct color
+         * for visual distinction in the evidence tree.
+         *
+         * @param {string} dimension - Dimension slug (cert, dns, whois, etc.)
+         * @returns {string} CSS color value
+         */
+        dimensionColor(dimension) {
+            var colors = {
+                cert:        "#00BCD4",
+                dns:         "#2196F3",
+                whois:       "#9C27B0",
+                asn:         "#FF9800",
+                nameserver:  "#795548",
+                subdomain:   "#4CAF50",
+                cloud:       "#bc8cff",
+                observation: "#607D8B",
+                exposure:    "#f85149",
+                naming:      "#d29922",
+                explicit:    "#3fb950",
+                recency:     "#58a6ff",
+            };
+            return colors[(dimension || "").toLowerCase()] || "var(--text-muted)";
+        },
+
+        /**
+         * Format a confidence delta as a signed string with appropriate
+         * color class for display in the evidence tree.
+         *
+         * @param {number} delta - Confidence delta value
+         * @returns {string} Formatted string like "+0.30" or "-0.10"
+         */
+        formatDelta(delta) {
+            if (delta === 0) return "0.00";
+            var sign = delta > 0 ? "+" : "";
+            return sign + delta.toFixed(2);
+        },
+
+        /**
+         * Check whether a pivot dimension was matched in the correlation summary.
+         *
+         * @param {string} dimension - Dimension slug
+         * @returns {boolean} True if any evidence item uses this dimension
+         */
+        isDimensionMatched(dimension) {
+            if (!this.provenanceData || !this.provenanceData.correlation) return false;
+            var evidence = this.provenanceData.correlation.evidence || [];
+            for (var i = 0; i < evidence.length; i++) {
+                if (evidence[i].dimension === dimension) return true;
+            }
+            return false;
+        },
+
+        /**
+         * Navigate to a related entity's provenance by finding and clicking it
+         * in the entity table, or by loading its provenance directly if we can
+         * resolve its UUID.
+         *
+         * @param {string} identifier - The source_entity canonical identifier
+         */
+        navigateToEntityProvenance(identifier) {
+            if (!identifier) return;
+            // Try to find the entity row in the table and click it
+            var rows = document.querySelectorAll("#entity-list .entity-row");
+            for (var i = 0; i < rows.length; i++) {
+                var text = rows[i].getAttribute("data-search-text") || "";
+                if (text.indexOf(identifier.toLowerCase()) >= 0) {
+                    rows[i].click();
+                    rows[i].scrollIntoView({ behavior: "smooth", block: "center" });
+                    return;
+                }
+            }
+            // Also highlight on the graph
+            this.highlightEntity(identifier);
+        },
+
+        /**
          * Map a lead score (0-100) to a CSS color variable.
          * Used by the findings table score bar to indicate severity.
          *

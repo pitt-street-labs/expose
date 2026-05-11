@@ -584,34 +584,103 @@
     <!-- ===== Provenance Detail Panel ===== -->
     <div class="card provenance-panel" x-show="selectedTenantId && provenanceData" x-cloak
          style="margin: 0 var(--space-lg); margin-bottom: var(--space-md);">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <h2 class="pane-title" style="margin: 0;">
-                Provenance Chain
-                <span class="help-tip" data-tip="Shows the evidence trail for this entity: which collectors observed it, what rules were applied, and how it connects to other entities. This is the trust-verification chain that supports attribution.">i</span>
-                <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400; margin-left: 0.5rem;"
-                      x-text="provenanceData ? provenanceData.entity_identifier : ''"></span>
-            </h2>
+
+        <!-- Header: Entity identifier + type/status badges + close -->
+        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div>
+                <h2 class="pane-title" style="margin: 0;">
+                    Provenance Chain
+                    <span class="help-tip" data-tip="Shows the evidence trail for this entity: which collectors observed it, what rules were applied, and how it connects to other entities. This is the trust-verification chain that supports attribution.">i</span>
+                </h2>
+                <div style="margin-top: 6px; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                    <span style="font-family: var(--font-mono); font-size: 1rem; font-weight: 700; color: var(--text-primary);"
+                          x-text="provenanceData ? provenanceData.entity_identifier : ''"></span>
+                    <span class="entity-type-badge" x-text="provenanceData?.entity_type"
+                          :class="'entity-type-' + (provenanceData?.entity_type || '')"
+                          style="font-size: 0.65rem;"></span>
+                    <span :class="'attribution-badge attribution-' + (provenanceData?.attribution_status || '')"
+                          x-text="provenanceData?.attribution_status"
+                          style="font-size: 0.65rem;"></span>
+                    <span style="font-family: var(--font-mono); font-size: 0.85rem; font-weight: 600; color: var(--accent);"
+                          x-text="provenanceData ? (provenanceData.attribution_confidence * 100).toFixed(1) + '%' : '--'"></span>
+                </div>
+            </div>
             <button class="btn btn-ghost" style="font-size: 0.75rem;"
                     @click="provenanceData = null">Close</button>
         </div>
 
-        <!-- Attribution summary -->
-        <div style="display: flex; gap: var(--space-md); margin-top: var(--space-sm); align-items: center; flex-wrap: wrap;">
-            <div style="font-size: 0.8rem;">
-                <span style="color: var(--text-muted); text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em;">Type</span>
-                <div class="entity-type-badge" x-text="provenanceData?.entity_type" style="margin-top: 2px;"></div>
+        <!-- Confidence bar -->
+        <div class="correlation-confidence-bar" style="margin-top: var(--space-sm);">
+            <div class="correlation-confidence-fill"
+                 :style="'width:' + (provenanceData ? (provenanceData.attribution_confidence * 100) : 0) + '%; background: ' + (provenanceData && provenanceData.attribution_confidence >= 0.8 ? 'var(--success, #34d399)' : provenanceData && provenanceData.attribution_confidence >= 0.5 ? 'var(--warning, #eab308)' : 'var(--text-dim)')"></div>
+        </div>
+
+        <!-- Attribution Evidence Tree -->
+        <div style="margin-top: var(--space-md);"
+             x-show="provenanceData && provenanceData.correlation && provenanceData.correlation.evidence.length > 0">
+            <h3 style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: var(--space-xs);">
+                Attribution Evidence
+                <span x-text="provenanceData && provenanceData.correlation ? '(' + provenanceData.correlation.evidence.length + ')' : ''"></span>
+            </h3>
+            <div class="correlation-evidence-tree">
+                <template x-for="(ev, idx) in (provenanceData?.correlation?.evidence || [])" :key="idx">
+                    <div class="correlation-evidence-item"
+                         :class="idx === (provenanceData?.correlation?.evidence || []).length - 1 ? 'correlation-evidence-last' : ''">
+                        <span class="correlation-tree-connector"
+                              x-text="idx === (provenanceData?.correlation?.evidence || []).length - 1 ? '└─' : '├─'"></span>
+                        <span class="correlation-dimension-badge"
+                              :style="'background:' + dimensionColor(ev.dimension) + '22; color:' + dimensionColor(ev.dimension) + '; border-color:' + dimensionColor(ev.dimension) + '44'"
+                              x-text="ev.dimension.toUpperCase()"></span>
+                        <span class="correlation-evidence-desc"
+                              x-text="ev.description"></span>
+                        <span class="correlation-evidence-delta"
+                              :style="'color:' + (ev.confidence_delta > 0 ? 'var(--success, #34d399)' : ev.confidence_delta < 0 ? 'var(--error, #f85149)' : 'var(--text-dim)')"
+                              x-text="formatDelta(ev.confidence_delta)"></span>
+                        <span class="correlation-evidence-source"
+                              x-show="ev.source_entity"
+                              @click="navigateToEntityProvenance(ev.source_entity)"
+                              x-text="ev.source_entity"
+                              style="cursor: pointer; text-decoration: underline; text-decoration-style: dotted;"></span>
+                    </div>
+                </template>
+                <!-- Total line -->
+                <div class="correlation-evidence-total"
+                     x-show="provenanceData && provenanceData.correlation">
+                    <span style="flex: 1; text-align: right; padding-right: var(--space-sm); font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em;">Total:</span>
+                    <span style="font-family: var(--font-mono); font-weight: 700; font-size: 0.85rem;"
+                          :style="'color:' + (provenanceData?.correlation?.total_confidence > 0 ? 'var(--success, #34d399)' : 'var(--text-dim)')"
+                          x-text="provenanceData && provenanceData.correlation ? formatDelta(provenanceData.correlation.total_confidence) : '0.00'"></span>
+                </div>
             </div>
-            <div style="font-size: 0.8rem;">
-                <span style="color: var(--text-muted); text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em;">Status</span>
-                <div x-text="provenanceData?.attribution_status"
-                     :class="'attribution-badge attribution-' + (provenanceData?.attribution_status || '')"
-                     style="margin-top: 2px;"></div>
+        </div>
+
+        <!-- Pivot Dimensions Summary Grid -->
+        <div style="margin-top: var(--space-md);"
+             x-show="provenanceData && provenanceData.correlation">
+            <h3 style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: var(--space-xs);">
+                Pivot Dimensions
+                <span x-text="provenanceData && provenanceData.correlation ? provenanceData.correlation.pivot_dimensions_matched + '/' + provenanceData.correlation.pivot_dimensions_checked + ' matched' : ''"></span>
+            </h3>
+            <div class="correlation-pivot-grid">
+                <template x-for="dim in ['cert','dns','whois','asn','nameserver','subdomain','cloud','observation','exposure','naming','explicit','recency']" :key="dim">
+                    <span class="correlation-pivot-item"
+                          :class="isDimensionMatched(dim) ? 'correlation-pivot-matched' : 'correlation-pivot-unmatched'"
+                          :style="isDimensionMatched(dim) ? 'border-color:' + dimensionColor(dim) + '66; color:' + dimensionColor(dim) : ''">
+                        <span x-text="isDimensionMatched(dim) ? '✓' : '✗'" style="font-size: 0.7rem;"></span>
+                        <span x-text="dim.charAt(0).toUpperCase() + dim.slice(1)"></span>
+                    </span>
+                </template>
             </div>
-            <div style="font-size: 0.8rem;">
-                <span style="color: var(--text-muted); text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em;">Confidence</span>
-                <div style="font-family: var(--font-mono); font-weight: 600; margin-top: 2px;"
-                     x-text="provenanceData ? (provenanceData.attribution_confidence * 100).toFixed(1) + '%' : '--'"></div>
-            </div>
+        </div>
+
+        <!-- LLM Analysis (if available) -->
+        <div style="margin-top: var(--space-md);"
+             x-show="provenanceData && provenanceData.correlation && provenanceData.correlation.llm_analysis">
+            <h3 style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: var(--space-xs);">
+                LLM Analysis
+            </h3>
+            <blockquote class="correlation-llm-analysis"
+                        x-text="provenanceData?.correlation?.llm_analysis || ''"></blockquote>
         </div>
 
         <!-- Observation timeline -->
@@ -680,7 +749,8 @@
                     </thead>
                     <tbody>
                         <template x-for="(rel, idx) in (provenanceData?.relationships || [])" :key="idx">
-                            <tr style="border-bottom: 1px solid var(--border-subtle);">
+                            <tr style="border-bottom: 1px solid var(--border-subtle); cursor: pointer;"
+                                @click="navigateToEntityProvenance(rel.target_identifier)">
                                 <td style="padding: 4px 8px;">
                                     <span class="provenance-edge-badge" x-text="rel.edge_type"></span>
                                 </td>
@@ -1065,6 +1135,122 @@
     background: var(--surface-raised);
     color: var(--text-secondary);
     border: 1px solid var(--border);
+}
+
+/* ===== Correlation Provenance Panel ===== */
+.correlation-confidence-bar {
+    height: 6px;
+    background: var(--surface-raised);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.correlation-confidence-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.4s ease, background 0.3s ease;
+}
+
+.correlation-evidence-tree {
+    border-left: 2px solid var(--border);
+    margin-left: 4px;
+    padding-left: 0;
+    font-size: 0.8rem;
+}
+.correlation-evidence-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 5px 0;
+    padding-left: 6px;
+    position: relative;
+    flex-wrap: wrap;
+}
+.correlation-tree-connector {
+    font-family: var(--font-mono);
+    color: var(--border);
+    flex-shrink: 0;
+    font-size: 0.8rem;
+    line-height: 1;
+    margin-left: -7px;
+}
+.correlation-dimension-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border: 1px solid;
+    flex-shrink: 0;
+    min-width: 4rem;
+    text-align: center;
+}
+.correlation-evidence-desc {
+    color: var(--text-secondary);
+    flex: 1;
+    min-width: 0;
+}
+.correlation-evidence-delta {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+    min-width: 3.5rem;
+    text-align: right;
+}
+.correlation-evidence-source {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--accent);
+    flex-shrink: 0;
+}
+.correlation-evidence-total {
+    display: flex;
+    align-items: center;
+    padding: 6px 0 2px 6px;
+    border-top: 1px solid var(--border-subtle);
+    margin-top: 4px;
+    margin-left: -7px;
+    padding-left: 13px;
+}
+
+/* Pivot dimensions grid */
+.correlation-pivot-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.correlation-pivot-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 0.7rem;
+    border: 1px solid var(--border);
+    transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+.correlation-pivot-matched {
+    font-weight: 600;
+}
+.correlation-pivot-unmatched {
+    color: var(--text-dim);
+    border-color: var(--border-subtle);
+    opacity: 0.6;
+}
+
+/* LLM analysis blockquote */
+.correlation-llm-analysis {
+    margin: 0;
+    padding: var(--space-sm) var(--space-md);
+    border-left: 3px solid var(--accent);
+    background: var(--surface-raised);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    font-style: italic;
 }
 
 .ai-insight-row {
