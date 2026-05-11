@@ -52,6 +52,86 @@ logger = logging.getLogger(__name__)
 # Default TLS port when not specified in seed properties.
 _DEFAULT_TLS_PORT = 443
 
+# ---------------------------------------------------------------------------
+# Cipher-suite strength classification
+# ---------------------------------------------------------------------------
+# Substrings that indicate an insecure cipher suite.
+_INSECURE_CIPHER_FRAGMENTS: tuple[str, ...] = (
+    "NULL",
+    "EXPORT",
+    "EXP-",       # OpenSSL export-grade cipher prefix
+    "EXP1024-",   # OpenSSL 1024-bit export-grade cipher prefix
+    "anon",       # Anonymous key exchange (IANA naming)
+    "ADH-",       # Anonymous Diffie-Hellman (OpenSSL naming)
+    "AECDH-",     # Anonymous Elliptic Curve DH (OpenSSL naming)
+)
+
+# Substrings that indicate a weak cipher suite.
+_WEAK_CIPHER_FRAGMENTS: tuple[str, ...] = (
+    "RC4",
+    "DES-CBC",    # Single DES (not 3DES)
+    "RC2",
+    "IDEA",
+    "SEED",
+)
+
+# Substrings that indicate an acceptable-but-not-strong cipher suite.
+_ACCEPTABLE_CIPHER_FRAGMENTS: tuple[str, ...] = (
+    "3DES",
+    "DES-CBC3",   # OpenSSL name for 3DES
+)
+
+# Protocol version assessment mapping.
+_PROTOCOL_ASSESSMENTS: dict[str | None, str] = {
+    "SSLv2": "insecure",
+    "SSLv3": "insecure",
+    "TLSv1": "deprecated",
+    "TLSv1.0": "deprecated",
+    "TLSv1.1": "deprecated",
+    "TLSv1.2": "acceptable",
+    "TLSv1.3": "preferred",
+}
+
+
+def _classify_cipher_strength(cipher_suite: str | None) -> str:
+    """Classify a negotiated cipher suite as strong/acceptable/weak/insecure.
+
+    Classification hierarchy (first match wins):
+    1. ``insecure`` — NULL, EXPORT, anonymous key exchange
+    2. ``acceptable`` — 3DES / DES-CBC3 (checked before weak to avoid
+       ``DES-CBC`` matching ``DES-CBC3`` as single DES)
+    3. ``weak`` — RC4, single DES, RC2, IDEA, SEED
+    4. ``strong`` — everything else (AES-GCM, ChaCha20, etc.)
+
+    Returns ``"unknown"`` if *cipher_suite* is None.
+    """
+    if cipher_suite is None:
+        return "unknown"
+    upper = cipher_suite.upper()
+    for frag in _INSECURE_CIPHER_FRAGMENTS:
+        if frag.upper() in upper:
+            return "insecure"
+    # Check acceptable (3DES) before weak (DES-CBC) to avoid substring
+    # collision: "DES-CBC3" contains "DES-CBC".
+    for frag in _ACCEPTABLE_CIPHER_FRAGMENTS:
+        if frag.upper() in upper:
+            return "acceptable"
+    for frag in _WEAK_CIPHER_FRAGMENTS:
+        if frag.upper() in upper:
+            return "weak"
+    return "strong"
+
+
+def _assess_protocol_version(tls_version: str | None) -> str:
+    """Assess the negotiated TLS protocol version.
+
+    Returns one of: ``"preferred"``, ``"acceptable"``, ``"deprecated"``,
+    ``"insecure"``, or ``"unknown"``.
+    """
+    if tls_version is None:
+        return "unknown"
+    return _PROTOCOL_ASSESSMENTS.get(tls_version, "unknown")
+
 # Well-known host used for health checks. Google's front-end servers have
 # valid TLS certificates and are highly available.
 _HEALTH_CHECK_HOST = "google.com"
@@ -95,6 +175,9 @@ def _extract_cert_details(
     When verify_mode is CERT_NONE, the parsed dict form returns an empty
     dict, so we fall back to parsing the DER certificate via the
     ``cryptography`` library.
+
+    Includes key algorithm/size extraction, chain depth estimation, and
+    key weakness detection.
     """
     details: dict[str, Any] = {
         "cert_subject_cn": None,
@@ -105,6 +188,11 @@ def _extract_cert_details(
         "cert_not_after": None,
         "cert_sans": [],
         "cert_fingerprint_sha256": None,
+        "key_algorithm": None,
+        "key_size_bits": None,
+        "key_weak": None,
+        "chain_depth": None,
+        "self_signed": None,
     }
 
     der_bytes = ssl_object.getpeercert(binary_form=True)
@@ -175,6 +263,56 @@ def _extract_cert_details(
             ]
         except ExtensionNotFound:
             details["cert_sans"] = []
+
+        # Public key algorithm and size
+        try:
+            from cryptography.hazmat.primitives.asymmetric import (  # noqa: PLC0415
+                dsa,
+                ec,
+                ed448,
+                ed25519,
+                rsa,
+            )
+
+            pub = cert.public_key()
+            if isinstance(pub, rsa.RSAPublicKey):
+                details["key_algorithm"] = "RSA"
+                details["key_size_bits"] = pub.key_size
+                details["key_weak"] = pub.key_size < 2048
+            elif isinstance(pub, ec.EllipticCurvePublicKey):
+                details["key_algorithm"] = "ECDSA"
+                details["key_size_bits"] = pub.key_size
+                details["key_weak"] = pub.key_size < 256
+            elif isinstance(pub, ed25519.Ed25519PublicKey):
+                details["key_algorithm"] = "Ed25519"
+                details["key_size_bits"] = 256
+                details["key_weak"] = False
+            elif isinstance(pub, ed448.Ed448PublicKey):
+                details["key_algorithm"] = "Ed448"
+                details["key_size_bits"] = 448
+                details["key_weak"] = False
+            elif isinstance(pub, dsa.DSAPublicKey):
+                details["key_algorithm"] = "DSA"
+                details["key_size_bits"] = pub.key_size
+                details["key_weak"] = pub.key_size < 2048
+            else:
+                details["key_algorithm"] = type(pub).__name__
+                details["key_size_bits"] = None
+                details["key_weak"] = None
+        except Exception:
+            logger.debug("Failed to extract public key info", exc_info=True)
+
+        # Chain depth and self-signed detection.
+        # Python 3.12 SSLObject does not expose get_unverified_chain(),
+        # so we infer from the leaf certificate: if subject == issuer,
+        # the cert is self-signed and chain depth is 1. Otherwise we
+        # report depth as None (unknown without the full chain).
+        try:
+            is_self_signed = cert.subject == cert.issuer
+            details["self_signed"] = is_self_signed
+            details["chain_depth"] = 1 if is_self_signed else None
+        except Exception:
+            logger.debug("Failed to determine chain depth", exc_info=True)
 
     except Exception:
         logger.debug(
@@ -284,9 +422,16 @@ class ActiveTlsCollector(Collector):
             # Compute JARM fingerprint (stub for v0.1.0).
             jarm = _compute_jarm(host, port)
 
+            # Classify cipher strength and protocol version.
+            cipher_strength = _classify_cipher_strength(cipher_suite)
+            protocol_assessment = _assess_protocol_version(tls_version)
+
             payload: dict[str, Any] = {
+                "_collector_id": self.collector_id,
                 "tls_version": tls_version,
+                "protocol_assessment": protocol_assessment,
                 "cipher_suite": cipher_suite,
+                "cipher_strength": cipher_strength,
                 "cert_subject_cn": cert_details["cert_subject_cn"],
                 "cert_issuer_cn": cert_details["cert_issuer_cn"],
                 "cert_issuer_org": cert_details["cert_issuer_org"],
@@ -295,6 +440,11 @@ class ActiveTlsCollector(Collector):
                 "cert_not_after": cert_details["cert_not_after"],
                 "cert_sans": cert_details["cert_sans"],
                 "cert_fingerprint_sha256": cert_details["cert_fingerprint_sha256"],
+                "key_algorithm": cert_details["key_algorithm"],
+                "key_size_bits": cert_details["key_size_bits"],
+                "key_weak": cert_details["key_weak"],
+                "chain_depth": cert_details["chain_depth"],
+                "self_signed": cert_details["self_signed"],
                 "jarm_fingerprint": jarm,
             }
 

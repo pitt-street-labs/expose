@@ -91,6 +91,13 @@ def _create_instruments(provider: MeterProvider) -> None:
     global observations_emitted  # noqa: PLW0603
     global run_duration  # noqa: PLW0603
     global active_runs  # noqa: PLW0603
+    global pipeline_dispatches_total  # noqa: PLW0603
+    global pipeline_dispatch_duration_seconds  # noqa: PLW0603
+    global pipeline_observations_total  # noqa: PLW0603
+    global pipeline_runs_total  # noqa: PLW0603
+    global pipeline_entities_discovered_total  # noqa: PLW0603
+    global pipeline_lead_score  # noqa: PLW0603
+    global api_requests_total  # noqa: PLW0603
 
     meter = provider.get_meter("expose.metrics", _get_service_version())
 
@@ -122,6 +129,50 @@ def _create_instruments(provider: MeterProvider) -> None:
         name="expose.runs.active",
         description="Number of pipeline runs currently in progress",
         unit="{run}",
+    )
+
+    # -- Pipeline-specific instruments (Sprint 4+) ----------------------------
+
+    pipeline_dispatches_total = meter.create_counter(
+        name="expose.pipeline.dispatches_total",
+        description="Total collector dispatches with outcome status",
+        unit="{dispatch}",
+    )
+
+    pipeline_dispatch_duration_seconds = meter.create_histogram(
+        name="expose.pipeline.dispatch_duration_seconds",
+        description="Duration of individual collector dispatches in seconds",
+        unit="s",
+    )
+
+    pipeline_observations_total = meter.create_counter(
+        name="expose.pipeline.observations_total",
+        description="Total observations produced by collectors",
+        unit="{observation}",
+    )
+
+    pipeline_runs_total = meter.create_counter(
+        name="expose.pipeline.runs_total",
+        description="Total pipeline runs by final outcome state",
+        unit="{run}",
+    )
+
+    pipeline_entities_discovered_total = meter.create_counter(
+        name="expose.pipeline.entities_discovered_total",
+        description="Total entities discovered across pipeline runs",
+        unit="{entity}",
+    )
+
+    pipeline_lead_score = meter.create_histogram(
+        name="expose.pipeline.lead_score",
+        description="Distribution of computed lead scores by priority tier",
+        unit="1",
+    )
+
+    api_requests_total = meter.create_counter(
+        name="expose.api.requests_total",
+        description="Total HTTP API requests handled",
+        unit="{request}",
     )
 
 
@@ -159,12 +210,100 @@ active_runs: UpDownCounter = _meter.create_up_down_counter(
     unit="{run}",
 )
 
+# -- Pipeline-specific proxy instruments ------------------------------------
+
+pipeline_dispatches_total: Counter = _meter.create_counter(
+    name="expose.pipeline.dispatches_total",
+    description="Total collector dispatches with outcome status",
+    unit="{dispatch}",
+)
+
+pipeline_dispatch_duration_seconds: Histogram = _meter.create_histogram(
+    name="expose.pipeline.dispatch_duration_seconds",
+    description="Duration of individual collector dispatches in seconds",
+    unit="s",
+)
+
+pipeline_observations_total: Counter = _meter.create_counter(
+    name="expose.pipeline.observations_total",
+    description="Total observations produced by collectors",
+    unit="{observation}",
+)
+
+pipeline_runs_total: Counter = _meter.create_counter(
+    name="expose.pipeline.runs_total",
+    description="Total pipeline runs by final outcome state",
+    unit="{run}",
+)
+
+pipeline_entities_discovered_total: Counter = _meter.create_counter(
+    name="expose.pipeline.entities_discovered_total",
+    description="Total entities discovered across pipeline runs",
+    unit="{entity}",
+)
+
+pipeline_lead_score: Histogram = _meter.create_histogram(
+    name="expose.pipeline.lead_score",
+    description="Distribution of computed lead scores by priority tier",
+    unit="1",
+)
+
+api_requests_total: Counter = _meter.create_counter(
+    name="expose.api.requests_total",
+    description="Total HTTP API requests handled",
+    unit="{request}",
+)
+
+
+# -- Prometheus metric reader (optional) ------------------------------------
+
+_prometheus_reader: MetricReader | None = None
+
+
+def get_prometheus_reader() -> MetricReader | None:
+    """Return the active ``PrometheusMetricReader`` if configured, else ``None``.
+
+    Called by the ``/metrics`` endpoint to check whether Prometheus scraping
+    is available.
+    """
+    return _prometheus_reader
+
+
+def init_prometheus_reader() -> MetricReader | None:
+    """Create and return a ``PrometheusMetricReader``.
+
+    Returns ``None`` if ``opentelemetry-exporter-prometheus`` is not
+    installed. The reader is cached at module level and returned on
+    subsequent calls.
+    """
+    global _prometheus_reader  # noqa: PLW0603
+    if _prometheus_reader is not None:
+        return _prometheus_reader
+    try:
+        from opentelemetry.exporter.prometheus import (  # noqa: PLC0415
+            PrometheusMetricReader,
+        )
+
+        _prometheus_reader = PrometheusMetricReader()
+        return _prometheus_reader
+    except ImportError:
+        return None
+
 
 __all__ = [
     "active_runs",
+    "api_requests_total",
     "collector_dispatch_count",
     "collector_dispatch_duration",
+    "get_prometheus_reader",
     "init_metrics",
+    "init_prometheus_reader",
     "observations_emitted",
+    "pipeline_dispatch_duration_seconds",
+    "pipeline_dispatches_total",
+    "pipeline_entities_discovered_total",
+    "pipeline_lead_score",
+    "pipeline_observations_total",
+    "pipeline_runs_total",
     "run_duration",
 ]

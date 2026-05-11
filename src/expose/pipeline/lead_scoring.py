@@ -12,6 +12,7 @@ observation dicts.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -88,6 +89,10 @@ _SIGNAL_PHRASES: dict[str, str] = {
     "missing_security_headers": "missing security headers",
     "weak_certificate": "weak/self-signed certificate",
     "debug_mode_detected": "debug mode enabled",
+    "open_port_risk": "risky open ports",
+    "deprecated_tls": "deprecated TLS configuration",
+    "dns_exposure": "DNS misconfiguration",
+    "http_technology_exposure": "HTTP technology exposure",
 }
 
 
@@ -189,6 +194,18 @@ class LeadScoringEngine:
 
         # 10. Debug mode / stack traces (+10)
         signals.extend(self._check_debug_mode(environment))
+
+        # 11. Open port risk (+5-20)
+        signals.extend(self._check_open_ports(obs))
+
+        # 12. Deprecated TLS (+10-15)
+        signals.extend(self._check_deprecated_tls(obs))
+
+        # 13. DNS exposure signals (+5-15)
+        signals.extend(self._check_dns_exposure(obs))
+
+        # 14. HTTP technology exposure (+5-10)
+        signals.extend(self._check_http_exposure(obs))
 
         # Aggregate
         raw_score = sum(s.points for s in signals)
@@ -466,6 +483,259 @@ class LeadScoringEngine:
                 source_module="environment_classifier",
             )
         ]
+
+    # -- Active-collector signal methods ---------------------------------------
+
+    # Port sets for risk classification.
+    _HIGH_RISK_PORTS: frozenset[int] = frozenset({
+        3306, 5432, 27017, 6379,  # databases
+        22, 3389, 5900,           # management
+    })
+    _MEDIUM_RISK_PORTS: frozenset[int] = frozenset({
+        135, 445,   # RPC / SMB
+        1883, 5672, # MQTT / AMQP
+    })
+    _WEB_PORTS: frozenset[int] = frozenset({80, 443, 8080, 8443})
+
+    # Weak cipher keywords (case-insensitive substring match).
+    _WEAK_CIPHER_KEYWORDS: tuple[str, ...] = ("RC4", "DES", "3DES", "NULL", "EXPORT")
+
+    # Regex for version numbers in Server header (e.g. "nginx/1.24.0").
+    _VERSION_RE: re.Pattern[str] = re.compile(r"/\d+[\d.]*")
+
+    @staticmethod
+    def _check_open_ports(
+        observations: list[dict[str, Any]],
+    ) -> list[ScoringSignal]:
+        """Open port risk → +5 (web-only), +10 (medium), +20 (high) points.
+
+        Examines ``active-port-surface`` observations for open ports and
+        classifies them by risk tier.  Only the highest-risk tier fires —
+        a target with both high-risk and web-only ports gets +20, not +25.
+        """
+        for obs in observations:
+            cid = obs.get("_collector_id") or obs.get("collector_id", "")
+            if cid != "active-port-surface":
+                continue
+
+            payload = obs.get("structured_payload", obs)
+            open_ports: list[int] = payload.get("open_ports", [])
+            if not open_ports:
+                continue
+
+            port_set = frozenset(open_ports)
+
+            if port_set & LeadScoringEngine._HIGH_RISK_PORTS:
+                hit = sorted(port_set & LeadScoringEngine._HIGH_RISK_PORTS)
+                return [
+                    ScoringSignal(
+                        signal_name="open_port_risk",
+                        points=20,
+                        evidence=f"High-risk ports open: {', '.join(str(p) for p in hit)}",
+                        source_module="port_surface",
+                    )
+                ]
+
+            if port_set & LeadScoringEngine._MEDIUM_RISK_PORTS:
+                hit = sorted(port_set & LeadScoringEngine._MEDIUM_RISK_PORTS)
+                return [
+                    ScoringSignal(
+                        signal_name="open_port_risk",
+                        points=10,
+                        evidence=f"Medium-risk ports open: {', '.join(str(p) for p in hit)}",
+                        source_module="port_surface",
+                    )
+                ]
+
+            if port_set <= LeadScoringEngine._WEB_PORTS:
+                return [
+                    ScoringSignal(
+                        signal_name="open_port_risk",
+                        points=5,
+                        evidence="Only web ports open",
+                        source_module="port_surface",
+                    )
+                ]
+
+        return []
+
+    @staticmethod
+    def _check_deprecated_tls(
+        observations: list[dict[str, Any]],
+    ) -> list[ScoringSignal]:
+        """Deprecated TLS version or weak ciphers → +10-15 points.
+
+        Examines ``active-tls-handshake`` observations.  Deprecated protocol
+        versions (TLSv1.0, TLSv1.1) score +15.  Weak cipher suites (RC4,
+        DES, 3DES, NULL, EXPORT) score +10.  Both can fire independently
+        but the method returns at most one signal (the higher-scoring one)
+        to avoid double-counting with the existing ``_check_weak_cert``.
+        """
+        for obs in observations:
+            cid = obs.get("_collector_id") or obs.get("collector_id", "")
+            if cid != "active-tls-handshake":
+                continue
+
+            payload = obs.get("structured_payload", obs)
+            tls_version: str = payload.get("tls_version") or ""
+            cipher_suite: str = payload.get("cipher_suite") or ""
+
+            # Deprecated protocol version.
+            if tls_version in ("TLSv1", "TLSv1.0", "TLSv1.1"):
+                return [
+                    ScoringSignal(
+                        signal_name="deprecated_tls",
+                        points=15,
+                        evidence=f"Deprecated TLS version: {tls_version}",
+                        source_module="tls_handshake",
+                    )
+                ]
+
+            # Weak cipher suite.
+            cipher_upper = cipher_suite.upper()
+            for kw in LeadScoringEngine._WEAK_CIPHER_KEYWORDS:
+                if kw in cipher_upper:
+                    return [
+                        ScoringSignal(
+                            signal_name="deprecated_tls",
+                            points=10,
+                            evidence=f"Weak cipher suite: {cipher_suite}",
+                            source_module="tls_handshake",
+                        )
+                    ]
+
+        return []
+
+    @staticmethod
+    def _check_dns_exposure(
+        observations: list[dict[str, Any]],
+    ) -> list[ScoringSignal]:
+        """DNS misconfiguration signals → +5-15 points.
+
+        Examines ``active-dns-resolve`` observations for:
+        - Zone transfer success (+15)
+        - Wildcard DNS detected (+10)
+        - No DNSSEC (+5)
+
+        Multiple signals can fire — e.g., a target with zone transfer AND
+        no DNSSEC gets both signals.
+        """
+        signals: list[ScoringSignal] = []
+
+        for obs in observations:
+            cid = obs.get("_collector_id") or obs.get("collector_id", "")
+            if cid != "active-dns-resolve":
+                continue
+
+            payload = obs.get("structured_payload", obs)
+
+            # Zone transfer successful.
+            if payload.get("zone_transfer"):
+                signals.append(
+                    ScoringSignal(
+                        signal_name="dns_exposure",
+                        points=15,
+                        evidence="Zone transfer successful — full zone data exposed",
+                        source_module="dns_resolve",
+                    )
+                )
+                return signals  # Major finding — return immediately.
+
+            # Wildcard DNS detected.
+            if payload.get("wildcard_dns"):
+                signals.append(
+                    ScoringSignal(
+                        signal_name="dns_exposure",
+                        points=10,
+                        evidence="Wildcard DNS detected — attack surface amplifier",
+                        source_module="dns_resolve",
+                    )
+                )
+                return signals
+
+            # No DNSSEC configured.
+            if payload.get("dnssec") is False:
+                signals.append(
+                    ScoringSignal(
+                        signal_name="dns_exposure",
+                        points=5,
+                        evidence="No DNSSEC configured",
+                        source_module="dns_resolve",
+                    )
+                )
+                return signals
+
+        return signals
+
+    @staticmethod
+    def _check_http_exposure(
+        observations: list[dict[str, Any]],
+    ) -> list[ScoringSignal]:
+        """HTTP technology exposure signals → +5-10 points.
+
+        Examines ``active-http-fingerprint`` observations for:
+        - Server header version leak (+5)
+        - Cookie without Secure/HttpOnly flags (+5)
+        - CORS wildcard origin (+10)
+
+        Multiple signals can fire independently.
+        """
+        signals: list[ScoringSignal] = []
+
+        for obs in observations:
+            cid = obs.get("_collector_id") or obs.get("collector_id", "")
+            if cid != "active-http-fingerprint":
+                continue
+
+            payload = obs.get("structured_payload", obs)
+
+            # Server header version leak.
+            server_header: str | None = payload.get("server_header")
+            if server_header and LeadScoringEngine._VERSION_RE.search(server_header):
+                signals.append(
+                    ScoringSignal(
+                        signal_name="http_technology_exposure",
+                        points=5,
+                        evidence=f"Server header leaks version: {server_header}",
+                        source_module="http_fingerprint",
+                    )
+                )
+
+            # Cookie without Secure/HttpOnly flags.
+            cookie_issues: list[dict[str, Any]] = payload.get("cookie_issues", [])
+            insecure_cookies: list[str] = []
+            for issue in cookie_issues:
+                missing = issue.get("missing_flags", [])
+                if "secure" in missing or "httponly" in missing:
+                    insecure_cookies.append(issue.get("name", "unknown"))
+            if insecure_cookies:
+                signals.append(
+                    ScoringSignal(
+                        signal_name="http_technology_exposure",
+                        points=5,
+                        evidence=f"Insecure cookies: {', '.join(insecure_cookies)}",
+                        source_module="http_fingerprint",
+                    )
+                )
+
+            # CORS wildcard origin.
+            cors_misconfig: dict[str, Any] | None = payload.get("cors_misconfig")
+            if cors_misconfig and "wildcard_origin" in cors_misconfig.get("issues", []):
+                signals.append(
+                    ScoringSignal(
+                        signal_name="http_technology_exposure",
+                        points=10,
+                        evidence="CORS wildcard origin (*) configured",
+                        source_module="http_fingerprint",
+                    )
+                )
+
+            # Return after first matching HTTP observation (avoid double-counting
+            # from multiple HTTP obs for same entity).
+            if signals:
+                return signals
+
+        return signals
 
 
 __all__ = [

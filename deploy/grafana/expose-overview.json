@@ -232,7 +232,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(increase(expose_run_duration_milliseconds_count[24h]))",
+          "expr": "sum(increase(expose_pipeline_runs_total[24h]))",
           "legendFormat": "24h",
           "instant": true,
           "refId": "A"
@@ -243,7 +243,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(increase(expose_run_duration_milliseconds_count[7d]))",
+          "expr": "sum(increase(expose_pipeline_runs_total[7d]))",
           "legendFormat": "7d",
           "instant": true,
           "refId": "B"
@@ -254,7 +254,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(increase(expose_run_duration_milliseconds_count[30d]))",
+          "expr": "sum(increase(expose_pipeline_runs_total[30d]))",
           "legendFormat": "30d",
           "instant": true,
           "refId": "C"
@@ -313,7 +313,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(increase(expose_run_duration_milliseconds_count{state=\"completed\"}[$__range])) / sum(increase(expose_run_duration_milliseconds_count[$__range]))",
+          "expr": "sum(increase(expose_pipeline_runs_total{final_state=\"completed\"}[$__range])) / sum(increase(expose_pipeline_runs_total[$__range]))",
           "legendFormat": "Success Rate",
           "instant": true,
           "refId": "A"
@@ -366,7 +366,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(increase(expose_observations_emitted_total[24h]))",
+          "expr": "sum(increase(expose_pipeline_observations_total[24h]))",
           "legendFormat": "Observations (24h)",
           "instant": true,
           "refId": "A"
@@ -419,7 +419,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (entity_type) (increase(expose_observations_emitted_total{entity_type!=\"\"}[$__range]))",
+          "expr": "sum by (entity_type) (increase(expose_pipeline_entities_discovered_total{entity_type!=\"\"}[$__range]))",
           "legendFormat": "{{entity_type}}",
           "instant": true,
           "refId": "A"
@@ -487,7 +487,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (collector_id) (increase(expose_collector_dispatch_count_total{status=\"success\"}[1h])) / sum by (collector_id) (increase(expose_collector_dispatch_count_total[1h]))",
+          "expr": "sum by (collector_id) (increase(expose_pipeline_dispatches_total{status=\"success\"}[1h])) / sum by (collector_id) (increase(expose_pipeline_dispatches_total[1h]))",
           "legendFormat": "{{collector_id}}",
           "instant": true,
           "refId": "A"
@@ -554,8 +554,8 @@
           {
             "matcher": { "id": "byName", "options": "Value #avg_duration" },
             "properties": [
-              { "id": "displayName", "value": "Avg Duration (ms)" },
-              { "id": "unit", "value": "ms" },
+              { "id": "displayName", "value": "Avg Duration" },
+              { "id": "unit", "value": "s" },
               { "id": "decimals", "value": 1 },
               {
                 "id": "thresholds",
@@ -615,7 +615,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (collector_id) (increase(expose_collector_dispatch_count_total{status=\"success\"}[1h])) / sum by (collector_id) (increase(expose_collector_dispatch_count_total[1h]))",
+          "expr": "sum by (collector_id) (increase(expose_pipeline_dispatches_total{status=\"success\"}[1h])) / sum by (collector_id) (increase(expose_pipeline_dispatches_total[1h]))",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -627,7 +627,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (collector_id) (rate(expose_collector_dispatch_duration_milliseconds_sum[1h])) / sum by (collector_id) (rate(expose_collector_dispatch_duration_milliseconds_count[1h]))",
+          "expr": "sum by (collector_id) (rate(expose_pipeline_dispatch_duration_seconds_sum[1h])) / sum by (collector_id) (rate(expose_pipeline_dispatch_duration_seconds_count[1h]))",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -639,7 +639,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (collector_id) (increase(expose_collector_dispatch_count_total[1h]))",
+          "expr": "sum by (collector_id) (increase(expose_pipeline_dispatches_total[1h]))",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -651,7 +651,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (collector_id) (increase(expose_observations_emitted_total[1h]))",
+          "expr": "sum by (collector_id) (increase(expose_pipeline_observations_total[1h]))",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -871,7 +871,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (collector_id) (increase(expose_observations_emitted_total[5m]))",
+          "expr": "sum by (collector_id) (increase(expose_pipeline_observations_total[5m]))",
           "legendFormat": "{{collector_id}}",
           "range": true,
           "refId": "A"
@@ -1091,10 +1091,10 @@
           "yHistogram": true
         },
         "yAxis": {
-          "axisLabel": "Duration (ms)",
+          "axisLabel": "Duration (s)",
           "axisPlacement": "left",
           "reverse": false,
-          "unit": "ms"
+          "unit": "s"
         }
       },
       "pluginVersion": "11.0.0",
@@ -1105,7 +1105,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(increase(expose_collector_dispatch_duration_milliseconds_bucket[5m])) by (le)",
+          "expr": "sum(increase(expose_pipeline_dispatch_duration_seconds_bucket[5m])) by (le)",
           "format": "heatmap",
           "legendFormat": "{{le}}",
           "range": true,
@@ -1201,7 +1201,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (tenant_id) (increase(expose_run_duration_milliseconds_count{tenant_id!=\"\"}[24h]))",
+          "expr": "sum by (tenant_id) (increase(expose_pipeline_runs_total{tenant_id!=\"\"}[24h]))",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -1210,6 +1210,259 @@
       ],
       "title": "Tenant Activity (24h)",
       "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 43 },
+      "id": 105,
+      "title": "API & Pipeline Rates",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Dispatch success vs failure rate over time across all collectors. A sustained failure spike indicates collector reliability issues.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Dispatches/sec",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "scheme",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "unit": "ops",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "success" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "error" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 44 },
+      "id": 14,
+      "options": {
+        "legend": {
+          "calcs": ["sum", "lastNotNull"],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(expose_pipeline_dispatches_total{status=\"success\"}[5m]))",
+          "legendFormat": "success",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(expose_pipeline_dispatches_total{status!=\"success\"}[5m]))",
+          "legendFormat": "error",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Dispatch Success / Failure Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Observations emitted per second across all collectors. Shows real-time data acquisition velocity.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Observations/sec",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "scheme",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "unit": "ops",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 44 },
+      "id": 15,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "max"],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(expose_pipeline_observations_total[5m]))",
+          "legendFormat": "observations/sec",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Observations Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Total API requests by HTTP method, path, and status code. Monitors API usage patterns and error rates.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Requests/sec",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "scheme",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "unit": "reqps",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 52 },
+      "id": 16,
+      "options": {
+        "legend": {
+          "calcs": ["sum", "mean"],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (method, path) (rate(expose_api_requests_total[5m]))",
+          "legendFormat": "{{method}} {{path}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "API Request Rate (by Method & Path)",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",
@@ -1222,7 +1475,10 @@
     "from": "now-6h",
     "to": "now"
   },
-  "timepicker": {},
+  "timepicker": {
+    "refresh_intervals": ["10s", "30s", "1m", "5m"],
+    "time_options": ["5m", "15m", "1h", "6h", "12h", "24h", "2d", "7d", "30d"]
+  },
   "timezone": "browser",
   "title": "EXPOSE Overview",
   "uid": "expose-overview",

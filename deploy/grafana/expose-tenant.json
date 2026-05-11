@@ -140,7 +140,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(increase(expose_run_duration_milliseconds_count{tenant_id=\"$tenant_id\"}[24h]))",
+          "expr": "sum(increase(expose_pipeline_runs_total{tenant_id=\"$tenant_id\"}[24h]))",
           "legendFormat": "Runs",
           "instant": true,
           "refId": "A"
@@ -193,7 +193,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(increase(expose_observations_emitted_total{tenant_id=\"$tenant_id\"}[24h]))",
+          "expr": "sum(increase(expose_pipeline_observations_total{tenant_id=\"$tenant_id\"}[24h]))",
           "legendFormat": "Observations",
           "instant": true,
           "refId": "A"
@@ -217,13 +217,13 @@
             "mode": "absolute",
             "steps": [
               { "color": "green", "value": null },
-              { "color": "yellow", "value": 500 },
-              { "color": "orange", "value": 2000 },
-              { "color": "red", "value": 5000 }
+              { "color": "yellow", "value": 0.5 },
+              { "color": "orange", "value": 2.0 },
+              { "color": "red", "value": 5.0 }
             ]
           },
           "mappings": [],
-          "unit": "ms"
+          "unit": "s"
         },
         "overrides": []
       },
@@ -249,7 +249,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(expose_collector_dispatch_duration_milliseconds_sum{tenant_id=\"$tenant_id\"}[1h])) / sum(rate(expose_collector_dispatch_duration_milliseconds_count{tenant_id=\"$tenant_id\"}[1h]))",
+          "expr": "sum(rate(expose_pipeline_dispatch_duration_seconds_sum{tenant_id=\"$tenant_id\"}[1h])) / sum(rate(expose_pipeline_dispatch_duration_seconds_count{tenant_id=\"$tenant_id\"}[1h]))",
           "legendFormat": "Avg Latency",
           "instant": true,
           "refId": "A"
@@ -306,7 +306,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(increase(expose_collector_dispatch_count_total{tenant_id=\"$tenant_id\", status=\"success\"}[1h])) / sum(increase(expose_collector_dispatch_count_total{tenant_id=\"$tenant_id\"}[1h]))",
+          "expr": "sum(increase(expose_pipeline_dispatches_total{tenant_id=\"$tenant_id\", status=\"success\"}[1h])) / sum(increase(expose_pipeline_dispatches_total{tenant_id=\"$tenant_id\"}[1h]))",
           "legendFormat": "Success Rate",
           "instant": true,
           "refId": "A"
@@ -364,7 +364,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(increase(expose_observations_emitted_total{tenant_id=\"$tenant_id\", attribution_status=\"confirmed\"}[$__range])) / sum(increase(expose_observations_emitted_total{tenant_id=\"$tenant_id\", attribution_status!=\"\"}[$__range]))",
+          "expr": "sum(increase(expose_pipeline_observations_total{tenant_id=\"$tenant_id\", attribution_status=\"confirmed\"}[$__range])) / sum(increase(expose_pipeline_observations_total{tenant_id=\"$tenant_id\", attribution_status!=\"\"}[$__range]))",
           "legendFormat": "Attribution Rate",
           "instant": true,
           "refId": "A"
@@ -445,7 +445,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (collector_id) (increase(expose_observations_emitted_total{tenant_id=\"$tenant_id\"}[5m]))",
+          "expr": "sum by (collector_id) (increase(expose_pipeline_observations_total{tenant_id=\"$tenant_id\"}[5m]))",
           "legendFormat": "{{collector_id}}",
           "range": true,
           "refId": "A"
@@ -521,7 +521,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (attribution_status) (increase(expose_observations_emitted_total{tenant_id=\"$tenant_id\", attribution_status!=\"\"}[$__range]))",
+          "expr": "sum by (attribution_status) (increase(expose_pipeline_observations_total{tenant_id=\"$tenant_id\", attribution_status!=\"\"}[$__range]))",
           "legendFormat": "{{attribution_status}}",
           "instant": true,
           "refId": "A"
@@ -533,6 +533,269 @@
     {
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 },
+      "id": 106,
+      "title": "Entity Discovery & Lead Scores",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Entity discovery rate by type for this tenant. Shows how quickly new entities (Domains, IPs, Certificates, etc.) are being found over time.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Entities",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "normal" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "id": 15,
+      "options": {
+        "legend": {
+          "calcs": ["sum"],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (entity_type) (increase(expose_pipeline_entities_discovered_total{tenant_id=\"$tenant_id\"}[5m]))",
+          "legendFormat": "{{entity_type}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Entity Discovery Rate (by Type)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Distribution of lead scores by priority tier for this tenant. Shows how findings are distributed across critical/high/medium/low tiers. Higher concentration in critical/high indicates more actionable intelligence.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          },
+          "mappings": [],
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "critical" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "high" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "medium" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "low" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "id": 16,
+      "options": {
+        "displayLabels": ["name", "percent"],
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "values": ["value", "percent"]
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (priority_tier) (increase(expose_pipeline_lead_score_count{tenant_id=\"$tenant_id\"}[$__range]))",
+          "legendFormat": "{{priority_tier}}",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Lead Score Distribution (by Priority Tier)",
+      "type": "piechart"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+      "id": 107,
+      "title": "Per-Tenant Run History",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Pipeline runs over time for this tenant, broken down by final state (completed, failed, timeout). Shows run frequency and reliability trends.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Runs",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "normal" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "completed" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "failed" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "timeout" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 25 },
+      "id": 17,
+      "options": {
+        "legend": {
+          "calcs": ["sum"],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (final_state) (increase(expose_pipeline_runs_total{tenant_id=\"$tenant_id\"}[1h]))",
+          "legendFormat": "{{final_state}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Run History (by Final State)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 33 },
       "id": 105,
       "title": "LLM Spend & Top Findings",
       "type": "row"
@@ -581,7 +844,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 34 },
       "id": 13,
       "options": {
         "legend": {
@@ -697,7 +960,7 @@
           }
         ]
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 34 },
       "id": 14,
       "options": {
         "cellHeight": "sm",
@@ -753,7 +1016,7 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 42 },
       "id": 102,
       "title": "Collector Detail",
       "type": "row"
@@ -822,15 +1085,15 @@
             "matcher": { "id": "byName", "options": "Value #avg_latency" },
             "properties": [
               { "id": "displayName", "value": "Avg Latency" },
-              { "id": "unit", "value": "ms" },
-              { "id": "decimals", "value": 1 }
+              { "id": "unit", "value": "s" },
+              { "id": "decimals", "value": 3 }
             ]
           },
           {
             "matcher": { "id": "byName", "options": "Value #p95_latency" },
             "properties": [
               { "id": "displayName", "value": "p95 Latency" },
-              { "id": "unit", "value": "ms" },
+              { "id": "unit", "value": "s" },
               { "id": "decimals", "value": 1 },
               {
                 "id": "thresholds",
@@ -858,7 +1121,7 @@
           }
         ]
       },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 25 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 43 },
       "id": 4,
       "options": {
         "cellHeight": "sm",
@@ -881,7 +1144,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (collector_id) (increase(expose_collector_dispatch_count_total{tenant_id=\"$tenant_id\", status=\"success\"}[1h]))",
+          "expr": "sum by (collector_id) (increase(expose_pipeline_dispatches_total{tenant_id=\"$tenant_id\", status=\"success\"}[1h]))",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -893,7 +1156,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (collector_id) (increase(expose_collector_dispatch_count_total{tenant_id=\"$tenant_id\", status!=\"success\"}[1h]))",
+          "expr": "sum by (collector_id) (increase(expose_pipeline_dispatches_total{tenant_id=\"$tenant_id\", status!=\"success\"}[1h]))",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -905,7 +1168,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (collector_id) (rate(expose_collector_dispatch_duration_milliseconds_sum{tenant_id=\"$tenant_id\"}[1h])) / sum by (collector_id) (rate(expose_collector_dispatch_duration_milliseconds_count{tenant_id=\"$tenant_id\"}[1h]))",
+          "expr": "sum by (collector_id) (rate(expose_pipeline_dispatch_duration_seconds_sum{tenant_id=\"$tenant_id\"}[1h])) / sum by (collector_id) (rate(expose_pipeline_dispatch_duration_seconds_count{tenant_id=\"$tenant_id\"}[1h]))",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -917,7 +1180,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (collector_id, le) (rate(expose_collector_dispatch_duration_milliseconds_bucket{tenant_id=\"$tenant_id\"}[1h])))",
+          "expr": "histogram_quantile(0.95, sum by (collector_id, le) (rate(expose_pipeline_dispatch_duration_seconds_bucket{tenant_id=\"$tenant_id\"}[1h])))",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -929,7 +1192,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (collector_id) (increase(expose_observations_emitted_total{tenant_id=\"$tenant_id\"}[1h]))",
+          "expr": "sum by (collector_id) (increase(expose_pipeline_observations_total{tenant_id=\"$tenant_id\"}[1h]))",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -957,7 +1220,7 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 33 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 51 },
       "id": 103,
       "title": "Recent Runs",
       "type": "row"
@@ -1045,7 +1308,7 @@
           }
         ]
       },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 34 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 52 },
       "id": 5,
       "options": {
         "cellHeight": "sm",
@@ -1068,7 +1331,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "expose_run_duration_milliseconds_sum{tenant_id=\"$tenant_id\", run_id!=\"\"} / expose_run_duration_milliseconds_count{tenant_id=\"$tenant_id\", run_id!=\"\"}",
+          "expr": "sum by (run_id, state) (increase(expose_pipeline_runs_total{tenant_id=\"$tenant_id\", run_id!=\"\"}[5m]))",
           "format": "table",
           "instant": false,
           "range": true,
@@ -1081,7 +1344,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (run_id, state) (increase(expose_observations_emitted_total{tenant_id=\"$tenant_id\", run_id!=\"\"}[5m]))",
+          "expr": "sum by (run_id) (increase(expose_pipeline_observations_total{tenant_id=\"$tenant_id\", run_id!=\"\"}[5m]))",
           "format": "table",
           "instant": false,
           "range": true,
@@ -1143,7 +1406,7 @@
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "definition": "label_values(expose_run_duration_milliseconds_count{tenant_id!=\"\"}, tenant_id)",
+        "definition": "label_values(expose_pipeline_runs_total{tenant_id!=\"\"}, tenant_id)",
         "description": "Select a tenant to view detailed metrics",
         "hide": 0,
         "includeAll": false,
@@ -1153,7 +1416,7 @@
         "options": [],
         "query": {
           "qryType": 1,
-          "query": "label_values(expose_run_duration_milliseconds_count{tenant_id!=\"\"}, tenant_id)",
+          "query": "label_values(expose_pipeline_runs_total{tenant_id!=\"\"}, tenant_id)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 2,
@@ -1168,7 +1431,10 @@
     "from": "now-24h",
     "to": "now"
   },
-  "timepicker": {},
+  "timepicker": {
+    "refresh_intervals": ["10s", "30s", "1m", "5m"],
+    "time_options": ["5m", "15m", "1h", "6h", "12h", "24h", "2d", "7d", "30d"]
+  },
   "timezone": "browser",
   "title": "EXPOSE Tenant Detail",
   "uid": "expose-tenant",

@@ -741,3 +741,714 @@ class TestScoreEntities:
     def test_empty_list_returns_empty(self) -> None:
         results = _ENGINE.score_entities([])
         assert results == []
+
+
+# ===========================================================================
+# Helpers for active-collector observation payloads
+# ===========================================================================
+
+
+def _port_obs(**payload_fields: object) -> dict[str, object]:
+    """Build a minimal active-port-surface observation dict."""
+    sp: dict[str, object] = {
+        "open_ports": [],
+        "closed_ports_probed": 27,
+        "total_ports_probed": 27,
+        "probe_timeout_seconds": 3.0,
+    }
+    sp.update(payload_fields)
+    return {"_collector_id": "active-port-surface", "structured_payload": sp}
+
+
+def _dns_obs(**payload_fields: object) -> dict[str, object]:
+    """Build a minimal active-dns-resolve observation dict."""
+    sp: dict[str, object] = {
+        "record_type": "A",
+        "values": ["93.184.215.14"],
+        "ttl": 300,
+    }
+    sp.update(payload_fields)
+    return {"_collector_id": "active-dns-resolve", "structured_payload": sp}
+
+
+# ===========================================================================
+# Open port risk signal tests
+# ===========================================================================
+
+
+class TestOpenPortRiskSignal:
+    """Open port risk → +5 (web), +10 (medium), +20 (high) points."""
+
+    def test_high_risk_database_ports_add_20(self) -> None:
+        obs = [_port_obs(open_ports=[80, 443, 3306, 5432])]
+        result = _ENGINE.score_entity(entity_identifier="db.example.com", observations=obs)
+        port_sigs = [s for s in result.contributing_signals if s.signal_name == "open_port_risk"]
+        assert len(port_sigs) == 1
+        assert port_sigs[0].points == 20
+        assert "3306" in port_sigs[0].evidence
+        assert "5432" in port_sigs[0].evidence
+
+    def test_high_risk_management_ports_add_20(self) -> None:
+        obs = [_port_obs(open_ports=[22, 3389, 5900])]
+        result = _ENGINE.score_entity(entity_identifier="mgmt.example.com", observations=obs)
+        port_sigs = [s for s in result.contributing_signals if s.signal_name == "open_port_risk"]
+        assert len(port_sigs) == 1
+        assert port_sigs[0].points == 20
+
+    def test_high_risk_redis_add_20(self) -> None:
+        obs = [_port_obs(open_ports=[6379])]
+        result = _ENGINE.score_entity(entity_identifier="redis.example.com", observations=obs)
+        port_sigs = [s for s in result.contributing_signals if s.signal_name == "open_port_risk"]
+        assert port_sigs[0].points == 20
+        assert "6379" in port_sigs[0].evidence
+
+    def test_high_risk_mongo_add_20(self) -> None:
+        obs = [_port_obs(open_ports=[27017])]
+        result = _ENGINE.score_entity(entity_identifier="mongo.example.com", observations=obs)
+        port_sigs = [s for s in result.contributing_signals if s.signal_name == "open_port_risk"]
+        assert port_sigs[0].points == 20
+        assert "27017" in port_sigs[0].evidence
+
+    def test_medium_risk_rpc_ports_add_10(self) -> None:
+        obs = [_port_obs(open_ports=[80, 443, 135, 445])]
+        result = _ENGINE.score_entity(entity_identifier="rpc.example.com", observations=obs)
+        port_sigs = [s for s in result.contributing_signals if s.signal_name == "open_port_risk"]
+        assert len(port_sigs) == 1
+        assert port_sigs[0].points == 10
+        assert "135" in port_sigs[0].evidence
+
+    def test_medium_risk_messaging_ports_add_10(self) -> None:
+        obs = [_port_obs(open_ports=[80, 1883, 5672])]
+        result = _ENGINE.score_entity(entity_identifier="mq.example.com", observations=obs)
+        port_sigs = [s for s in result.contributing_signals if s.signal_name == "open_port_risk"]
+        assert port_sigs[0].points == 10
+
+    def test_web_only_ports_add_5(self) -> None:
+        obs = [_port_obs(open_ports=[80, 443])]
+        result = _ENGINE.score_entity(entity_identifier="web.example.com", observations=obs)
+        port_sigs = [s for s in result.contributing_signals if s.signal_name == "open_port_risk"]
+        assert len(port_sigs) == 1
+        assert port_sigs[0].points == 5
+        assert "Only web ports" in port_sigs[0].evidence
+
+    def test_web_only_includes_alt_ports(self) -> None:
+        """8080 and 8443 are also considered web ports."""
+        obs = [_port_obs(open_ports=[8080, 8443])]
+        result = _ENGINE.score_entity(entity_identifier="web.example.com", observations=obs)
+        port_sigs = [s for s in result.contributing_signals if s.signal_name == "open_port_risk"]
+        assert port_sigs[0].points == 5
+
+    def test_no_open_ports_no_signal(self) -> None:
+        obs = [_port_obs(open_ports=[])]
+        result = _ENGINE.score_entity(entity_identifier="closed.example.com", observations=obs)
+        port_sigs = [s for s in result.contributing_signals if s.signal_name == "open_port_risk"]
+        assert len(port_sigs) == 0
+
+    def test_no_port_obs_no_signal(self) -> None:
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=[])
+        port_sigs = [s for s in result.contributing_signals if s.signal_name == "open_port_risk"]
+        assert len(port_sigs) == 0
+
+    def test_high_risk_trumps_medium(self) -> None:
+        """When both high and medium risk ports are open, only highest fires."""
+        obs = [_port_obs(open_ports=[445, 3306])]
+        result = _ENGINE.score_entity(entity_identifier="mixed.example.com", observations=obs)
+        port_sigs = [s for s in result.contributing_signals if s.signal_name == "open_port_risk"]
+        assert len(port_sigs) == 1
+        assert port_sigs[0].points == 20
+
+    def test_non_classified_ports_no_signal(self) -> None:
+        """Ports that are not in any risk category produce no signal."""
+        obs = [_port_obs(open_ports=[25, 53, 110])]
+        result = _ENGINE.score_entity(entity_identifier="mail.example.com", observations=obs)
+        port_sigs = [s for s in result.contributing_signals if s.signal_name == "open_port_risk"]
+        assert len(port_sigs) == 0
+
+    def test_signal_source_module(self) -> None:
+        obs = [_port_obs(open_ports=[3306])]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        port_sigs = [s for s in result.contributing_signals if s.signal_name == "open_port_risk"]
+        assert port_sigs[0].source_module == "port_surface"
+
+
+# ===========================================================================
+# Deprecated TLS signal tests
+# ===========================================================================
+
+
+class TestDeprecatedTlsSignal:
+    """Deprecated TLS → +10 (weak cipher) or +15 (old version) points."""
+
+    def test_tlsv1_0_adds_15(self) -> None:
+        obs = [_tls_obs(tls_version="TLSv1.0")]
+        result = _ENGINE.score_entity(entity_identifier="old.example.com", observations=obs)
+        tls_sigs = [s for s in result.contributing_signals if s.signal_name == "deprecated_tls"]
+        assert len(tls_sigs) == 1
+        assert tls_sigs[0].points == 15
+        assert "TLSv1.0" in tls_sigs[0].evidence
+
+    def test_tlsv1_bare_adds_15(self) -> None:
+        """Some libraries report 'TLSv1' without the '.0' suffix."""
+        obs = [_tls_obs(tls_version="TLSv1")]
+        result = _ENGINE.score_entity(entity_identifier="old.example.com", observations=obs)
+        tls_sigs = [s for s in result.contributing_signals if s.signal_name == "deprecated_tls"]
+        assert tls_sigs[0].points == 15
+
+    def test_tlsv1_1_adds_15(self) -> None:
+        obs = [_tls_obs(tls_version="TLSv1.1")]
+        result = _ENGINE.score_entity(entity_identifier="old.example.com", observations=obs)
+        tls_sigs = [s for s in result.contributing_signals if s.signal_name == "deprecated_tls"]
+        assert tls_sigs[0].points == 15
+        assert "TLSv1.1" in tls_sigs[0].evidence
+
+    def test_rc4_cipher_adds_10(self) -> None:
+        obs = [_tls_obs(tls_version="TLSv1.2", cipher_suite="RC4-SHA")]
+        result = _ENGINE.score_entity(entity_identifier="weak.example.com", observations=obs)
+        tls_sigs = [s for s in result.contributing_signals if s.signal_name == "deprecated_tls"]
+        assert len(tls_sigs) == 1
+        assert tls_sigs[0].points == 10
+        assert "RC4-SHA" in tls_sigs[0].evidence
+
+    def test_des_cipher_adds_10(self) -> None:
+        obs = [_tls_obs(tls_version="TLSv1.2", cipher_suite="DES-CBC3-SHA")]
+        result = _ENGINE.score_entity(entity_identifier="weak.example.com", observations=obs)
+        tls_sigs = [s for s in result.contributing_signals if s.signal_name == "deprecated_tls"]
+        assert tls_sigs[0].points == 10
+
+    def test_3des_cipher_adds_10(self) -> None:
+        obs = [_tls_obs(tls_version="TLSv1.2", cipher_suite="TLS_RSA_WITH_3DES_EDE_CBC_SHA")]
+        result = _ENGINE.score_entity(entity_identifier="weak.example.com", observations=obs)
+        tls_sigs = [s for s in result.contributing_signals if s.signal_name == "deprecated_tls"]
+        assert tls_sigs[0].points == 10
+
+    def test_null_cipher_adds_10(self) -> None:
+        obs = [_tls_obs(tls_version="TLSv1.2", cipher_suite="TLS_RSA_WITH_NULL_SHA256")]
+        result = _ENGINE.score_entity(entity_identifier="weak.example.com", observations=obs)
+        tls_sigs = [s for s in result.contributing_signals if s.signal_name == "deprecated_tls"]
+        assert tls_sigs[0].points == 10
+
+    def test_export_cipher_adds_10(self) -> None:
+        obs = [_tls_obs(tls_version="TLSv1.2", cipher_suite="TLS_RSA_EXPORT_WITH_RC4_40_MD5")]
+        result = _ENGINE.score_entity(entity_identifier="weak.example.com", observations=obs)
+        tls_sigs = [s for s in result.contributing_signals if s.signal_name == "deprecated_tls"]
+        assert tls_sigs[0].points == 10
+
+    def test_tls13_strong_cipher_no_signal(self) -> None:
+        obs = [_tls_obs(tls_version="TLSv1.3", cipher_suite="TLS_AES_256_GCM_SHA384")]
+        result = _ENGINE.score_entity(entity_identifier="secure.example.com", observations=obs)
+        tls_sigs = [s for s in result.contributing_signals if s.signal_name == "deprecated_tls"]
+        assert len(tls_sigs) == 0
+
+    def test_tls12_strong_cipher_no_signal(self) -> None:
+        obs = [_tls_obs(tls_version="TLSv1.2", cipher_suite="TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384")]
+        result = _ENGINE.score_entity(entity_identifier="secure.example.com", observations=obs)
+        tls_sigs = [s for s in result.contributing_signals if s.signal_name == "deprecated_tls"]
+        assert len(tls_sigs) == 0
+
+    def test_no_tls_obs_no_signal(self) -> None:
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=[])
+        tls_sigs = [s for s in result.contributing_signals if s.signal_name == "deprecated_tls"]
+        assert len(tls_sigs) == 0
+
+    def test_deprecated_version_trumps_weak_cipher(self) -> None:
+        """Deprecated version (15) returned before weak cipher (10) check."""
+        obs = [_tls_obs(tls_version="TLSv1.0", cipher_suite="RC4-SHA")]
+        result = _ENGINE.score_entity(entity_identifier="awful.example.com", observations=obs)
+        tls_sigs = [s for s in result.contributing_signals if s.signal_name == "deprecated_tls"]
+        assert len(tls_sigs) == 1
+        assert tls_sigs[0].points == 15
+
+    def test_signal_source_module(self) -> None:
+        obs = [_tls_obs(tls_version="TLSv1.0")]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        tls_sigs = [s for s in result.contributing_signals if s.signal_name == "deprecated_tls"]
+        assert tls_sigs[0].source_module == "tls_handshake"
+
+
+# ===========================================================================
+# DNS exposure signal tests
+# ===========================================================================
+
+
+class TestDnsExposureSignal:
+    """DNS exposure → +5 (no DNSSEC), +10 (wildcard), +15 (zone transfer)."""
+
+    def test_zone_transfer_adds_15(self) -> None:
+        obs = [_dns_obs(zone_transfer=True)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        dns_sigs = [s for s in result.contributing_signals if s.signal_name == "dns_exposure"]
+        assert len(dns_sigs) == 1
+        assert dns_sigs[0].points == 15
+        assert "zone" in dns_sigs[0].evidence.lower()
+
+    def test_wildcard_dns_adds_10(self) -> None:
+        obs = [_dns_obs(wildcard_dns=True)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        dns_sigs = [s for s in result.contributing_signals if s.signal_name == "dns_exposure"]
+        assert len(dns_sigs) == 1
+        assert dns_sigs[0].points == 10
+        assert "wildcard" in dns_sigs[0].evidence.lower()
+
+    def test_no_dnssec_adds_5(self) -> None:
+        obs = [_dns_obs(dnssec=False)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        dns_sigs = [s for s in result.contributing_signals if s.signal_name == "dns_exposure"]
+        assert len(dns_sigs) == 1
+        assert dns_sigs[0].points == 5
+        assert "DNSSEC" in dns_sigs[0].evidence
+
+    def test_dnssec_present_no_signal(self) -> None:
+        obs = [_dns_obs(dnssec=True)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        dns_sigs = [s for s in result.contributing_signals if s.signal_name == "dns_exposure"]
+        assert len(dns_sigs) == 0
+
+    def test_no_dns_obs_no_signal(self) -> None:
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=[])
+        dns_sigs = [s for s in result.contributing_signals if s.signal_name == "dns_exposure"]
+        assert len(dns_sigs) == 0
+
+    def test_zone_transfer_trumps_wildcard_and_dnssec(self) -> None:
+        """Zone transfer is the highest-priority DNS signal."""
+        obs = [_dns_obs(zone_transfer=True, wildcard_dns=True, dnssec=False)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        dns_sigs = [s for s in result.contributing_signals if s.signal_name == "dns_exposure"]
+        assert len(dns_sigs) == 1
+        assert dns_sigs[0].points == 15
+
+    def test_signal_source_module(self) -> None:
+        obs = [_dns_obs(zone_transfer=True)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        dns_sigs = [s for s in result.contributing_signals if s.signal_name == "dns_exposure"]
+        assert dns_sigs[0].source_module == "dns_resolve"
+
+    def test_zone_transfer_false_no_signal(self) -> None:
+        """Explicit False for zone_transfer does not trigger."""
+        obs = [_dns_obs(zone_transfer=False)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        dns_sigs = [s for s in result.contributing_signals if s.signal_name == "dns_exposure"]
+        assert len(dns_sigs) == 0
+
+
+# ===========================================================================
+# HTTP technology exposure signal tests
+# ===========================================================================
+
+
+class TestHttpExposureSignal:
+    """HTTP technology exposure → +5 (server version), +5 (cookies), +10 (CORS)."""
+
+    def test_server_version_leak_adds_5(self) -> None:
+        obs = [_http_obs(server_header="nginx/1.24.0")]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        http_sigs = [
+            s for s in result.contributing_signals if s.signal_name == "http_technology_exposure"
+        ]
+        assert any(s.points == 5 and "nginx/1.24.0" in s.evidence for s in http_sigs)
+
+    def test_server_header_without_version_no_signal(self) -> None:
+        obs = [_http_obs(server_header="nginx")]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        http_sigs = [
+            s for s in result.contributing_signals if s.signal_name == "http_technology_exposure"
+        ]
+        version_sigs = [s for s in http_sigs if "version" in s.evidence.lower()]
+        assert len(version_sigs) == 0
+
+    def test_no_server_header_no_version_signal(self) -> None:
+        obs = [_http_obs(server_header=None)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        http_sigs = [
+            s for s in result.contributing_signals if s.signal_name == "http_technology_exposure"
+        ]
+        version_sigs = [s for s in http_sigs if "version" in s.evidence.lower()]
+        assert len(version_sigs) == 0
+
+    def test_insecure_cookies_add_5(self) -> None:
+        obs = [
+            _http_obs(
+                cookie_issues=[
+                    {"name": "session_id", "missing_flags": ["secure", "httponly"]},
+                ]
+            )
+        ]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        http_sigs = [
+            s for s in result.contributing_signals if s.signal_name == "http_technology_exposure"
+        ]
+        cookie_sigs = [s for s in http_sigs if "cookie" in s.evidence.lower()]
+        assert len(cookie_sigs) == 1
+        assert cookie_sigs[0].points == 5
+        assert "session_id" in cookie_sigs[0].evidence
+
+    def test_cookie_missing_only_secure_still_fires(self) -> None:
+        obs = [
+            _http_obs(
+                cookie_issues=[{"name": "token", "missing_flags": ["secure"]}]
+            )
+        ]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        http_sigs = [
+            s for s in result.contributing_signals if s.signal_name == "http_technology_exposure"
+        ]
+        cookie_sigs = [s for s in http_sigs if "cookie" in s.evidence.lower()]
+        assert len(cookie_sigs) == 1
+
+    def test_cookie_missing_only_samesite_no_signal(self) -> None:
+        """Missing SameSite alone does not trigger (only Secure/HttpOnly)."""
+        obs = [
+            _http_obs(
+                cookie_issues=[{"name": "prefs", "missing_flags": ["samesite"]}]
+            )
+        ]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        http_sigs = [
+            s for s in result.contributing_signals if s.signal_name == "http_technology_exposure"
+        ]
+        cookie_sigs = [s for s in http_sigs if "cookie" in s.evidence.lower()]
+        assert len(cookie_sigs) == 0
+
+    def test_no_cookie_issues_no_cookie_signal(self) -> None:
+        obs = [_http_obs(cookie_issues=[])]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        http_sigs = [
+            s for s in result.contributing_signals if s.signal_name == "http_technology_exposure"
+        ]
+        cookie_sigs = [s for s in http_sigs if "cookie" in s.evidence.lower()]
+        assert len(cookie_sigs) == 0
+
+    def test_cors_wildcard_adds_10(self) -> None:
+        obs = [
+            _http_obs(
+                cors_misconfig={"allow_origin": "*", "issues": ["wildcard_origin"]}
+            )
+        ]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        http_sigs = [
+            s for s in result.contributing_signals if s.signal_name == "http_technology_exposure"
+        ]
+        cors_sigs = [s for s in http_sigs if "CORS" in s.evidence]
+        assert len(cors_sigs) == 1
+        assert cors_sigs[0].points == 10
+
+    def test_cors_non_wildcard_no_signal(self) -> None:
+        """credentials_allowed without wildcard_origin does not trigger."""
+        obs = [
+            _http_obs(
+                cors_misconfig={
+                    "allow_origin": "https://app.example.com",
+                    "issues": ["credentials_allowed"],
+                }
+            )
+        ]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        http_sigs = [
+            s for s in result.contributing_signals if s.signal_name == "http_technology_exposure"
+        ]
+        cors_sigs = [s for s in http_sigs if "CORS" in s.evidence]
+        assert len(cors_sigs) == 0
+
+    def test_no_cors_misconfig_no_signal(self) -> None:
+        obs = [_http_obs(cors_misconfig=None)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        http_sigs = [
+            s for s in result.contributing_signals if s.signal_name == "http_technology_exposure"
+        ]
+        cors_sigs = [s for s in http_sigs if "CORS" in s.evidence]
+        assert len(cors_sigs) == 0
+
+    def test_all_three_signals_fire_together(self) -> None:
+        """Server version + insecure cookies + CORS wildcard = 5+5+10 = 20."""
+        obs = [
+            _http_obs(
+                server_header="Apache/2.4.51",
+                cookie_issues=[{"name": "sess", "missing_flags": ["secure", "httponly"]}],
+                cors_misconfig={"allow_origin": "*", "issues": ["wildcard_origin"]},
+            )
+        ]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        http_sigs = [
+            s for s in result.contributing_signals if s.signal_name == "http_technology_exposure"
+        ]
+        assert len(http_sigs) == 3
+        total = sum(s.points for s in http_sigs)
+        assert total == 20
+
+    def test_no_http_obs_no_signal(self) -> None:
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=[])
+        http_sigs = [
+            s for s in result.contributing_signals if s.signal_name == "http_technology_exposure"
+        ]
+        assert len(http_sigs) == 0
+
+    def test_signal_source_module(self) -> None:
+        obs = [_http_obs(server_header="nginx/1.24.0")]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        http_sigs = [
+            s for s in result.contributing_signals if s.signal_name == "http_technology_exposure"
+        ]
+        assert all(s.source_module == "http_fingerprint" for s in http_sigs)
+
+
+# ===========================================================================
+# Calibration tests — realistic composite scoring
+# ===========================================================================
+
+
+class TestCalibration:
+    """Verify realistic targets produce scores in the expected ranges.
+
+    - Well-secured production site: 0-10  (LOW)
+    - Moderately exposed site: 25-45     (MEDIUM-HIGH)
+    - Poorly secured target: 60-90       (HIGH-CRITICAL)
+    """
+
+    def test_well_secured_production_site(self) -> None:
+        """WAF present, HSTS, CSP, TLS 1.3 strong cipher, no risky ports, DNSSEC.
+
+        Expected signals: 0 (no signals fire).  Score: 0.
+        """
+        env = _make_env(predicted=EnvironmentLabel.PRODUCTION, is_non_prod=False)
+        obs = [
+            _http_obs(
+                headers={
+                    "strict-transport-security": "max-age=31536000; includeSubDomains",
+                    "content-security-policy": "default-src 'self'",
+                },
+                server_header="cloudflare",  # no version
+                cookie_issues=[],
+                cors_misconfig=None,
+            ),
+            _tls_obs(
+                tls_version="TLSv1.3",
+                cipher_suite="TLS_AES_256_GCM_SHA384",
+                cert_subject_cn="example.com",
+                cert_issuer_cn="R3",
+            ),
+            _port_obs(open_ports=[443]),
+            _dns_obs(dnssec=True),
+        ]
+        result = _ENGINE.score_entity(
+            entity_identifier="www.example.com",
+            observations=obs,
+            environment=env,
+            waf_detected=True,
+        )
+        assert result.score <= 10, (
+            f"Well-secured site scored {result.score}, expected 0-10. "
+            f"Signals: {[s.signal_name for s in result.contributing_signals]}"
+        )
+        assert result.priority_tier == PriorityTier.LOW
+
+    def test_moderately_exposed_site(self) -> None:
+        """No WAF, missing HSTS, some open ports but not databases, TLS 1.2.
+
+        Expected signals:
+        - no_waf_protection: +20
+        - missing_security_headers: +5
+        - open_port_risk (web only 80+443): +5
+        Total: 30  -> MEDIUM tier
+        """
+        env = _make_env(predicted=EnvironmentLabel.PRODUCTION, is_non_prod=False)
+        obs = [
+            _http_obs(
+                headers={},  # missing HSTS and CSP
+                server_header="Apache/2.4.51",
+                cookie_issues=[],
+                cors_misconfig=None,
+            ),
+            _tls_obs(
+                tls_version="TLSv1.2",
+                cipher_suite="TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+            ),
+            _port_obs(open_ports=[80, 443]),
+            _dns_obs(dnssec=False),
+        ]
+        result = _ENGINE.score_entity(
+            entity_identifier="app.example.com",
+            observations=obs,
+            environment=env,
+            waf_detected=False,
+        )
+        assert 25 <= result.score <= 45, (
+            f"Moderate site scored {result.score}, expected 25-45. "
+            f"Signals: {[(s.signal_name, s.points) for s in result.contributing_signals]}"
+        )
+        assert result.priority_tier in (PriorityTier.MEDIUM, PriorityTier.HIGH)
+
+    def test_poorly_secured_target(self) -> None:
+        """Staging exposed, open databases, TLS 1.0, zone transfer, self-signed cert.
+
+        Expected signals:
+        - non_production_exposed: +30
+        - no_waf_protection: +20
+        - open_port_risk (high, databases): +20
+        - deprecated_tls (TLSv1.0): +15
+        - dns_exposure (zone transfer): +15
+        - weak_certificate (self-signed): +10
+        - missing_security_headers: +5
+        Total: 115, capped to 100  -> CRITICAL
+        """
+        env = _make_env(is_non_prod=True)
+        obs = [
+            _http_obs(
+                headers={},
+                server_header="Apache/2.2.34",
+                cookie_issues=[{"name": "JSESSIONID", "missing_flags": ["secure", "httponly"]}],
+                cors_misconfig={"allow_origin": "*", "issues": ["wildcard_origin"]},
+            ),
+            _tls_obs(
+                tls_version="TLSv1.0",
+                cipher_suite="RC4-SHA",
+                cert_subject_cn="staging.example.com",
+                cert_issuer_cn="staging.example.com",  # self-signed
+            ),
+            _port_obs(open_ports=[22, 80, 443, 3306, 5432, 6379, 27017]),
+            _dns_obs(zone_transfer=True, dnssec=False),
+        ]
+        result = _ENGINE.score_entity(
+            entity_identifier="staging.example.com",
+            observations=obs,
+            environment=env,
+            waf_detected=False,
+        )
+        assert 60 <= result.score <= 100, (
+            f"Poorly secured site scored {result.score}, expected 60-90+. "
+            f"Signals: {[(s.signal_name, s.points) for s in result.contributing_signals]}"
+        )
+        assert result.priority_tier in (PriorityTier.HIGH, PriorityTier.CRITICAL)
+
+    def test_moderate_with_trust_and_dnsbl(self) -> None:
+        """Moderate exposure plus DNSBL and trust degradation pushes into HIGH.
+
+        Expected signals:
+        - no_waf_protection: +20
+        - dnsbl_listed: +15
+        - trust_degradation: +10
+        - missing_security_headers: +5
+        Total: 50  -> HIGH
+        """
+        trust_events = [_make_trust_event(severity=DegradationSeverity.MEDIUM)]
+        dnsbl = [{"blacklist_name": "SORBS", "listing_type": "listed", "severity": "medium"}]
+        obs = [
+            _http_obs(headers={}),
+        ]
+        result = _ENGINE.score_entity(
+            entity_identifier="suspect.example.com",
+            observations=obs,
+            waf_detected=False,
+            dnsbl_listings=dnsbl,
+            trust_events=trust_events,
+        )
+        assert 25 <= result.score <= 60, (
+            f"Moderate+trust+dnsbl scored {result.score}, expected 25-60. "
+            f"Signals: {[(s.signal_name, s.points) for s in result.contributing_signals]}"
+        )
+
+
+# ===========================================================================
+# Signal phrase coverage test
+# ===========================================================================
+
+
+class TestSignalPhraseCoverage:
+    """Verify _SIGNAL_PHRASES covers every signal name the engine can produce."""
+
+    def test_all_signal_names_have_phrases(self) -> None:
+        """Every signal name emitted by _check_* methods must be in _SIGNAL_PHRASES."""
+        from expose.pipeline.lead_scoring import _SIGNAL_PHRASES
+
+        # Known signal names from all _check_* methods.
+        expected_names = {
+            "non_production_exposed",
+            "no_waf_protection",
+            "dnsbl_listed",
+            "trust_degradation",
+            "post_acquisition_asset",
+            "unexpected_saas_product",
+            "security_indicator_found",
+            "missing_security_headers",
+            "weak_certificate",
+            "debug_mode_detected",
+            "open_port_risk",
+            "deprecated_tls",
+            "dns_exposure",
+            "http_technology_exposure",
+        }
+        for name in expected_names:
+            assert name in _SIGNAL_PHRASES, f"Missing phrase for signal: {name}"
+
+    def test_no_orphan_phrases(self) -> None:
+        """Every entry in _SIGNAL_PHRASES should correspond to an actual signal."""
+        from expose.pipeline.lead_scoring import _SIGNAL_PHRASES
+
+        expected_names = {
+            "non_production_exposed",
+            "no_waf_protection",
+            "dnsbl_listed",
+            "trust_degradation",
+            "post_acquisition_asset",
+            "unexpected_saas_product",
+            "security_indicator_found",
+            "missing_security_headers",
+            "weak_certificate",
+            "debug_mode_detected",
+            "open_port_risk",
+            "deprecated_tls",
+            "dns_exposure",
+            "http_technology_exposure",
+        }
+        for name in _SIGNAL_PHRASES:
+            assert name in expected_names, f"Orphan phrase for unknown signal: {name}"
+
+
+# ===========================================================================
+# ScoringSignal model tests for new signals
+# ===========================================================================
+
+
+class TestNewSignalModels:
+    """Verify all new signals produce valid ScoringSignal objects."""
+
+    def test_open_port_signal_is_valid(self) -> None:
+        obs = [_port_obs(open_ports=[3306])]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        port_sigs = [s for s in result.contributing_signals if s.signal_name == "open_port_risk"]
+        assert len(port_sigs) == 1
+        sig = port_sigs[0]
+        assert isinstance(sig, ScoringSignal)
+        assert 0 <= sig.points <= 100
+        assert sig.signal_name
+        assert sig.evidence
+        assert sig.source_module
+
+    def test_deprecated_tls_signal_is_valid(self) -> None:
+        obs = [_tls_obs(tls_version="TLSv1.0")]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        tls_sigs = [s for s in result.contributing_signals if s.signal_name == "deprecated_tls"]
+        assert len(tls_sigs) == 1
+        sig = tls_sigs[0]
+        assert isinstance(sig, ScoringSignal)
+        assert 0 <= sig.points <= 100
+
+    def test_dns_exposure_signal_is_valid(self) -> None:
+        obs = [_dns_obs(zone_transfer=True)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        dns_sigs = [s for s in result.contributing_signals if s.signal_name == "dns_exposure"]
+        assert len(dns_sigs) == 1
+        sig = dns_sigs[0]
+        assert isinstance(sig, ScoringSignal)
+        assert 0 <= sig.points <= 100
+
+    def test_http_exposure_signal_is_valid(self) -> None:
+        obs = [_http_obs(server_header="nginx/1.24.0")]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        http_sigs = [
+            s for s in result.contributing_signals if s.signal_name == "http_technology_exposure"
+        ]
+        assert len(http_sigs) >= 1
+        for sig in http_sigs:
+            assert isinstance(sig, ScoringSignal)
+            assert 0 <= sig.points <= 100
+            assert sig.signal_name == "http_technology_exposure"
+            assert sig.source_module == "http_fingerprint"

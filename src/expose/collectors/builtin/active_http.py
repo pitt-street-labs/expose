@@ -73,6 +73,26 @@ _SECURITY_HEADERS = frozenset(
     }
 )
 
+# Headers that reveal technology stack information.
+_TECH_STACK_HEADERS = (
+    "x-powered-by",
+    "x-aspnet-version",
+    "x-aspnetmvc-version",
+    "x-generator",
+    "x-drupal-cache",
+    "x-drupal-dynamic-cache",
+    "x-varnish",
+    "x-cache",
+    "x-litespeed-cache",
+    "x-turbo-charged-by",
+    "x-redirect-by",
+    "x-pingback",
+    "composed-by",
+)
+
+# Cookie attribute flags to audit (lowercase).
+_COOKIE_SECURITY_FLAGS = ("secure", "httponly", "samesite")
+
 # Health-check target — a well-known, high-availability endpoint.
 _HEALTH_CHECK_URL = "https://httpbin.org/head"
 
@@ -332,6 +352,107 @@ def _extract_security_headers(response: httpx.Response) -> dict[str, str]:
     return headers
 
 
+def _detect_technologies(response: httpx.Response) -> list[str]:
+    """Identify web technologies from response headers.
+
+    Scans tech-stack-revealing headers (``X-Powered-By``, ``Server``,
+    ``X-Generator``, etc.) and returns a deduplicated, sanitized list of
+    technology identifiers found.
+    """
+    techs: list[str] = []
+    seen: set[str] = set()
+
+    # Server header often contains technology info (e.g. "Apache/2.4.52 (Ubuntu)").
+    raw_server = response.headers.get("server")
+    if raw_server:
+        val = sanitize_field(raw_server, SanitizationFieldKind.GENERIC).value
+        lower = val.lower()
+        if lower not in seen:
+            seen.add(lower)
+            techs.append(val)
+
+    # Dedicated tech-stack headers.
+    for header_name in _TECH_STACK_HEADERS:
+        raw = response.headers.get(header_name)
+        if raw:
+            val = sanitize_field(raw, SanitizationFieldKind.GENERIC).value
+            lower = val.lower()
+            if lower not in seen:
+                seen.add(lower)
+                techs.append(val)
+
+    return techs
+
+
+def _analyze_cookie_security(response: httpx.Response) -> list[dict[str, Any]]:
+    """Audit ``Set-Cookie`` headers for missing security attributes.
+
+    Returns a list of issue dicts, each containing the cookie ``name`` and
+    a list of ``missing_flags`` (from Secure, HttpOnly, SameSite).
+    """
+    issues: list[dict[str, Any]] = []
+    raw_cookies = response.headers.get_list("set-cookie")
+
+    for raw_cookie in raw_cookies:
+        if not raw_cookie:
+            continue
+
+        # Cookie name is everything before the first '='.
+        eq_pos = raw_cookie.find("=")
+        if eq_pos <= 0:
+            continue
+
+        cookie_name = raw_cookie[:eq_pos].strip()
+        cookie_name = sanitize_field(
+            cookie_name, SanitizationFieldKind.GENERIC
+        ).value
+
+        cookie_lower = raw_cookie.lower()
+        missing: list[str] = []
+        for flag in _COOKIE_SECURITY_FLAGS:
+            if flag not in cookie_lower:
+                missing.append(flag)
+
+        if missing:
+            issues.append({"name": cookie_name, "missing_flags": missing})
+
+    return issues
+
+
+def _check_cors_misconfig(response: httpx.Response) -> dict[str, Any] | None:
+    """Detect overly permissive CORS configurations.
+
+    Returns a dict describing the misconfiguration, or ``None`` if CORS is
+    absent or acceptably restrictive.
+    """
+    raw_origin = response.headers.get("access-control-allow-origin")
+    if raw_origin is None:
+        return None
+
+    origin = sanitize_field(raw_origin, SanitizationFieldKind.GENERIC).value
+
+    issues: list[str] = []
+    if origin == "*":
+        issues.append("wildcard_origin")
+
+    raw_creds = response.headers.get("access-control-allow-credentials")
+    if raw_creds and raw_creds.strip().lower() == "true":
+        issues.append("credentials_allowed")
+
+    if not issues:
+        return None
+
+    result: dict[str, Any] = {
+        "allow_origin": origin,
+        "issues": issues,
+    }
+    if raw_creds:
+        result["allow_credentials"] = sanitize_field(
+            raw_creds.strip(), SanitizationFieldKind.GENERIC
+        ).value
+    return result
+
+
 def _build_payload(response: httpx.Response) -> dict[str, Any]:
     """Build the ``structured_payload`` dict from a completed response."""
     body = response.content
@@ -369,7 +490,17 @@ def _build_payload(response: httpx.Response) -> dict[str, Any]:
         str(response.url), SanitizationFieldKind.HTTP_REDIRECT_TARGET
     ).value
 
+    # Tech stack detection.
+    technologies = _detect_technologies(response)
+
+    # Cookie security analysis.
+    cookie_issues = _analyze_cookie_security(response)
+
+    # CORS misconfiguration detection.
+    cors_misconfig = _check_cors_misconfig(response)
+
     return {
+        "_collector_id": "active-http-fingerprint",
         "url": final_url,
         "status_code": response.status_code,
         "server_header": server_header,
@@ -378,6 +509,9 @@ def _build_payload(response: httpx.Response) -> dict[str, Any]:
         "headers": sec_headers,
         "redirect_chain": redirect_chain,
         "banner": banner,
+        "technologies": technologies,
+        "cookie_issues": cookie_issues,
+        "cors_misconfig": cors_misconfig,
     }
 
 

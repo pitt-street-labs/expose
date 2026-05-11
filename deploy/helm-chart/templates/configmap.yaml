@@ -7,5 +7,9 @@ metadata:
 data:
   EXPOSE_DEFAULT_CRON: {{ .Values.runSchedule.defaultCron | quote }}
   EXPOSE_LOG_FORMAT: "json"
+  EXPOSE_FIPS_MODE: {{ .Values.global.fipsMode | quote }}
   EXPOSE_OTEL_ENABLED: {{ .Values.observability.otlp.enabled | quote }}
   EXPOSE_OTEL_ENDPOINT: {{ .Values.observability.otlp.endpoint | quote }}
+  EXPOSE_METRICS_ENABLED: {{ .Values.observability.prometheus.enabled | quote }}
+  EXPOSE_METRICS_PORT: {{ .Values.observability.prometheus.port | quote }}
+  EXPOSE_METRICS_PATH: {{ .Values.observability.prometheus.path | quote }}

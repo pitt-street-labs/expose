@@ -6,6 +6,12 @@ metadata:
   labels:
     {{- include "expose.labels" . | nindent 4 }}
     app.kubernetes.io/component: control-plane
+  {{- if .Values.observability.prometheus.enabled }}
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: {{ .Values.observability.prometheus.port | quote }}
+    prometheus.io/path: {{ .Values.observability.prometheus.path | quote }}
+  {{- end }}
 spec:
   type: {{ .Values.controlPlane.service.type }}
   ports:

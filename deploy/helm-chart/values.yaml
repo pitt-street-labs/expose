@@ -20,11 +20,19 @@ global:
   imageRegistry: "ghcr.io/korlogos"
   imagePullSecrets: []
 
+  # FIPS 140-2 validated cryptography mode. When true, the container image
+  # uses FIPS-validated crypto providers per ADR-010. The Helm chart sets the
+  # env var; enforcement is in the application and container image.
+  fipsMode: false
+
 image:
   repository: expose
   pullPolicy: IfNotPresent
   # Set explicitly per release; chart appVersion is the default.
   tag: ""
+
+nameOverride: ""
+fullnameOverride: ""
 
 # Default tenant — v1 deployment ships with a single tenant. Multi-tenant
 # lifecycle deferred to Phase 3 production-hardening (#23 Tenant lifecycle API).
@@ -37,26 +45,57 @@ controlPlane:
   enabled: true
   replicaCount: 1
   resources:
-    requests: { cpu: "200m", memory: "512Mi" }
-    limits:   { cpu: "1000m", memory: "2Gi" }
+    requests: { cpu: "200m", memory: "256Mi" }
+    limits:   { cpu: "1000m", memory: "512Mi" }
   service:
     type: ClusterIP
-    port: 8000
+    port: 8090
+  # Pod disruption budget — ensures at least 1 pod is available during
+  # voluntary disruptions (node drain, rolling update).
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  # Liveness and readiness probes. The control-plane exposes /healthz.
+  probes:
+    liveness:
+      enabled: true
+      path: /healthz
+      port: http
+      initialDelaySeconds: 15
+      periodSeconds: 20
+      timeoutSeconds: 5
+      failureThreshold: 3
+    readiness:
+      enabled: true
+      path: /healthz
+      port: http
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
 
 # === Workers ================================================================
 collectorWorker:
   enabled: true
   replicaCount: 2
+  concurrency: 4  # max concurrent collection tasks per pod
   resources:
-    requests: { cpu: "100m", memory: "256Mi" }
-    limits:   { cpu: "500m", memory: "1Gi" }
+    requests: { cpu: "100m", memory: "128Mi" }
+    limits:   { cpu: "500m", memory: "256Mi" }
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
 
 scannerWorker:
   enabled: true
-  replicaCount: 1
+  replicaCount: 2
+  concurrency: 2  # max concurrent scan tasks per pod (lower — active scanning is heavier)
   resources:
-    requests: { cpu: "100m", memory: "256Mi" }
-    limits:   { cpu: "500m", memory: "1Gi" }
+    requests: { cpu: "100m", memory: "128Mi" }
+    limits:   { cpu: "500m", memory: "256Mi" }
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
   # EgressProfile per ADR-003 §"Scanner egress" + #1 active-scanner-egress
   # issue. Operators MUST configure an explicit egress profile for production;
   # the chart fails closed if `direct` is used in non-cloud deployments.
@@ -97,6 +136,7 @@ objectStorage:
   bucket: "expose-artifacts"
   region: "us-east-1"
   existingSecret: ""         # credentials secret
+  forcePathStyle: false      # set true for MinIO / non-AWS S3
 
 secretsBackend:
   # SecretsProvider abstraction per ADR-003. v1 implementations: vaultwarden,
@@ -117,11 +157,21 @@ observability:
   bundled:
     enabled: false
 
+  # Prometheus scrape annotations on pods. Enable to have Prometheus
+  # auto-discover and scrape the /metrics endpoint.
+  prometheus:
+    enabled: true
+    port: 9090
+    path: /metrics
+
 # === NATS JetStream (per ADR-003 / #36) =====================================
 nats:
   # In-cluster NATS is dev/lab-only; production uses an operator-managed
   # NATS cluster or a managed JetStream service.
   enabled: false
+  # External NATS URL (production). When nats.enabled=false AND this is set,
+  # workers connect to this URL instead of the in-cluster NATS service.
+  externalUrl: ""
   clientPort: 4222
   clusterPort: 6222
   replicas: 1
@@ -202,7 +252,19 @@ serviceAccount:
 ingress:
   enabled: false
   className: ""
+  annotations: {}
+    # nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    # traefik.ingress.kubernetes.io/router.tls: "true"
+  tls: []
+  #  - secretName: expose-tls
+  #    hosts:
+  #      - expose.example.com
   hosts: []
+  #  - host: expose.example.com
+  #    paths:
+  #      - path: /
+  #        pathType: Prefix
 
 # === Run scheduling =========================================================
 runSchedule:

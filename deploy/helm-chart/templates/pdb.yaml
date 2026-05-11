@@ -1,0 +1,47 @@
+{{- if and .Values.controlPlane.enabled .Values.controlPlane.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "expose.fullname" . }}-control-plane
+  labels:
+    {{- include "expose.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+spec:
+  minAvailable: {{ .Values.controlPlane.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "expose.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: control-plane
+{{- end }}
+{{- if and .Values.scannerWorker.enabled .Values.scannerWorker.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "expose.fullname" . }}-scanner-worker
+  labels:
+    {{- include "expose.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scanner-worker
+spec:
+  minAvailable: {{ .Values.scannerWorker.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "expose.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: scanner-worker
+{{- end }}
+{{- if and .Values.collectorWorker.enabled .Values.collectorWorker.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "expose.fullname" . }}-collector-worker
+  labels:
+    {{- include "expose.labels" . | nindent 4 }}
+    app.kubernetes.io/component: collector-worker
+spec:
+  minAvailable: {{ .Values.collectorWorker.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "expose.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: collector-worker
+{{- end }}

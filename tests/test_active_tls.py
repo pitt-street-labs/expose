@@ -16,6 +16,11 @@ Coverage:
     8.  Health check failure
     9.  Evidence blob contains PEM bytes
     10. SANs are sanitized
+    11. Cipher strength classification (all categories)
+    12. Key size extraction and weakness detection
+    13. Protocol version assessment
+    14. _collector_id present in all observation payloads
+    15. Chain depth and self-signed detection
 """
 
 from __future__ import annotations
@@ -39,6 +44,8 @@ from expose.collectors.base import (
 )
 from expose.collectors.builtin.active_tls import (
     ActiveTlsCollector,
+    _assess_protocol_version,
+    _classify_cipher_strength,
     _compute_jarm,
     _extract_cert_details,
     _extract_cert_pem,
@@ -159,6 +166,16 @@ class TestHappyPathDomainSeed:
         assert obs.structured_payload["cert_fingerprint_sha256"] is not None
         # JARM is stubbed to None in v0.1.0.
         assert obs.structured_payload["jarm_fingerprint"] is None
+        # New fields from enhanced analysis.
+        assert obs.structured_payload["_collector_id"] == "active-tls-handshake"
+        assert obs.structured_payload["cipher_strength"] == "strong"
+        assert obs.structured_payload["protocol_assessment"] == "preferred"
+        assert obs.structured_payload["key_algorithm"] == "RSA"
+        assert obs.structured_payload["key_size_bits"] == 2048
+        assert obs.structured_payload["key_weak"] is False
+        # Test cert is self-signed (subject == issuer).
+        assert obs.structured_payload["self_signed"] is True
+        assert obs.structured_payload["chain_depth"] == 1
         # Writer should be closed after extraction.
         writer.close.assert_called_once()
 
@@ -487,6 +504,25 @@ class TestExtractCertDetails:
         assert details["cert_serial"] is None
         assert details["cert_fingerprint_sha256"] is None
         assert details["cert_sans"] == []
+        assert details["key_algorithm"] is None
+        assert details["key_size_bits"] is None
+        assert details["key_weak"] is None
+        assert details["chain_depth"] is None
+        assert details["self_signed"] is None
+
+    def test_extracts_key_algorithm_and_size(self) -> None:
+        ssl_obj = _make_mock_ssl_object(der_bytes=_TEST_CERT_DER)
+        details = _extract_cert_details(ssl_obj)
+        assert details["key_algorithm"] == "RSA"
+        assert details["key_size_bits"] == 2048
+        assert details["key_weak"] is False
+
+    def test_self_signed_detection(self) -> None:
+        ssl_obj = _make_mock_ssl_object(der_bytes=_TEST_CERT_DER)
+        details = _extract_cert_details(ssl_obj)
+        # Test cert has subject == issuer (self-signed).
+        assert details["self_signed"] is True
+        assert details["chain_depth"] == 1
 
     def test_validity_dates_present(self) -> None:
         ssl_obj = _make_mock_ssl_object(der_bytes=_TEST_CERT_DER)
@@ -532,3 +568,289 @@ class TestSslError:
             seed = Seed(seed_type=SeedType.DOMAIN, value="badsslserver.example.com")
             with pytest.raises(CollectorSourceUnreachableError, match="TLS handshake failed"):
                 await _collect(seed)
+
+
+# ======================================================================
+# 11. Cipher strength classification
+# ======================================================================
+class TestCipherStrengthClassification:
+    """Test 11: Cipher suite strength classification for all categories."""
+
+    # -- Strong ciphers (modern, secure) --
+    def test_aes_256_gcm_is_strong(self) -> None:
+        assert _classify_cipher_strength("TLS_AES_256_GCM_SHA384") == "strong"
+
+    def test_aes_128_gcm_is_strong(self) -> None:
+        assert _classify_cipher_strength("TLS_AES_128_GCM_SHA256") == "strong"
+
+    def test_chacha20_is_strong(self) -> None:
+        assert _classify_cipher_strength("TLS_CHACHA20_POLY1305_SHA256") == "strong"
+
+    def test_ecdhe_aes_is_strong(self) -> None:
+        assert _classify_cipher_strength("ECDHE-RSA-AES256-GCM-SHA384") == "strong"
+
+    # -- Acceptable ciphers (3DES, deprecated but not broken) --
+    def test_3des_is_acceptable(self) -> None:
+        assert _classify_cipher_strength("ECDHE-RSA-DES-CBC3-SHA") == "acceptable"
+
+    def test_triple_des_variant_is_acceptable(self) -> None:
+        assert _classify_cipher_strength("DES-CBC3-SHA") == "acceptable"
+
+    def test_3des_ede_is_acceptable(self) -> None:
+        assert _classify_cipher_strength("TLS_RSA_WITH_3DES_EDE_CBC_SHA") == "acceptable"
+
+    # -- Weak ciphers (known vulnerabilities) --
+    def test_rc4_is_weak(self) -> None:
+        assert _classify_cipher_strength("RC4-SHA") == "weak"
+
+    def test_rc4_md5_is_weak(self) -> None:
+        assert _classify_cipher_strength("RC4-MD5") == "weak"
+
+    def test_des_cbc_is_weak(self) -> None:
+        assert _classify_cipher_strength("DES-CBC-SHA") == "weak"
+
+    def test_rc2_is_weak(self) -> None:
+        assert _classify_cipher_strength("RC2-CBC-MD5") == "weak"
+
+    def test_exp_rc2_is_insecure_not_weak(self) -> None:
+        # EXP- prefix contains EXPORT -> insecure wins first.
+        assert _classify_cipher_strength("EXP-RC2-CBC-MD5") == "insecure"
+
+    def test_idea_is_weak(self) -> None:
+        assert _classify_cipher_strength("IDEA-CBC-SHA") == "weak"
+
+    def test_seed_is_weak(self) -> None:
+        assert _classify_cipher_strength("SEED-SHA") == "weak"
+
+    # -- Insecure ciphers (no confidentiality or authentication) --
+    def test_null_is_insecure(self) -> None:
+        assert _classify_cipher_strength("NULL-SHA") == "insecure"
+
+    def test_null_md5_is_insecure(self) -> None:
+        assert _classify_cipher_strength("NULL-MD5") == "insecure"
+
+    def test_export_is_insecure(self) -> None:
+        assert _classify_cipher_strength("EXP-DES-CBC-SHA") == "insecure"
+
+    def test_export_rc4_is_insecure(self) -> None:
+        assert _classify_cipher_strength("EXP-RC4-MD5") == "insecure"
+
+    def test_anon_is_insecure(self) -> None:
+        assert _classify_cipher_strength("ADH-AES256-SHA") == "insecure"
+        # "anon" substring check — anonymous DH
+        assert _classify_cipher_strength("AECDH-AES128-SHA") == "insecure"
+
+    def test_anon_dh_is_insecure(self) -> None:
+        assert _classify_cipher_strength("aNULL") == "insecure"
+
+    # -- Edge cases --
+    def test_none_cipher_is_unknown(self) -> None:
+        assert _classify_cipher_strength(None) == "unknown"
+
+    def test_case_insensitive(self) -> None:
+        assert _classify_cipher_strength("tls_aes_256_gcm_sha384") == "strong"
+        assert _classify_cipher_strength("null-sha") == "insecure"
+        assert _classify_cipher_strength("rc4-sha") == "weak"
+
+    async def test_cipher_strength_in_observation_payload(self) -> None:
+        """Verify cipher_strength appears in the observation from expand()."""
+        ssl_obj = _make_mock_ssl_object(
+            cipher=("RC4-SHA", "TLSv1.2", 128),
+        )
+        writer = _make_mock_writer(ssl_obj)
+        mock_open = AsyncMock(return_value=(MagicMock(), writer))
+
+        with patch("expose.collectors.builtin.active_tls.asyncio.open_connection", mock_open):
+            seed = Seed(seed_type=SeedType.DOMAIN, value="weak-cipher.example.com")
+            observations = await _collect(seed)
+
+        assert len(observations) == 1
+        assert observations[0].structured_payload["cipher_strength"] == "weak"
+
+
+# ======================================================================
+# 12. Key size extraction and weakness detection
+# ======================================================================
+class TestKeyExtraction:
+    """Test 12: Key algorithm/size extraction and weakness flagging."""
+
+    def test_rsa_2048_not_weak(self) -> None:
+        # The test cert has RSA-2048.
+        ssl_obj = _make_mock_ssl_object(der_bytes=_TEST_CERT_DER)
+        details = _extract_cert_details(ssl_obj)
+        assert details["key_algorithm"] == "RSA"
+        assert details["key_size_bits"] == 2048
+        assert details["key_weak"] is False
+
+    async def test_key_fields_in_observation(self) -> None:
+        """Key algorithm and size appear in structured_payload."""
+        ssl_obj = _make_mock_ssl_object(der_bytes=_TEST_CERT_DER)
+        writer = _make_mock_writer(ssl_obj)
+        mock_open = AsyncMock(return_value=(MagicMock(), writer))
+
+        with patch("expose.collectors.builtin.active_tls.asyncio.open_connection", mock_open):
+            seed = Seed(seed_type=SeedType.DOMAIN, value="test.com")
+            observations = await _collect(seed)
+
+        assert len(observations) == 1
+        payload = observations[0].structured_payload
+        assert payload["key_algorithm"] == "RSA"
+        assert payload["key_size_bits"] == 2048
+        assert payload["key_weak"] is False
+
+    def test_key_fields_none_when_no_cert(self) -> None:
+        """When no certificate is available, key fields are None."""
+        ssl_obj = MagicMock(spec=ssl.SSLObject)
+        ssl_obj.getpeercert.return_value = None
+        details = _extract_cert_details(ssl_obj)
+        assert details["key_algorithm"] is None
+        assert details["key_size_bits"] is None
+        assert details["key_weak"] is None
+
+
+# ======================================================================
+# 13. Protocol version assessment
+# ======================================================================
+class TestProtocolAssessment:
+    """Test 13: Protocol version assessment for all TLS versions."""
+
+    def test_tlsv13_preferred(self) -> None:
+        assert _assess_protocol_version("TLSv1.3") == "preferred"
+
+    def test_tlsv12_acceptable(self) -> None:
+        assert _assess_protocol_version("TLSv1.2") == "acceptable"
+
+    def test_tlsv11_deprecated(self) -> None:
+        assert _assess_protocol_version("TLSv1.1") == "deprecated"
+
+    def test_tlsv10_deprecated(self) -> None:
+        assert _assess_protocol_version("TLSv1.0") == "deprecated"
+
+    def test_tlsv1_deprecated(self) -> None:
+        # Some implementations report "TLSv1" without the ".0".
+        assert _assess_protocol_version("TLSv1") == "deprecated"
+
+    def test_sslv3_insecure(self) -> None:
+        assert _assess_protocol_version("SSLv3") == "insecure"
+
+    def test_sslv2_insecure(self) -> None:
+        assert _assess_protocol_version("SSLv2") == "insecure"
+
+    def test_none_version_unknown(self) -> None:
+        assert _assess_protocol_version(None) == "unknown"
+
+    def test_unrecognized_version_unknown(self) -> None:
+        assert _assess_protocol_version("TLSv1.4") == "unknown"
+
+    async def test_protocol_assessment_in_observation(self) -> None:
+        """Protocol assessment appears in structured_payload."""
+        ssl_obj = _make_mock_ssl_object(
+            version="TLSv1.1",
+            cipher=("ECDHE-RSA-AES256-SHA384", "TLSv1.1", 256),
+        )
+        writer = _make_mock_writer(ssl_obj)
+        mock_open = AsyncMock(return_value=(MagicMock(), writer))
+
+        with patch("expose.collectors.builtin.active_tls.asyncio.open_connection", mock_open):
+            seed = Seed(seed_type=SeedType.DOMAIN, value="oldtls.example.com")
+            observations = await _collect(seed)
+
+        assert len(observations) == 1
+        assert observations[0].structured_payload["protocol_assessment"] == "deprecated"
+        assert observations[0].structured_payload["tls_version"] == "TLSv1.1"
+
+    async def test_tlsv12_assessment_in_observation(self) -> None:
+        ssl_obj = _make_mock_ssl_object(
+            version="TLSv1.2",
+            cipher=("ECDHE-RSA-AES256-GCM-SHA384", "TLSv1.2", 256),
+        )
+        writer = _make_mock_writer(ssl_obj)
+        mock_open = AsyncMock(return_value=(MagicMock(), writer))
+
+        with patch("expose.collectors.builtin.active_tls.asyncio.open_connection", mock_open):
+            seed = Seed(seed_type=SeedType.DOMAIN, value="tls12.example.com")
+            observations = await _collect(seed)
+
+        assert len(observations) == 1
+        assert observations[0].structured_payload["protocol_assessment"] == "acceptable"
+
+
+# ======================================================================
+# 14. _collector_id present in all observation payloads
+# ======================================================================
+class TestCollectorIdInPayload:
+    """Test 14: _collector_id is always present in structured_payload for lead scoring."""
+
+    async def test_collector_id_in_domain_seed_payload(self) -> None:
+        ssl_obj = _make_mock_ssl_object()
+        writer = _make_mock_writer(ssl_obj)
+        mock_open = AsyncMock(return_value=(MagicMock(), writer))
+
+        with patch("expose.collectors.builtin.active_tls.asyncio.open_connection", mock_open):
+            seed = Seed(seed_type=SeedType.DOMAIN, value="example.com")
+            observations = await _collect(seed)
+
+        assert len(observations) == 1
+        assert observations[0].structured_payload["_collector_id"] == "active-tls-handshake"
+
+    async def test_collector_id_in_ip_seed_payload(self) -> None:
+        ssl_obj = _make_mock_ssl_object()
+        writer = _make_mock_writer(ssl_obj)
+        mock_open = AsyncMock(return_value=(MagicMock(), writer))
+
+        with patch("expose.collectors.builtin.active_tls.asyncio.open_connection", mock_open):
+            seed = Seed(seed_type=SeedType.IP, value="10.0.0.1")
+            observations = await _collect(seed)
+
+        assert len(observations) == 1
+        assert observations[0].structured_payload["_collector_id"] == "active-tls-handshake"
+
+    async def test_collector_id_matches_class_attribute(self) -> None:
+        """_collector_id in payload matches the class-level collector_id."""
+        ssl_obj = _make_mock_ssl_object()
+        writer = _make_mock_writer(ssl_obj)
+        mock_open = AsyncMock(return_value=(MagicMock(), writer))
+
+        with patch("expose.collectors.builtin.active_tls.asyncio.open_connection", mock_open):
+            seed = Seed(seed_type=SeedType.DOMAIN, value="example.com")
+            observations = await _collect(seed)
+
+        assert len(observations) == 1
+        assert observations[0].structured_payload["_collector_id"] == observations[0].collector_id
+
+
+# ======================================================================
+# 15. Chain depth and self-signed detection
+# ======================================================================
+class TestChainDepthAndSelfSigned:
+    """Test 15: Certificate chain depth and self-signed detection."""
+
+    async def test_self_signed_cert_chain_depth_1(self) -> None:
+        """Self-signed certs (subject == issuer) report chain_depth=1."""
+        ssl_obj = _make_mock_ssl_object(der_bytes=_TEST_CERT_DER)
+        writer = _make_mock_writer(ssl_obj)
+        mock_open = AsyncMock(return_value=(MagicMock(), writer))
+
+        with patch("expose.collectors.builtin.active_tls.asyncio.open_connection", mock_open):
+            seed = Seed(seed_type=SeedType.DOMAIN, value="selfsigned.example.com")
+            observations = await _collect(seed)
+
+        assert len(observations) == 1
+        payload = observations[0].structured_payload
+        assert payload["self_signed"] is True
+        assert payload["chain_depth"] == 1
+
+    def test_self_signed_details_extraction(self) -> None:
+        """Direct test of _extract_cert_details for self-signed cert."""
+        ssl_obj = _make_mock_ssl_object(der_bytes=_TEST_CERT_DER)
+        details = _extract_cert_details(ssl_obj)
+        assert details["self_signed"] is True
+        assert details["chain_depth"] == 1
+
+    def test_chain_depth_none_when_no_cert(self) -> None:
+        """When no certificate is available, chain_depth is None."""
+        ssl_obj = MagicMock(spec=ssl.SSLObject)
+        ssl_obj.getpeercert.return_value = None
+        details = _extract_cert_details(ssl_obj)
+        assert details["chain_depth"] is None
+        assert details["self_signed"] is None

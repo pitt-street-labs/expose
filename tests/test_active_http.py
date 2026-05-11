@@ -545,3 +545,569 @@ class TestEgressProfileIntegration:
 
         mock_profile.configure_httpx_client.assert_called_once()
         assert result == {}
+
+
+# ======================================================================
+# 14. _collector_id tag in structured_payload
+# ======================================================================
+class TestCollectorIdTag:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_collector_id_present_in_payload(self) -> None:
+        """Every observation's structured_payload contains _collector_id."""
+        respx.get("https://example.com").mock(
+            return_value=httpx.Response(
+                200,
+                headers={"server": "nginx/1.25.0"},
+                content=b"<html><title>Tag test</title></html>",
+            )
+        )
+        respx.get("http://example.com").mock(
+            return_value=httpx.Response(
+                200,
+                headers={"server": "nginx/1.25.0"},
+                content=b"OK",
+            )
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="example.com")
+        observations = await _collect(seed)
+
+        assert len(observations) == 2
+        for obs in observations:
+            assert obs.structured_payload["_collector_id"] == "active-http-fingerprint"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_collector_id_present_for_ip_seed(self) -> None:
+        """_collector_id is present for IP seed observations too."""
+        respx.get("https://10.0.0.1").mock(
+            return_value=httpx.Response(200, content=b"OK")
+        )
+        respx.get("http://10.0.0.1").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.IP, value="10.0.0.1")
+        observations = await _collect(seed)
+
+        assert len(observations) == 1
+        assert observations[0].structured_payload["_collector_id"] == "active-http-fingerprint"
+
+
+# ======================================================================
+# 15. Tech stack detection
+# ======================================================================
+class TestTechStackDetection:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_x_powered_by_detected(self) -> None:
+        """X-Powered-By header is captured in technologies list."""
+        respx.get("https://tech.example.com").mock(
+            return_value=httpx.Response(
+                200,
+                headers={
+                    "server": "Apache/2.4.52",
+                    "x-powered-by": "PHP/8.1.2",
+                },
+                content=b"OK",
+            )
+        )
+        respx.get("http://tech.example.com").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="tech.example.com")
+        observations = await _collect(seed)
+
+        assert len(observations) == 1
+        techs = observations[0].structured_payload["technologies"]
+        assert "Apache/2.4.52" in techs
+        assert "PHP/8.1.2" in techs
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_aspnet_version_detected(self) -> None:
+        """X-AspNet-Version header is captured."""
+        respx.get("https://dotnet.example.com").mock(
+            return_value=httpx.Response(
+                200,
+                headers={
+                    "server": "Microsoft-IIS/10.0",
+                    "x-aspnet-version": "4.0.30319",
+                    "x-aspnetmvc-version": "5.2",
+                },
+                content=b"OK",
+            )
+        )
+        respx.get("http://dotnet.example.com").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="dotnet.example.com")
+        observations = await _collect(seed)
+
+        techs = observations[0].structured_payload["technologies"]
+        assert "Microsoft-IIS/10.0" in techs
+        assert "4.0.30319" in techs
+        assert "5.2" in techs
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_x_generator_detected(self) -> None:
+        """X-Generator header (e.g. WordPress) is captured."""
+        respx.get("https://wp.example.com").mock(
+            return_value=httpx.Response(
+                200,
+                headers={
+                    "server": "nginx",
+                    "x-generator": "WordPress 6.4",
+                    "x-pingback": "https://wp.example.com/xmlrpc.php",
+                },
+                content=b"OK",
+            )
+        )
+        respx.get("http://wp.example.com").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="wp.example.com")
+        observations = await _collect(seed)
+
+        techs = observations[0].structured_payload["technologies"]
+        assert "WordPress 6.4" in techs
+        assert any("xmlrpc" in t for t in techs)
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_no_tech_headers_yields_empty_list(self) -> None:
+        """When no tech-stack headers exist, technologies is empty."""
+        respx.get("https://bare.example.com").mock(
+            return_value=httpx.Response(
+                200,
+                headers={},
+                content=b"OK",
+            )
+        )
+        respx.get("http://bare.example.com").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="bare.example.com")
+        observations = await _collect(seed)
+
+        assert observations[0].structured_payload["technologies"] == []
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_duplicate_server_and_tech_header_deduplicated(self) -> None:
+        """If Server and X-Powered-By have the same value, deduplicated."""
+        respx.get("https://dupe.example.com").mock(
+            return_value=httpx.Response(
+                200,
+                headers={
+                    "server": "nginx",
+                    "x-powered-by": "nginx",
+                },
+                content=b"OK",
+            )
+        )
+        respx.get("http://dupe.example.com").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="dupe.example.com")
+        observations = await _collect(seed)
+
+        techs = observations[0].structured_payload["technologies"]
+        # "nginx" should appear only once.
+        assert techs.count("nginx") == 1
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_varnish_and_cache_headers_detected(self) -> None:
+        """X-Varnish and X-Cache headers are captured."""
+        respx.get("https://cached.example.com").mock(
+            return_value=httpx.Response(
+                200,
+                headers={
+                    "x-varnish": "123456 654321",
+                    "x-cache": "HIT",
+                },
+                content=b"OK",
+            )
+        )
+        respx.get("http://cached.example.com").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="cached.example.com")
+        observations = await _collect(seed)
+
+        techs = observations[0].structured_payload["technologies"]
+        assert any("123456" in t for t in techs)
+        assert "HIT" in techs
+
+
+# ======================================================================
+# 16. Cookie security analysis
+# ======================================================================
+class TestCookieSecurityAnalysis:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_missing_secure_flag_detected(self) -> None:
+        """Cookie without Secure flag is reported."""
+        respx.get("https://cookie.example.com").mock(
+            return_value=httpx.Response(
+                200,
+                headers=[
+                    ("set-cookie", "session=abc123; HttpOnly; SameSite=Strict; Path=/"),
+                ],
+                content=b"OK",
+            )
+        )
+        respx.get("http://cookie.example.com").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="cookie.example.com")
+        observations = await _collect(seed)
+
+        cookie_issues = observations[0].structured_payload["cookie_issues"]
+        assert len(cookie_issues) == 1
+        assert cookie_issues[0]["name"] == "session"
+        assert "secure" in cookie_issues[0]["missing_flags"]
+        assert "httponly" not in cookie_issues[0]["missing_flags"]
+        assert "samesite" not in cookie_issues[0]["missing_flags"]
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_missing_httponly_flag_detected(self) -> None:
+        """Cookie without HttpOnly flag is reported."""
+        respx.get("https://cookie2.example.com").mock(
+            return_value=httpx.Response(
+                200,
+                headers=[
+                    ("set-cookie", "token=xyz; Secure; SameSite=Lax; Path=/"),
+                ],
+                content=b"OK",
+            )
+        )
+        respx.get("http://cookie2.example.com").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="cookie2.example.com")
+        observations = await _collect(seed)
+
+        cookie_issues = observations[0].structured_payload["cookie_issues"]
+        assert len(cookie_issues) == 1
+        assert "httponly" in cookie_issues[0]["missing_flags"]
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_missing_samesite_flag_detected(self) -> None:
+        """Cookie without SameSite flag is reported."""
+        respx.get("https://cookie3.example.com").mock(
+            return_value=httpx.Response(
+                200,
+                headers=[
+                    ("set-cookie", "id=val; Secure; HttpOnly; Path=/"),
+                ],
+                content=b"OK",
+            )
+        )
+        respx.get("http://cookie3.example.com").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="cookie3.example.com")
+        observations = await _collect(seed)
+
+        cookie_issues = observations[0].structured_payload["cookie_issues"]
+        assert len(cookie_issues) == 1
+        assert "samesite" in cookie_issues[0]["missing_flags"]
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_all_flags_missing(self) -> None:
+        """Cookie with no security flags at all reports all three missing."""
+        respx.get("https://cookie4.example.com").mock(
+            return_value=httpx.Response(
+                200,
+                headers=[
+                    ("set-cookie", "bare=value; Path=/"),
+                ],
+                content=b"OK",
+            )
+        )
+        respx.get("http://cookie4.example.com").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="cookie4.example.com")
+        observations = await _collect(seed)
+
+        cookie_issues = observations[0].structured_payload["cookie_issues"]
+        assert len(cookie_issues) == 1
+        assert set(cookie_issues[0]["missing_flags"]) == {"secure", "httponly", "samesite"}
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_fully_secured_cookie_no_issues(self) -> None:
+        """Cookie with all security flags yields empty cookie_issues."""
+        respx.get("https://cookie5.example.com").mock(
+            return_value=httpx.Response(
+                200,
+                headers=[
+                    ("set-cookie", "good=val; Secure; HttpOnly; SameSite=Strict; Path=/"),
+                ],
+                content=b"OK",
+            )
+        )
+        respx.get("http://cookie5.example.com").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="cookie5.example.com")
+        observations = await _collect(seed)
+
+        assert observations[0].structured_payload["cookie_issues"] == []
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_no_cookies_yields_empty_list(self) -> None:
+        """Response with no Set-Cookie headers yields empty cookie_issues."""
+        respx.get("https://nocookie.example.com").mock(
+            return_value=httpx.Response(200, content=b"OK")
+        )
+        respx.get("http://nocookie.example.com").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="nocookie.example.com")
+        observations = await _collect(seed)
+
+        assert observations[0].structured_payload["cookie_issues"] == []
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_multiple_cookies_individually_analyzed(self) -> None:
+        """Multiple Set-Cookie headers are each analyzed independently."""
+        respx.get("https://multi.example.com").mock(
+            return_value=httpx.Response(
+                200,
+                headers=[
+                    ("set-cookie", "a=1; Secure; HttpOnly; SameSite=Lax"),
+                    ("set-cookie", "b=2; Path=/"),
+                ],
+                content=b"OK",
+            )
+        )
+        respx.get("http://multi.example.com").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="multi.example.com")
+        observations = await _collect(seed)
+
+        cookie_issues = observations[0].structured_payload["cookie_issues"]
+        # Cookie "a" is fully secured -> not in issues.
+        # Cookie "b" is missing all three flags -> in issues.
+        assert len(cookie_issues) == 1
+        assert cookie_issues[0]["name"] == "b"
+        assert set(cookie_issues[0]["missing_flags"]) == {"secure", "httponly", "samesite"}
+
+
+# ======================================================================
+# 17. CORS misconfiguration detection
+# ======================================================================
+class TestCorsMisconfigDetection:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_wildcard_origin_detected(self) -> None:
+        """Access-Control-Allow-Origin: * is flagged."""
+        respx.get("https://cors.example.com").mock(
+            return_value=httpx.Response(
+                200,
+                headers={"access-control-allow-origin": "*"},
+                content=b"OK",
+            )
+        )
+        respx.get("http://cors.example.com").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="cors.example.com")
+        observations = await _collect(seed)
+
+        cors = observations[0].structured_payload["cors_misconfig"]
+        assert cors is not None
+        assert cors["allow_origin"] == "*"
+        assert "wildcard_origin" in cors["issues"]
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_credentials_with_wildcard_detected(self) -> None:
+        """Wildcard origin + credentials=true is a dangerous combination."""
+        respx.get("https://cors2.example.com").mock(
+            return_value=httpx.Response(
+                200,
+                headers={
+                    "access-control-allow-origin": "*",
+                    "access-control-allow-credentials": "true",
+                },
+                content=b"OK",
+            )
+        )
+        respx.get("http://cors2.example.com").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="cors2.example.com")
+        observations = await _collect(seed)
+
+        cors = observations[0].structured_payload["cors_misconfig"]
+        assert cors is not None
+        assert "wildcard_origin" in cors["issues"]
+        assert "credentials_allowed" in cors["issues"]
+        assert cors["allow_credentials"] == "true"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_credentials_without_wildcard_detected(self) -> None:
+        """Credentials=true with a specific origin is still flagged."""
+        respx.get("https://cors3.example.com").mock(
+            return_value=httpx.Response(
+                200,
+                headers={
+                    "access-control-allow-origin": "https://attacker.com",
+                    "access-control-allow-credentials": "true",
+                },
+                content=b"OK",
+            )
+        )
+        respx.get("http://cors3.example.com").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="cors3.example.com")
+        observations = await _collect(seed)
+
+        cors = observations[0].structured_payload["cors_misconfig"]
+        assert cors is not None
+        assert "credentials_allowed" in cors["issues"]
+        assert "wildcard_origin" not in cors["issues"]
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_no_cors_headers_yields_none(self) -> None:
+        """No CORS headers means cors_misconfig is None."""
+        respx.get("https://nocors.example.com").mock(
+            return_value=httpx.Response(200, content=b"OK")
+        )
+        respx.get("http://nocors.example.com").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="nocors.example.com")
+        observations = await _collect(seed)
+
+        assert observations[0].structured_payload["cors_misconfig"] is None
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_specific_origin_no_credentials_not_flagged(self) -> None:
+        """A specific origin without credentials is not flagged."""
+        respx.get("https://cors4.example.com").mock(
+            return_value=httpx.Response(
+                200,
+                headers={
+                    "access-control-allow-origin": "https://trusted.example.com",
+                },
+                content=b"OK",
+            )
+        )
+        respx.get("http://cors4.example.com").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="cors4.example.com")
+        observations = await _collect(seed)
+
+        assert observations[0].structured_payload["cors_misconfig"] is None
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_credentials_false_not_flagged(self) -> None:
+        """Credentials=false with specific origin is not flagged."""
+        respx.get("https://cors5.example.com").mock(
+            return_value=httpx.Response(
+                200,
+                headers={
+                    "access-control-allow-origin": "https://safe.example.com",
+                    "access-control-allow-credentials": "false",
+                },
+                content=b"OK",
+            )
+        )
+        respx.get("http://cors5.example.com").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="cors5.example.com")
+        observations = await _collect(seed)
+
+        assert observations[0].structured_payload["cors_misconfig"] is None
+
+
+# ======================================================================
+# 18. Combined features — integration-style test
+# ======================================================================
+class TestCombinedFeatures:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_all_new_fields_present_together(self) -> None:
+        """A response with tech headers, cookies, and CORS yields all fields."""
+        respx.get("https://full.example.com").mock(
+            return_value=httpx.Response(
+                200,
+                headers=[
+                    ("server", "Apache/2.4.52 (Ubuntu)"),
+                    ("x-powered-by", "PHP/8.1.2"),
+                    ("access-control-allow-origin", "*"),
+                    ("set-cookie", "sess=abc; Path=/"),
+                    ("content-type", "text/html"),
+                ],
+                content=b"<html><title>Full Test</title></html>",
+            )
+        )
+        respx.get("http://full.example.com").mock(
+            side_effect=httpx.ConnectError("refused")
+        )
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="full.example.com")
+        observations = await _collect(seed)
+
+        assert len(observations) == 1
+        payload = observations[0].structured_payload
+
+        # _collector_id tag.
+        assert payload["_collector_id"] == "active-http-fingerprint"
+
+        # Tech stack.
+        assert "Apache/2.4.52 (Ubuntu)" in payload["technologies"]
+        assert "PHP/8.1.2" in payload["technologies"]
+
+        # Cookie issues.
+        assert len(payload["cookie_issues"]) == 1
+        assert payload["cookie_issues"][0]["name"] == "sess"
+
+        # CORS.
+        assert payload["cors_misconfig"] is not None
+        assert payload["cors_misconfig"]["allow_origin"] == "*"
+
+        # Existing fields still present.
+        assert payload["status_code"] == 200
+        assert payload["title"] == "Full Test"
+        assert payload["url"] is not None

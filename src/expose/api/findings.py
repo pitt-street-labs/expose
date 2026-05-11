@@ -409,60 +409,16 @@ async def get_findings(
     """Return top entities ranked by lead score.
 
     When a database session factory is available, queries for entities
-    with lead scores (``_lead_score`` property written by the pipeline's
-    lead scoring step) and subdomain takeover risks (``_takeover_risk``
-    property). Real scored entities are returned with
-    ``is_placeholder=False``.
+    with lead scores and subdomain takeover risks. Real scored entities
+    are returned with ``is_placeholder=False``.
 
     When no database is available or no scored entities exist, returns
     placeholder findings that demonstrate the prioritized-findings UX.
 
     Findings are always sorted by score descending (highest risk first).
     """
+    from expose.services.findings_service import FindingsService  # noqa: PLC0415
+
     session_factory = getattr(request.app.state, "session_factory", None)
-
-    # Fetch real scored entities and takeover findings from the database
-    scored_findings = await _build_scored_findings(session_factory, tenant_id)
-    takeover_findings = await _build_takeover_findings(session_factory, tenant_id)
-
-    # Combine real findings from both sources
-    real_findings = takeover_findings + scored_findings
-    has_real_data = len(real_findings) > 0
-
-    if has_real_data:
-        all_entries = real_findings
-    else:
-        # No DB or no scored entities — use placeholder data
-        all_entries = [
-            FindingEntry(rank=1, **item)  # rank re-assigned below
-            for item in _PLACEHOLDER_FINDINGS
-        ]
-
-    total_scored = len(all_entries)
-
-    # Filter by min_score, sort descending, apply limit
-    filtered = [f for f in all_entries if f.score >= min_score]
-    filtered.sort(key=lambda f: f.score, reverse=True)
-    filtered = filtered[:limit]
-
-    # Re-assign sequential ranks after filtering
-    ranked = [
-        FindingEntry(
-            rank=idx + 1,
-            entity_identifier=f.entity_identifier,
-            entity_type=f.entity_type,
-            score=f.score,
-            priority_tier=f.priority_tier,
-            justification=f.justification,
-            signals=f.signals,
-        )
-        for idx, f in enumerate(filtered)
-    ]
-
-    return FindingsResponse(
-        tenant_id=tenant_id,
-        findings=ranked,
-        total_scored=total_scored,
-        generated_at=datetime.now(tz=UTC),
-        is_placeholder=not has_real_data,
-    )
+    service = FindingsService(session_factory)
+    return await service.get_all_findings(tenant_id, limit, min_score)

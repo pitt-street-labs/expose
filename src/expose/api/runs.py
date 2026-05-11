@@ -507,13 +507,10 @@ async def list_runs(
     session: SessionDep,
 ) -> RunList:
     """List all runs for a tenant."""
-    stmt = select(Run).where(Run.tenant_id == tenant_id).order_by(Run.started_at.desc())
-    result = await session.execute(stmt)
-    runs = list(result.scalars().all())
-    return RunList(
-        runs=[_run_to_response(r) for r in runs],
-        total=len(runs),
-    )
+    from expose.services.run_service import RunService  # noqa: PLC0415
+
+    service = RunService(session)
+    return await service.list_runs(tenant_id)
 
 
 @router.get("/tenants/{tenant_id}/runs/{run_id}", response_model=RunResponse)
@@ -523,12 +520,13 @@ async def get_run(
     session: SessionDep,
 ) -> RunResponse:
     """Get a specific run by ID."""
-    stmt = select(Run).where(Run.id == run_id, Run.tenant_id == tenant_id)
-    result = await session.execute(stmt)
-    run = result.scalar_one_or_none()
-    if run is None:
+    from expose.services.run_service import RunService  # noqa: PLC0415
+
+    service = RunService(session)
+    result = await service.get_run(tenant_id, run_id)
+    if result is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    return _run_to_response(run)
+    return result
 
 
 @router.get("/tenants/{tenant_id}/runs/{run_id}/artifact")
@@ -600,15 +598,10 @@ async def list_entities(
     session: SessionDep,
 ) -> EntityList:
     """List all entities discovered for a tenant."""
-    stmt = (
-        select(Entity).where(Entity.tenant_id == tenant_id).order_by(Entity.last_observed_at.desc())
-    )
-    result = await session.execute(stmt)
-    entities = list(result.scalars().all())
-    return EntityList(
-        entities=[_entity_to_response(e) for e in entities],
-        total=len(entities),
-    )
+    from expose.services.run_service import RunService  # noqa: PLC0415
+
+    service = RunService(session)
+    return await service.list_entities(tenant_id)
 
 
 @router.get(
@@ -621,12 +614,10 @@ async def get_entity(
     session: SessionDep,
 ) -> EntityResponse:
     """Get a specific entity by ID."""
-    stmt = select(Entity).where(
-        Entity.id == entity_id,
-        Entity.tenant_id == tenant_id,
-    )
-    result = await session.execute(stmt)
-    entity = result.scalar_one_or_none()
-    if entity is None:
+    from expose.services.run_service import RunService  # noqa: PLC0415
+
+    service = RunService(session)
+    result = await service.get_entity(tenant_id, entity_id)
+    if result is None:
         raise HTTPException(status_code=404, detail="Entity not found")
-    return _entity_to_response(entity)
+    return result

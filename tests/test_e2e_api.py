@@ -15,6 +15,7 @@ Covers:
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -79,7 +80,8 @@ def _make_app() -> Any:
     """Construct the full EXPOSE app with all routers.
 
     Uses the app factory but disables OTel (not needed in tests).
-    The lifespan is NOT used — we override ``get_session`` directly.
+    The lifespan is NOT used — we override ``get_session`` directly and
+    initialize the state attributes that lifespan would normally set.
     """
     from fastapi import FastAPI  # noqa: PLC0415
 
@@ -93,6 +95,26 @@ def _make_app() -> Any:
     app.include_router(runs_router)
     app.include_router(graph_router)
     app.include_router(events_router)
+
+    # Include additional routers that create_app() wires — skip gracefully
+    # if the module is not yet available.
+    _optional_routers: list[tuple[str, str]] = [
+        ("expose.api.findings", "router"),
+        ("expose.api.provenance", "router"),
+        ("expose.api.export", "router"),
+        ("expose.api.credentials", "router"),
+        ("expose.api.soc", "router"),
+        ("expose.api.reports", "router"),
+        ("expose.api.timeline", "router"),
+    ]
+    for mod_path, attr_name in _optional_routers:
+        try:
+            import importlib  # noqa: PLC0415
+
+            mod = importlib.import_module(mod_path)
+            app.include_router(getattr(mod, attr_name))
+        except (ImportError, AttributeError):
+            pass
 
     # Health endpoint (matches create_app's inline definition)
     @app.get("/healthz", tags=["health"])
@@ -160,9 +182,25 @@ async def client(
     # path can find it (though background pipeline won't fully execute in tests).
     app.state.session_factory = session_factory
 
+    # Initialize state attributes that the lifespan context manager would
+    # normally set.  Without these, endpoints that access app.state._bg_tasks
+    # (e.g. start_run) crash with AttributeError.
+    app.state._bg_tasks = {}
+    app.state.server_started_at = datetime.now(UTC)
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
+
+    # Cancel any background tasks spawned during the test (e.g. pipeline
+    # tasks created by start_run) so they don't try to use the DB after the
+    # in-memory SQLite engine is disposed.
+    bg_tasks: dict[str, asyncio.Task[None]] = app.state._bg_tasks
+    for task in list(bg_tasks.values()):
+        task.cancel()
+    if bg_tasks:
+        await asyncio.gather(*bg_tasks.values(), return_exceptions=True)
+        bg_tasks.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -441,3 +479,95 @@ async def test_healthz_endpoint(
     assert resp.status_code == 200
     data = resp.json()
     assert data == {"status": "ok"}
+
+
+# === 6. SOC STIX endpoint =====================================================
+
+
+async def test_soc_stix_bundle(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """GET /v1/tenants/{tid}/soc/stix returns 200 with a STIX bundle structure."""
+    tid = await _seed_tenant(session_factory, "soc-stix-tenant")
+
+    resp = await client.get(f"/v1/tenants/{tid}/soc/stix")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["tenant_id"] == str(tid)
+    assert "generated_at" in data
+    assert "bundle" in data
+    bundle = data["bundle"]
+    assert bundle.get("type") == "bundle"
+    assert "objects" in bundle
+
+
+# === 7. CISO report endpoint ==================================================
+
+
+async def test_ciso_report(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """GET /v1/tenants/{tid}/reports/ciso returns 200 with report structure."""
+    tid = await _seed_tenant(session_factory, "ciso-report-tenant")
+
+    resp = await client.get(f"/v1/tenants/{tid}/reports/ciso")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["tenant_id"] == str(tid)
+    assert "generated_at" in data
+    assert "report_version" in data
+    assert "sector_analysis" in data
+    assert "threat_actors" in data
+    assert "attraction_assessment" in data
+    assert "ranked_targets" in data
+    assert "executive_summary" in data
+
+
+# === 8. Findings endpoint =====================================================
+
+
+async def test_findings_list(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """GET /v1/tenants/{tid}/findings/ returns 200 with findings list."""
+    tid = await _seed_tenant(session_factory, "findings-tenant")
+
+    resp = await client.get(f"/v1/tenants/{tid}/findings/")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["tenant_id"] == str(tid)
+    assert "findings" in data
+    assert isinstance(data["findings"], list)
+    assert "total_scored" in data
+    assert "generated_at" in data
+
+
+# === 9. Timeline endpoint =====================================================
+
+
+async def test_entity_timeline(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """GET /v1/tenants/{tid}/entities/{eid}/timeline returns 200."""
+    tid = await _seed_tenant(session_factory, "timeline-tenant")
+    eid = await _seed_entity(
+        session_factory,
+        tenant_id=tid,
+        entity_type="Domain",
+        canonical_identifier="timeline.example.com",
+    )
+
+    resp = await client.get(f"/v1/tenants/{tid}/entities/{eid}/timeline")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["tenant_id"] == str(tid)
+    assert "snapshots" in data
+    assert isinstance(data["snapshots"], list)
+    assert "patterns" in data
+    assert isinstance(data["patterns"], list)
+    assert "span_days" in data
+    assert "temporal_score_delta" in data

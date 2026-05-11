@@ -17,6 +17,12 @@ spec:
       labels:
         {{- include "expose.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: scanner-worker
+      annotations:
+        {{- if .Values.observability.prometheus.enabled }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.observability.prometheus.port | quote }}
+        prometheus.io/path: {{ .Values.observability.prometheus.path | quote }}
+        {{- end }}
     spec:
       serviceAccountName: {{ include "expose.serviceAccountName" . }}
       securityContext:
@@ -29,8 +35,13 @@ spec:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           command: ["expose", "worker", "--kind", "scanner"]
           env:
+            {{- if .Values.nats.enabled }}
             - name: EXPOSE_NATS_URL
               value: "nats://{{ include "expose.fullname" . }}-nats:{{ .Values.nats.clientPort }}"
+            {{- else if .Values.nats.externalUrl }}
+            - name: EXPOSE_NATS_URL
+              value: {{ .Values.nats.externalUrl | quote }}
+            {{- end }}
             - name: EXPOSE_DB_HOST
               value: {{ .Values.postgres.host | quote }}
             - name: EXPOSE_DB_PORT
@@ -51,16 +62,57 @@ spec:
                   name: {{ .Values.postgres.existingSecret }}
                   key: password
             {{- end }}
+            {{- if .Values.objectStorage.endpoint }}
+            - name: EXPOSE_S3_ENDPOINT
+              value: {{ .Values.objectStorage.endpoint | quote }}
+            - name: EXPOSE_S3_BUCKET
+              value: {{ .Values.objectStorage.bucket | quote }}
+            - name: EXPOSE_S3_REGION
+              value: {{ .Values.objectStorage.region | quote }}
+            - name: EXPOSE_S3_FORCE_PATH_STYLE
+              value: {{ .Values.objectStorage.forcePathStyle | quote }}
+            {{- end }}
+            {{- if .Values.objectStorage.existingSecret }}
+            - name: EXPOSE_S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.objectStorage.existingSecret }}
+                  key: access-key
+            - name: EXPOSE_S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.objectStorage.existingSecret }}
+                  key: secret-key
+            {{- end }}
             - name: EXPOSE_DEFAULT_TENANT_ID
               value: {{ .Values.tenant.defaultId | quote }}
+            - name: EXPOSE_WORKER_CONCURRENCY
+              value: {{ .Values.scannerWorker.concurrency | quote }}
             - name: EXPOSE_EGRESS_PROFILE_TYPE
               value: {{ .Values.scannerWorker.egressProfile.type | quote }}
             {{- if .Values.scannerWorker.egressProfile.config }}
             - name: EXPOSE_EGRESS_PROFILE_CONFIG
               value: {{ .Values.scannerWorker.egressProfile.config | toJson | quote }}
             {{- end }}
+            - name: EXPOSE_FIPS_MODE
+              value: {{ .Values.global.fipsMode | quote }}
             - name: EXPOSE_LOG_LEVEL
               value: "info"
+            - name: EXPOSE_LOG_FORMAT
+              value: "json"
+          {{- if .Values.observability.prometheus.enabled }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.observability.prometheus.port }}
+              protocol: TCP
+          {{- end }}
           resources:
             {{- toYaml .Values.scannerWorker.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
 {{- end }}

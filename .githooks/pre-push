@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# pre-push hook -- Block pushes if internal artifacts are detected.
+#
+# Install:
+#   git config core.hooksPath .githooks
+
+set -euo pipefail
+
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$HOOK_DIR/.." && pwd)"
+SANITIZE_SCRIPT="$REPO_ROOT/scripts/sanitize-for-github.sh"
+
+if [ ! -x "$SANITIZE_SCRIPT" ]; then
+    printf '[pre-push] ERROR: %s not found or not executable.\n' "$SANITIZE_SCRIPT"
+    printf '           Run: chmod +x scripts/sanitize-for-github.sh\n'
+    exit 1
+fi
+
+printf '[pre-push] Running metadata sanitization check...\n'
+
+if ! "$SANITIZE_SCRIPT"; then
+    printf '\n'
+    printf '=======================================================\n'
+    printf '  PUSH BLOCKED -- internal artifacts detected.\n'
+    printf '  Clean the matches listed above before pushing.\n'
+    printf '  Run: ./scripts/sanitize-for-github.sh\n'
+    printf '=======================================================\n'
+    printf '\n'
+    exit 1
+fi
+
+printf '[pre-push] Sanitization check passed.\n'
