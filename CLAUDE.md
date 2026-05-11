@@ -82,12 +82,17 @@ This repository (`pitt-street-labs/ff6k` on internal Gitea — repo path retains
 
 ## Issue tracker conventions
 
-- **30+ closed / 20+ open / 73 total.** v1-tagged: all closed. All original high-priority issues closed.
+- **30+ closed / 27 open / 111 total.** v1-tagged: all closed. All original high-priority issues closed.
 - New issues from Pre-Push session: #48 (screenshot vision), #49 (trust degradation), #50 (WAF/origin discovery), #51 (dark web indicators), #52 (legal/social mentions).
 - **Session 2026-05-11 (marathon):** 17 issues closed (#72–#90), 30+ commits. D3 graph fix, iterative multi-pass expansion, M&A org search, egress fallback with SOCKS5/tor, 15 new collectors (29 total), relationship creation, multi-TLD expansion with DNS pre-check, credential persistence, admin panel, scan log panel, entity click-to-expand, target profiling + AI-guided collector selection, supply chain inference with 50-provider fingerprint database, SSRF protection, batch DB writes, parallel dispatch, attribution engine. Security review by ChatGPT + Gemini cross-review.
+- **Session 2026-05-11 (prep):** 8-agent deep audit (spec, ADRs, roadmap, session history). 16 new issues filed (#96–#111). M&A pipeline wiring, 38-collector UI (was 13), Gemini LLM provider, help tooltips on all sections, scan form UX fixes. Implementation strategy written for 19-agent 5-wave next session (`~/.claude/plans/expose-tier-abcd-strategy.md`).
 - #73 (test_findings_api failure): pre-existing, tracked.
 - #86 (fuzzy matching "did you mean?"): open, filed.
 - #87 (error evaluation batch): open, partially addressed.
+- **Tier A critical (#96–#98):** Rule evaluation engine, lead scoring wiring, RunEventBus SSE — core differentiators not yet functional.
+- **Tier B high (#99–#101):** Run scheduling, enforcement module, artifact signing — mission-critical gaps.
+- **Tier C medium (#102–#108):** ATT&CK annotation, research datasets, provenance viz, graph edges, attribution fix, audit logging, Tier 3 gating.
+- **Tier D low (#109–#111):** Identity Surface, Grafana dashboards, evidence storage.
 - Labels follow `epic:<slug>`, `area:<slug>`, `priority:<level>`, `type:<kind>`.
 - Reference issues by number in commits: `Closes #N` or `Refs #N`.
 - New work discovered during a session → file an issue immediately (Tier 3, pre-authorized) rather than letting it slip.
@@ -114,7 +119,12 @@ Following `~/CLAUDE.md` change control:
 - **D3 graph.js must be loaded before expose.js in base.html** — `ExposeGraph` is defined in `graph.js` but consumed by `expose.js`. Missing this caused silent graph failure (typeof check returned undefined, `_initGraphAndPoll` returned early).
 - **Alpine.js evaluates x-model bindings even on x-show=false elements.** Never null out objects used in x-model; reset to default empty objects and use separate `_loaded` flags for loading state detection.
 - **Docker-compose alembic config issue:** Container fails with "No 'script_location' key found" because WORKDIR is `/app` but `alembic.ini` references relative paths. Dev server (`uvicorn` direct) works; container needs alembic.ini path fix. Pre-existing, not introduced by #72.
-- **Dev server launch:** `EXPOSE_DB_HOST=localhost ... .venv/bin/python3 -c "from expose.api.app import create_app; import uvicorn; uvicorn.run(create_app(enable_otel=False), host='0.0.0.0', port=8090)"` — requires postgres running (docker-compose postgres service or local).
+- **Dev server launch:** `EXPOSE_DB_HOST=localhost EXPOSE_DB_PASSWORD=expose-dev EXPOSE_DB_DATABASE=expose EXPOSE_GEMINI_API_KEY="$GEMINI_API_KEY" .venv/bin/python3 -c "from expose.api.app import create_app; import uvicorn; uvicorn.run(create_app(enable_otel=False), host='0.0.0.0', port=8090)"` — requires postgres running (docker-compose postgres service). Note: password is `expose-dev` not `expose`, and field is `EXPOSE_DB_DATABASE` not `EXPOSE_DB_NAME` (pydantic_settings `extra="forbid"` rejects unknown env vars).
+- **Tenant config is in-memory** — lost on server restart. Re-apply via `curl -X PUT .../config/` after restart. LLM config: `{"llm_enabled":true,"llm_provider":"gemini","llm_model":"gemini-2.5-flash","llm_cost_ceiling_per_run":1.0}`.
+- **Credentials persist** to `~/.expose-credentials.json` (11 slots configured for default tenant). Survive restarts.
+- **Stuck "pending" runs** after server crash: fix with `UPDATE runs SET state='failed', completed_at=NOW() WHERE state='pending';` via docker exec psql.
+- **8-agent deep audit (2026-05-11)** identified 5 critical gaps: rule evaluation engine (~5% built), lead scoring unwired, RunEventBus silent, enforcement module unused, collector registry 3-way mismatch (UI/credentials/builtin). Full findings in strategy doc.
+- **Tier A-D implementation strategy** at `~/.claude/plans/expose-tier-abcd-strategy.md` — 19 agents, 5 waves, ~90 min. Start next session by reading this plan.
 
 ## Subsequent session order (recommended)
 
