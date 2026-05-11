@@ -459,3 +459,77 @@ async def test_executor_logs_dispatch_exception() -> None:
     error_entries = [e for e in entries if e["level"] == "error"]
     assert len(error_entries) >= 1
     assert any("raised exception" in e["msg"] for e in error_entries)
+
+
+# === Scan Estimate endpoint tests =============================================
+
+
+async def test_scan_estimate_defaults(_app) -> None:
+    """GET /v1/admin/scan-estimate with defaults returns expected structure."""
+    async with AsyncClient(
+        transport=ASGITransport(app=_app),
+        base_url="http://test",
+    ) as client:
+        resp = await client.get("/v1/admin/scan-estimate")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "estimated_seconds" in data
+    assert "total_dispatches" in data
+    # Default: 1 seed * 13 collectors = 13 dispatches
+    assert data["total_dispatches"] == 13
+    # 13 dispatches / 15 parallel = ceil(13/15) = 1 batch * 3.0s = 3.0s
+    assert data["estimated_seconds"] == 3.0
+
+
+async def test_scan_estimate_custom_params(_app) -> None:
+    """GET /v1/admin/scan-estimate with custom seed_count and collector_count."""
+    async with AsyncClient(
+        transport=ASGITransport(app=_app),
+        base_url="http://test",
+    ) as client:
+        resp = await client.get(
+            "/v1/admin/scan-estimate?seed_count=5&collector_count=20"
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    # 5 seeds * 20 collectors = 100 dispatches
+    assert data["total_dispatches"] == 100
+    # 100 / 15 = ceil(6.67) = 7 batches * 3.0s = 21.0s
+    assert data["estimated_seconds"] == 21.0
+
+
+async def test_scan_estimate_single_batch(_app) -> None:
+    """Scan with dispatches <= parallel_factor fits in a single batch."""
+    async with AsyncClient(
+        transport=ASGITransport(app=_app),
+        base_url="http://test",
+    ) as client:
+        resp = await client.get(
+            "/v1/admin/scan-estimate?seed_count=1&collector_count=15"
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    # 15 dispatches / 15 parallel = exactly 1 batch
+    assert data["total_dispatches"] == 15
+    assert data["estimated_seconds"] == 3.0
+
+
+async def test_scan_estimate_large_scan(_app) -> None:
+    """Large scan with many seeds and collectors."""
+    async with AsyncClient(
+        transport=ASGITransport(app=_app),
+        base_url="http://test",
+    ) as client:
+        resp = await client.get(
+            "/v1/admin/scan-estimate?seed_count=10&collector_count=29"
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    # 10 * 29 = 290 dispatches
+    assert data["total_dispatches"] == 290
+    # ceil(290/15) = 20 batches * 3.0s = 60.0s
+    assert data["estimated_seconds"] == 60.0

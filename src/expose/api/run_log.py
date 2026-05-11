@@ -30,6 +30,7 @@ Design constraints:
 
 from __future__ import annotations
 
+import math
 import threading
 from datetime import UTC, datetime
 from typing import Any
@@ -133,6 +134,35 @@ def make_log_sink(run_id: UUID | str) -> Any:
 # === FastAPI endpoint =========================================================
 
 router = APIRouter(tags=["run-log"])
+
+
+@router.get("/v1/admin/scan-estimate")
+async def scan_estimate(
+    seed_count: int = 1,
+    collector_count: int = 13,
+) -> dict[str, Any]:
+    """Return an estimated scan duration based on seed and collector counts.
+
+    The estimate uses a conservative average of 3 seconds per dispatch batch
+    and assumes ``_MAX_CONCURRENT_DISPATCHES`` (15) parallel workers, matching
+    the pipeline executor's semaphore-bounded concurrency.
+
+    Query parameters:
+        seed_count: Number of seeds to scan (default 1).
+        collector_count: Number of enabled collectors (default 13).
+
+    Returns:
+        ``{"estimated_seconds": N, "total_dispatches": M}``
+    """
+    avg_per_dispatch = 3.0  # seconds, conservative default
+    parallel_factor = 15  # _MAX_CONCURRENT_DISPATCHES
+    total_dispatches = seed_count * collector_count
+    batches = math.ceil(total_dispatches / parallel_factor)
+    estimated_seconds = batches * avg_per_dispatch
+    return {
+        "estimated_seconds": estimated_seconds,
+        "total_dispatches": total_dispatches,
+    }
 
 
 @router.get("/v1/tenants/{tenant_id}/runs/{run_id}/log")

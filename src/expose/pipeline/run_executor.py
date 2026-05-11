@@ -41,6 +41,7 @@ from expose.pipeline.collector_filter import filter_collectors
 from expose.pipeline.dispatcher import clear_health_cache
 from expose.pipeline.enrichment import EnrichmentPipeline
 from expose.pipeline.supply_chain import detect_providers
+from expose.pipeline.takeover_detection import TakeoverRisk, detect_takeover_risks
 from expose.pipeline.entity_seed_converter import (
     entities_to_seeds,
     extract_org_seeds_from_properties,
@@ -458,6 +459,20 @@ class RunExecutor:
             except Exception:
                 logger.exception(
                     "Supply chain inference failed after pass %d", pass_number
+                )
+
+            # --- Subdomain takeover detection -----------------------------------
+            # After supply chain inference, check for dangling CNAME records
+            # pointing to takeover-vulnerable services (issue #95).
+            try:
+                await self._apply_takeover_detections(
+                    entities=entities,
+                    tenant_id=tenant_id,
+                    pass_number=pass_number,
+                )
+            except Exception:
+                logger.exception(
+                    "Takeover detection failed after pass %d", pass_number
                 )
 
             # --- Target profiling & collector filtering (after Pass 1) ---
@@ -1187,6 +1202,89 @@ class RunExecutor:
                     "Supply chain: failed to persist detection %s -> %s",
                     detection.source_entity,
                     detection.provider_id,
+                )
+
+    async def _apply_takeover_detections(
+        self,
+        *,
+        entities: Any,
+        tenant_id: UUID,
+        pass_number: int,
+    ) -> None:
+        """Run subdomain takeover detection and update at-risk entities.
+
+        For each ``TakeoverRisk`` returned by ``detect_takeover_risks``:
+        1. Update the source entity's ``attribution_status`` to
+           ``requires_review``.
+        2. Add ``_takeover_risk`` to the entity's properties with risk details.
+        3. Log a CRITICAL-level finding to the scan log.
+
+        Failures are logged but never propagated -- takeover detection is
+        best-effort enrichment.
+        """
+        risks = await detect_takeover_risks(entities)
+        if not risks:
+            return
+
+        self._log(
+            "info",
+            f"Takeover detection: {len(risks)} dangling CNAME(s) found "
+            f"in pass {pass_number}",
+        )
+
+        # Build entity lookup for property updates
+        entity_lookup: dict[str, Any] = {
+            e.canonical_identifier: e for e in entities
+        }
+
+        for risk in risks:
+            try:
+                source = entity_lookup.get(risk.subdomain)
+                if source is None:
+                    logger.warning(
+                        "Takeover detection: entity %s not found in lookup",
+                        risk.subdomain,
+                    )
+                    continue
+
+                # Build updated properties with takeover risk metadata
+                updated_props = dict(source.properties or {})
+                updated_props["_takeover_risk"] = {
+                    "cname_target": risk.cname_target,
+                    "provider": risk.provider,
+                    "risk_level": risk.risk_level,
+                    "evidence": risk.evidence,
+                }
+
+                # Update entity with requires_review status and risk data
+                await self._entity_repo.create_or_update(
+                    tenant_id=TenantId(tenant_id),
+                    entity_type=source.entity_type,
+                    canonical_identifier=source.canonical_identifier,
+                    properties=updated_props,
+                    attribution_status="requires_review",
+                    attribution_confidence=Decimal("0.000"),
+                )
+
+                # Log as critical finding
+                self._log(
+                    "error",
+                    f"CRITICAL: {risk.subdomain} vulnerable to subdomain "
+                    f"takeover via {risk.provider} "
+                    f"(CNAME -> {risk.cname_target})",
+                )
+
+                logger.critical(
+                    "Subdomain takeover risk: %s -> %s (provider: %s, level: %s)",
+                    risk.subdomain,
+                    risk.cname_target,
+                    risk.provider,
+                    risk.risk_level,
+                )
+            except Exception:
+                logger.exception(
+                    "Takeover detection: failed to update entity %s",
+                    risk.subdomain,
                 )
 
 

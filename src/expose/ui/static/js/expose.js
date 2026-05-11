@@ -20,6 +20,7 @@
 function exposeApp() {
     return {
         // Tenant selection
+        tenants: [],
         selectedTenantId: "",
 
         // Active run tracking
@@ -77,6 +78,11 @@ function exposeApp() {
         sfImportText: "",
         bundleImportText: "",
 
+        // Scan elapsed timer
+        _scanStartTime: null,
+        _scanElapsedHandle: null,
+        scanElapsed: 0,
+
         // Scan log panel
         showScanLog: true,
         scanLogEntries: [],
@@ -88,6 +94,10 @@ function exposeApp() {
         showFindingsPanel: true,
         findings: [],
 
+        // Supply chain providers
+        showProvidersPanel: false,
+        providers: [],
+
         // Summary stats for at-a-glance risk posture
         stats: {
             totalEntities: 0,
@@ -96,6 +106,24 @@ function exposeApp() {
             collectors: 0,
             lastScan: '--',
             nonProduction: 0,
+        },
+
+        /**
+         * Fetch the list of tenants from the API and populate the
+         * tenant selector dropdown.  Called once during init().
+         */
+        async loadTenants() {
+            try {
+                var resp = await fetch("/v1/tenants/");
+                if (!resp.ok) {
+                    console.error("[EXPOSE] Failed to load tenants:", resp.status);
+                    return;
+                }
+                var data = await resp.json();
+                this.tenants = data.tenants || [];
+            } catch (e) {
+                console.error("[EXPOSE] Error loading tenants:", e);
+            }
         },
 
         /**
@@ -115,6 +143,7 @@ function exposeApp() {
 
             // Stop scan log polling and clear entries
             this.stopScanLogPolling();
+            this.stopScanTimer();
             this.scanLogEntries = [];
             this._scanLogSince = 0;
 
@@ -145,8 +174,10 @@ function exposeApp() {
             if (!this.selectedTenantId) {
                 this.entityCount = 0;
                 this.activeRunId = null;
-                // Reset findings
+                // Reset findings and providers
                 this.findings = [];
+                this.providers = [];
+                this.showProvidersPanel = false;
                 // Reset summary stats
                 this.stats = {
                     totalEntities: 0,
@@ -181,6 +212,9 @@ function exposeApp() {
 
             // Load priority findings
             this.loadFindings();
+
+            // Load supply chain providers
+            this.loadProviders();
         },
 
         /**
@@ -363,6 +397,9 @@ function exposeApp() {
             this._pollScanLog();
             this.stopScanLogPolling();
 
+            // Stop elapsed timer
+            this.stopScanTimer();
+
             // Final data refresh
             this._refreshEntityTable();
             this._refreshRunStatus();
@@ -373,6 +410,9 @@ function exposeApp() {
 
             // Refresh priority findings after run completion
             this.loadFindings();
+
+            // Refresh supply chain providers after run completion
+            this.loadProviders();
 
             // Refresh AI insights if the component exists
             var aiPanel = document.querySelector("[x-data='aiInsights()']");
@@ -892,6 +932,71 @@ function exposeApp() {
             }
         },
 
+        /* ==================================================================
+           Supply Chain Providers
+           ================================================================== */
+
+        /**
+         * Category color mapping for supply chain provider badges.
+         * Returns a CSS color string for the provider category.
+         * @param {string} category - Provider category slug
+         * @returns {string} CSS color value
+         */
+        providerCategoryColor(category) {
+            var colors = {
+                "cdn_waf": "#f59e0b",
+                "cdn": "#f59e0b",
+                "waf": "#f59e0b",
+                "email": "#6366f1",
+                "email_delivery": "#818cf8",
+                "email_deliv": "#818cf8",
+                "dns": "#22d3ee",
+                "hosting": "#10b981",
+                "analytics": "#a78bfa",
+                "support": "#f472b6",
+                "marketing": "#fb923c",
+                "payment": "#ef4444",
+                "auth": "#ec4899",
+                "ci_cd": "#14b8a6",
+                "monitoring": "#84cc16",
+                "cloud": "#3b82f6",
+                "storage": "#0ea5e9",
+            };
+            return colors[(category || "").toLowerCase()] || "var(--text-muted)";
+        },
+
+        /**
+         * Fetch supply chain providers from the entities API.
+         * Filters for entities with entity_type="provider" and populates
+         * this.providers for the Supply Chain Dependencies panel.
+         */
+        async loadProviders() {
+            if (!this.selectedTenantId) return;
+            try {
+                var resp = await fetch(
+                    "/v1/tenants/" + this.selectedTenantId + "/entities"
+                );
+                if (!resp.ok) return;
+                var data = await resp.json();
+                var entities = data.entities || data.items || [];
+                this.providers = entities
+                    .filter(function (e) {
+                        return e.entity_type === "provider";
+                    })
+                    .map(function (e) {
+                        var props = e.properties || {};
+                        return {
+                            name: e.canonical_identifier || e.name || "Unknown",
+                            category: props.category || props.provider_category || "unknown",
+                            evidence: props.evidence || props.detection_evidence || "--",
+                            risk_notes: props.risk_notes || props.risk_note || "--",
+                        };
+                    });
+            } catch (e) {
+                console.warn("[EXPOSE] Failed to load providers:", e);
+            }
+        },
+
         /**
          * Map a lead score (0-100) to a CSS color variable.
          * Used by the findings table score bar to indicate severity.
@@ -918,6 +1023,48 @@ function exposeApp() {
                     detail: { id: identifier },
                 })
             );
+        },
+
+        /* ==================================================================
+           Scan Elapsed Timer
+           ================================================================== */
+
+        /**
+         * Start the elapsed-time timer.  Records the current timestamp and
+         * updates ``scanElapsed`` (in whole seconds) every second.
+         * Called when a run begins (alongside scan-log polling).
+         */
+        startScanTimer() {
+            this.stopScanTimer();
+            this._scanStartTime = Date.now();
+            this.scanElapsed = 0;
+            var self = this;
+            this._scanElapsedHandle = setInterval(function () {
+                self.scanElapsed = Math.floor((Date.now() - self._scanStartTime) / 1000);
+            }, 1000);
+        },
+
+        /**
+         * Stop the elapsed-time timer.  Idempotent.
+         */
+        stopScanTimer() {
+            if (this._scanElapsedHandle) {
+                clearInterval(this._scanElapsedHandle);
+                this._scanElapsedHandle = null;
+            }
+        },
+
+        /**
+         * Format elapsed seconds as a compact human-readable string.
+         * Examples: "12s", "1m 05s", "3m 20s".
+         * @param {number} seconds - Elapsed seconds
+         * @returns {string}
+         */
+        formatElapsed(seconds) {
+            if (seconds < 60) return seconds + "s";
+            var m = Math.floor(seconds / 60);
+            var s = seconds % 60;
+            return m + "m " + String(s).padStart(2, "0") + "s";
         },
 
         /* ==================================================================
@@ -987,13 +1134,17 @@ function exposeApp() {
         },
 
         /**
-         * Format a scan-log message with highlighted observation counts.
+         * Format a scan-log message with highlighted observation counts
+         * and actionable error guidance.
          * HTML-escapes the message first (XSS safety), then wraps non-zero
-         * observation counts in a green-highlighted span.
+         * observation counts in a green-highlighted span. For warn/error-level
+         * entries matching known error patterns, appends actionable guidance
+         * in a dimmer color.
          * @param {string} msg - Raw log message string
+         * @param {string} [level] - Log level (info, warn, error)
          * @returns {string} HTML-safe string with optional highlight markup
          */
-        formatLogMsg(msg) {
+        formatLogMsg(msg, level) {
             if (!msg) return "";
             // HTML-escape to prevent XSS
             var escaped = msg
@@ -1004,7 +1155,7 @@ function exposeApp() {
                 .replace(/'/g, "&#x27;");
             // Highlight non-zero observation counts:
             // Pattern: "completed: N observation(s)" where N > 0
-            return escaped.replace(
+            var result = escaped.replace(
                 /completed: (\d+) observation/,
                 function (_match, n) {
                     if (parseInt(n, 10) > 0) {
@@ -1013,6 +1164,33 @@ function exposeApp() {
                     return _match;
                 }
             );
+
+            // Actionable error guidance for warn/error-level log entries.
+            // When a known error pattern is detected, append guidance text
+            // in a dimmer color to help the user take corrective action.
+            if (level === "warn" || level === "error") {
+                var ERROR_GUIDANCE = {
+                    "HTTP 302": "credentials may be invalid — check API Keys panel",
+                    "HTTP 401": "API key rejected — verify key in API Keys panel",
+                    "HTTP 403": "access denied — check API key permissions",
+                    "HTTP 429": "rate limited — scan will retry on next run",
+                    "HTTP 502": "upstream service down — will use fallback if configured",
+                    "HTTP 503": "service unavailable — temporary outage",
+                    "not configured": "API key missing — import via API Keys panel",
+                    "credentials not configured": "API key not loaded — check credential import",
+                    "unreachable": "service not responding — check network or try later",
+                };
+                var lowerMsg = msg.toLowerCase();
+                for (var pattern in ERROR_GUIDANCE) {
+                    if (lowerMsg.indexOf(pattern.toLowerCase()) >= 0) {
+                        result += ' <span style="color: var(--text-dim); font-style: italic; font-size: 0.9em;">— ' +
+                            ERROR_GUIDANCE[pattern] + '</span>';
+                        break;
+                    }
+                }
+            }
+
+            return result;
         },
 
         /**
@@ -1064,6 +1242,9 @@ function exposeApp() {
         init() {
             var self = this;
 
+            // Populate tenant selector from API
+            this.loadTenants();
+
             document.addEventListener("htmx:afterSwap", function (event) {
                 if (event.detail.target && event.detail.target.id === "entity-list") {
                     var rows = event.detail.target.querySelectorAll(".entity-row");
@@ -1077,6 +1258,7 @@ function exposeApp() {
                 if (runId) {
                     self.activeRunId = runId;
                     self.startScanLogPolling();
+                    self.startScanTimer();
                     self.connectSSE();
                 }
             });
@@ -1106,6 +1288,65 @@ function scanForm() {
         orgName: "",
         scanning: false,
         statusMessage: "",
+        estimateText: "",
+
+        /**
+         * Compute and display a scan duration estimate.
+         * Uses seed/org field state plus the tenant's enabled collector
+         * count to call the backend estimate endpoint.
+         *
+         * Heuristics for seed count estimation:
+         *  - 1 for a non-empty domain/IP/CIDR seed
+         *  - +1 if an organization name is provided
+         *  - x3 TLD expansion factor (multi-TLD DNS pre-check)
+         */
+        async updateEstimate() {
+            var hasSeed = this.seed.trim().length > 0;
+            var hasOrg = this.orgName.trim().length > 0;
+
+            if (!hasSeed && !hasOrg) {
+                this.estimateText = "";
+                return;
+            }
+
+            // Estimate seed count: base seeds x TLD expansion factor
+            var baseSeedCount = (hasSeed ? 1 : 0) + (hasOrg ? 1 : 0);
+            var tldExpansion = 3;  // multi-TLD pre-check factor
+            var seedCount = baseSeedCount * tldExpansion;
+
+            // Try to get the enabled collector count from the parent app
+            var collectorCount = 13;  // conservative default
+            var appEl = document.querySelector("[x-data]");
+            if (appEl && appEl._x_dataStack) {
+                var appData = appEl._x_dataStack[0];
+                if (appData && appData.tenantConfig &&
+                    appData.tenantConfig.enabled_collectors &&
+                    appData.tenantConfig.enabled_collectors.length > 0) {
+                    collectorCount = appData.tenantConfig.enabled_collectors.length;
+                } else if (appData && appData.stats && appData.stats.collectors > 0) {
+                    collectorCount = appData.stats.collectors;
+                }
+            }
+
+            try {
+                var resp = await fetch(
+                    "/v1/admin/scan-estimate?seed_count=" + seedCount +
+                    "&collector_count=" + collectorCount
+                );
+                if (resp.ok) {
+                    var data = await resp.json();
+                    var secs = Math.round(data.estimated_seconds);
+                    var label = secs < 60
+                        ? "~" + secs + "s"
+                        : "~" + Math.ceil(secs / 60) + "m";
+                    this.estimateText = "Estimated: " + label +
+                        " (" + data.total_dispatches + " dispatches)";
+                }
+            } catch (_e) {
+                // Silently ignore — estimate is best-effort
+                this.estimateText = "";
+            }
+        },
 
         /**
          * Submit the scan request to the runs API.

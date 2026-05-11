@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 router = APIRouter(prefix="/v1/tenants/{tenant_id}/findings", tags=["findings"])
@@ -253,24 +253,129 @@ def _build_placeholder_findings(
 # ---------------------------------------------------------------------------
 
 
+async def _build_takeover_findings(
+    session_factory: Any,
+    tenant_id: UUID,
+) -> list[FindingEntry]:
+    """Query entities with ``_takeover_risk`` in properties and build findings.
+
+    Returns a list of ``FindingEntry`` objects for entities flagged with
+    subdomain takeover risk by the ``takeover_detection`` pipeline stage.
+    """
+    if session_factory is None:
+        return []
+
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from expose.db.models import Entity  # noqa: PLC0415
+
+    async with session_factory() as session:
+        stmt = (
+            select(Entity)
+            .where(Entity.tenant_id == tenant_id)
+            .order_by(Entity.last_observed_at.desc())
+            .limit(500)
+        )
+        result = await session.execute(stmt)
+        rows = result.scalars().all()
+
+    findings: list[FindingEntry] = []
+    rank = 1
+    for entity in rows:
+        props = entity.properties or {}
+        takeover = props.get("_takeover_risk")
+        if not takeover:
+            continue
+
+        risk_level = takeover.get("risk_level", "high")
+        score = 98 if risk_level == "critical" else 85
+        provider = takeover.get("provider", "unknown")
+        cname_target = takeover.get("cname_target", "unknown")
+
+        findings.append(FindingEntry(
+            rank=rank,
+            entity_identifier=entity.canonical_identifier,
+            entity_type=entity.entity_type,
+            score=score,
+            priority_tier="critical",
+            justification=(
+                f"Subdomain takeover risk: CNAME points to {cname_target} "
+                f"({provider}) but the service no longer exists. An attacker "
+                f"can claim this service and hijack the subdomain."
+            ),
+            signals=[
+                {"signal": "dangling_cname", "weight": 50},
+                {"signal": f"vulnerable_provider_{provider}", "weight": 30},
+                {"signal": "nxdomain_confirmed", "weight": 18},
+            ],
+        ))
+        rank += 1
+
+    return findings
+
+
 @router.get("/")
 async def get_findings(
+    request: Request,
     tenant_id: UUID,
     limit: int = Query(default=20, ge=1, le=100),
     min_score: int = Query(default=0, ge=0, le=100),
 ) -> FindingsResponse:
     """Return top entities ranked by lead score.
 
-    Phase 1 returns placeholder findings data that demonstrates the
-    prioritized-findings UX.  When the lead scoring engine
-    (``expose.pipeline.lead_scoring``) is wired, this endpoint will
-    return real scored entities from the database.
+    When a database session factory is available, queries for entities
+    with subdomain takeover risks (``_takeover_risk`` property) and
+    merges them with placeholder findings. Takeover risks sort to the
+    top as critical findings.
+
+    When no database is available (dev/test mode), returns placeholder
+    findings that demonstrate the prioritized-findings UX.
 
     Findings are always sorted by score descending (highest risk first).
     """
+    session_factory = getattr(request.app.state, "session_factory", None)
+
+    # Fetch takeover-risk findings from the database if available
+    takeover_findings = await _build_takeover_findings(session_factory, tenant_id)
+
+    if takeover_findings:
+        # Merge takeover risks (critical) with placeholder findings
+        placeholder_entries = [
+            FindingEntry(rank=1, **item)  # rank re-assigned below
+            for item in _PLACEHOLDER_FINDINGS
+        ]
+        all_entries = takeover_findings + placeholder_entries
+    else:
+        # No DB or no takeover risks — use placeholder data
+        all_entries = [
+            FindingEntry(rank=1, **item)  # rank re-assigned below
+            for item in _PLACEHOLDER_FINDINGS
+        ]
+
+    total_scored = len(all_entries)
+
+    # Filter by min_score, sort descending, apply limit
+    filtered = [f for f in all_entries if f.score >= min_score]
+    filtered.sort(key=lambda f: f.score, reverse=True)
+    filtered = filtered[:limit]
+
+    # Re-assign sequential ranks after filtering
+    ranked = [
+        FindingEntry(
+            rank=idx + 1,
+            entity_identifier=f.entity_identifier,
+            entity_type=f.entity_type,
+            score=f.score,
+            priority_tier=f.priority_tier,
+            justification=f.justification,
+            signals=f.signals,
+        )
+        for idx, f in enumerate(filtered)
+    ]
+
     return FindingsResponse(
         tenant_id=tenant_id,
-        findings=[],
-        total_scored=0,
+        findings=ranked,
+        total_scored=total_scored,
         generated_at=datetime.now(tz=UTC),
     )
