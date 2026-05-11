@@ -32,6 +32,22 @@ Coverage:
 28. All: health check returns True on 200
 29. All: health check returns False on network error
 30. All: error handling on complete delivery failure
+
+Integration tests (added):
+
+31. Base: retry on 429 rate-limit then success
+32. Base: circuit breaker opens after threshold failures
+33. Base: circuit breaker resets after cooldown
+34. Splunk: entity type -> CIM data model mapping (domain, ip, cidr, cloud, url)
+35. Splunk: severity mapping (info->informational, high->high)
+36. Sentinel: entity_type_s field present in mapped observations
+37. Sentinel: entity_type_s field present in mapped findings
+38. Chronicle: entity type -> UDM event_type mapping (domain->NETWORK_DNS)
+39. Chronicle: cloud_resource_id includes target.resource in UDM
+40. Splunk: batch size limit respected (multiple HTTP calls for large batches)
+41. Sentinel: batch size limit respected
+42. Chronicle: batch size limit respected
+43. Base: circuit breaker short-circuits delivery calls
 """
 
 from __future__ import annotations
@@ -46,7 +62,7 @@ import respx
 
 from expose.integrations.chronicle import ChronicleAdapter
 from expose.integrations.sentinel import SentinelAdapter
-from expose.integrations.siem import DeliveryResult, SIEMConfig
+from expose.integrations.siem import CircuitBreakerOpen, DeliveryResult, SIEMConfig
 from expose.integrations.splunk import SplunkHECAdapter
 
 # Deterministic test IDs.
@@ -612,3 +628,423 @@ class TestChronicle:
         assert adapter._ingestion_url.endswith(
             "/v2/unstructuredlogentries:batchCreate",
         )
+
+
+# ===========================================================================
+# Integration tests: retry on 429, circuit breaker, entity type mapping,
+# batch size limits
+# ===========================================================================
+
+
+class TestRetryOn429:
+    """Verify that 429 rate-limit responses are retried (base adapter behaviour)."""
+
+    @respx.mock
+    async def test_splunk_retries_on_429_then_success(self) -> None:
+        """First request returns 429, second returns 200."""
+        call_count = 0
+
+        def _side_effect(request: httpx.Request) -> httpx.Response:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return httpx.Response(429, text="Rate limited")
+            return httpx.Response(200, json={"text": "Success", "code": 0})
+
+        respx.post(f"{SPLUNK_ENDPOINT}/services/collector/event").mock(
+            side_effect=_side_effect,
+        )
+
+        adapter = SplunkHECAdapter(_splunk_config())
+        result = await adapter.send_observations([_sample_observation()], TENANT_ID)
+
+        assert result.success is True
+        assert result.events_sent == 1
+        assert call_count == 2
+
+    @respx.mock
+    async def test_sentinel_retries_on_429(self) -> None:
+        """Sentinel retries 429 and succeeds on second attempt."""
+        call_count = 0
+        api_url = f"https://{SENTINEL_WORKSPACE}.ods.opinsights.azure.com/api/logs"
+
+        def _side_effect(request: httpx.Request) -> httpx.Response:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return httpx.Response(429, text="Rate limited")
+            return httpx.Response(200)
+
+        respx.post(url__startswith=api_url).mock(side_effect=_side_effect)
+
+        adapter = SentinelAdapter(
+            _sentinel_config(),
+            workspace_id=SENTINEL_WORKSPACE,
+        )
+        result = await adapter.send_observations([_sample_observation()], TENANT_ID)
+
+        assert result.success is True
+        assert call_count == 2
+
+    @respx.mock
+    async def test_chronicle_retries_on_429(self) -> None:
+        """Chronicle retries 429 and succeeds on second attempt."""
+        call_count = 0
+        ingestion_url = f"{CHRONICLE_ENDPOINT}/v2/unstructuredlogentries:batchCreate"
+
+        def _side_effect(request: httpx.Request) -> httpx.Response:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return httpx.Response(429, text="Rate limited")
+            return httpx.Response(200, json={})
+
+        respx.post(ingestion_url).mock(side_effect=_side_effect)
+
+        adapter = ChronicleAdapter(_chronicle_config())
+        result = await adapter.send_observations([_sample_observation()], TENANT_ID)
+
+        assert result.success is True
+        assert call_count == 2
+
+
+class TestCircuitBreaker:
+    """Verify circuit breaker opens after threshold and resets after cooldown."""
+
+    @respx.mock
+    async def test_circuit_breaker_opens_after_threshold(self) -> None:
+        """After 5 consecutive all-retries-exhausted failures, breaker opens."""
+        respx.post(f"{SPLUNK_ENDPOINT}/services/collector/event").mock(
+            return_value=httpx.Response(500, text="Internal Server Error"),
+        )
+
+        adapter = SplunkHECAdapter(_splunk_config())
+
+        # Exhaust retries 5 times to trip the breaker (threshold = 5).
+        for _ in range(5):
+            await adapter.send_observations([_sample_observation()], TENANT_ID)
+
+        assert adapter.circuit_is_open is True
+
+    @respx.mock
+    async def test_circuit_breaker_short_circuits_delivery(self) -> None:
+        """Once open, the breaker causes immediate failure without HTTP calls."""
+        respx.post(f"{SPLUNK_ENDPOINT}/services/collector/event").mock(
+            return_value=httpx.Response(500, text="Internal Server Error"),
+        )
+
+        adapter = SplunkHECAdapter(_splunk_config())
+
+        # Trip the breaker.
+        for _ in range(5):
+            await adapter.send_observations([_sample_observation()], TENANT_ID)
+
+        assert adapter.circuit_is_open is True
+
+        # Next call should fail immediately (circuit breaker).
+        result = await adapter.send_observations([_sample_observation()], TENANT_ID)
+        assert result.success is False
+        assert result.events_failed == 1
+
+    async def test_circuit_breaker_resets_on_success(self) -> None:
+        """A successful call resets the failure counter."""
+        adapter = SplunkHECAdapter(_splunk_config())
+
+        # Manually simulate some failures without fully tripping.
+        adapter._consecutive_failures = 4
+        adapter._record_success()
+
+        assert adapter._consecutive_failures == 0
+        assert adapter.circuit_is_open is False
+
+    async def test_circuit_breaker_not_open_initially(self) -> None:
+        """Fresh adapter has breaker closed."""
+        adapter = SplunkHECAdapter(_splunk_config())
+        assert adapter.circuit_is_open is False
+        assert adapter._consecutive_failures == 0
+
+
+class TestSplunkEntityTypeMapping:
+    """Verify EXPOSE entity types map to correct Splunk CIM data models."""
+
+    def test_domain_entity_cim_mapping(self) -> None:
+        adapter = SplunkHECAdapter(_splunk_config())
+        obs = _sample_observation(entity_type="domain", entity_identifier="example.com")
+        hec = adapter._map_observation_to_hec(obs, TENANT_ID)
+        event = hec["event"]
+        assert event["cim_data_model"] == "DNS"
+        assert event["query"] == "example.com"
+        assert event["entity_type"] == "domain"
+
+    def test_subdomain_entity_cim_mapping(self) -> None:
+        adapter = SplunkHECAdapter(_splunk_config())
+        obs = _sample_observation(entity_type="subdomain", entity_identifier="api.example.com")
+        hec = adapter._map_observation_to_hec(obs, TENANT_ID)
+        event = hec["event"]
+        assert event["cim_data_model"] == "DNS"
+        assert event["query"] == "api.example.com"
+
+    def test_ip_entity_cim_mapping(self) -> None:
+        adapter = SplunkHECAdapter(_splunk_config())
+        obs = _sample_observation(entity_type="ip", entity_identifier="192.168.1.1")
+        hec = adapter._map_observation_to_hec(obs, TENANT_ID)
+        event = hec["event"]
+        assert event["cim_data_model"] == "Network_Traffic"
+        # entity_type=ip maps entity_identifier to src (overwrites source_ip).
+        assert event["src"] == "192.168.1.1"
+
+    def test_cidr_entity_cim_mapping(self) -> None:
+        adapter = SplunkHECAdapter(_splunk_config())
+        obs = _sample_observation(entity_type="cidr", entity_identifier="10.0.0.0/8")
+        hec = adapter._map_observation_to_hec(obs, TENANT_ID)
+        event = hec["event"]
+        assert event["cim_data_model"] == "Network_Traffic"
+        assert event["src_range"] == "10.0.0.0/8"
+
+    def test_cloud_resource_entity_cim_mapping(self) -> None:
+        adapter = SplunkHECAdapter(_splunk_config())
+        obs = _sample_observation(
+            entity_type="cloud_resource_id",
+            entity_identifier="arn:aws:s3:::my-bucket",
+            cloud_provider="aws",
+        )
+        hec = adapter._map_observation_to_hec(obs, TENANT_ID)
+        event = hec["event"]
+        assert event["cim_data_model"] == "Cloud_Infrastructure"
+        assert event["object_id"] == "arn:aws:s3:::my-bucket"
+        assert event["vendor_product"] == "aws"
+
+    def test_url_entity_cim_mapping(self) -> None:
+        adapter = SplunkHECAdapter(_splunk_config())
+        obs = _sample_observation(
+            entity_type="url",
+            entity_identifier="https://example.com/admin",
+        )
+        hec = adapter._map_observation_to_hec(obs, TENANT_ID)
+        event = hec["event"]
+        assert event["cim_data_model"] == "Web"
+        assert event["url"] == "https://example.com/admin"
+        assert event["http_method"] == "GET"
+
+    def test_unknown_entity_type_defaults_to_network(self) -> None:
+        adapter = SplunkHECAdapter(_splunk_config())
+        obs = _sample_observation(entity_type="other_thing")
+        hec = adapter._map_observation_to_hec(obs, TENANT_ID)
+        assert hec["event"]["cim_data_model"] == "Network_Traffic"
+
+
+class TestSplunkSeverityMapping:
+    """Verify EXPOSE severity -> Splunk CIM severity mapping."""
+
+    def test_info_maps_to_informational(self) -> None:
+        adapter = SplunkHECAdapter(_splunk_config())
+        obs = _sample_observation(severity="info")
+        hec = adapter._map_observation_to_hec(obs, TENANT_ID)
+        assert hec["event"]["severity"] == "informational"
+
+    def test_high_maps_to_high(self) -> None:
+        adapter = SplunkHECAdapter(_splunk_config())
+        obs = _sample_observation(severity="high")
+        hec = adapter._map_observation_to_hec(obs, TENANT_ID)
+        assert hec["event"]["severity"] == "high"
+
+    def test_critical_maps_to_critical(self) -> None:
+        adapter = SplunkHECAdapter(_splunk_config())
+        obs = _sample_observation(severity="critical")
+        hec = adapter._map_observation_to_hec(obs, TENANT_ID)
+        assert hec["event"]["severity"] == "critical"
+
+    def test_finding_severity_mapped(self) -> None:
+        adapter = SplunkHECAdapter(_splunk_config())
+        finding = _sample_finding(severity="high")
+        hec = adapter._map_finding_to_hec(finding, TENANT_ID)
+        assert hec["event"]["severity"] == "high"
+
+    def test_finding_info_severity_mapped(self) -> None:
+        adapter = SplunkHECAdapter(_splunk_config())
+        finding = _sample_finding(severity="info")
+        hec = adapter._map_finding_to_hec(finding, TENANT_ID)
+        assert hec["event"]["severity"] == "informational"
+
+
+class TestSentinelEntityType:
+    """Verify entity_type field is included in Sentinel mapped observations/findings."""
+
+    def test_observation_includes_entity_type(self) -> None:
+        obs = _sample_observation(entity_type="domain")
+        mapped = SentinelAdapter._map_observation(obs, TENANT_ID)
+        assert mapped["entity_type_s"] == "domain"
+
+    def test_observation_entity_type_default_empty(self) -> None:
+        obs = _sample_observation()  # no entity_type key
+        mapped = SentinelAdapter._map_observation(obs, TENANT_ID)
+        assert mapped["entity_type_s"] == ""
+
+    def test_finding_includes_entity_type(self) -> None:
+        finding = _sample_finding(entity_type="subdomain")
+        mapped = SentinelAdapter._map_finding(finding, TENANT_ID)
+        assert mapped["entity_type_s"] == "subdomain"
+
+
+class TestChronicleEntityTypeUDM:
+    """Verify EXPOSE entity types map to correct UDM event_type values."""
+
+    def test_domain_maps_to_network_dns(self) -> None:
+        adapter = ChronicleAdapter(_chronicle_config())
+        obs = _sample_observation(entity_type="domain")
+        entry = adapter._map_observation_to_udm(obs, TENANT_ID)
+        udm = json.loads(entry["log_text"])
+        assert udm["metadata"]["event_type"] == "NETWORK_DNS"
+
+    def test_subdomain_maps_to_network_dns(self) -> None:
+        adapter = ChronicleAdapter(_chronicle_config())
+        obs = _sample_observation(entity_type="subdomain")
+        entry = adapter._map_observation_to_udm(obs, TENANT_ID)
+        udm = json.loads(entry["log_text"])
+        assert udm["metadata"]["event_type"] == "NETWORK_DNS"
+
+    def test_ip_maps_to_network_uncategorized(self) -> None:
+        adapter = ChronicleAdapter(_chronicle_config())
+        obs = _sample_observation(entity_type="ip")
+        entry = adapter._map_observation_to_udm(obs, TENANT_ID)
+        udm = json.loads(entry["log_text"])
+        assert udm["metadata"]["event_type"] == "NETWORK_UNCATEGORIZED"
+
+    def test_url_maps_to_network_http(self) -> None:
+        adapter = ChronicleAdapter(_chronicle_config())
+        obs = _sample_observation(entity_type="url", entity_identifier="https://example.com")
+        entry = adapter._map_observation_to_udm(obs, TENANT_ID)
+        udm = json.loads(entry["log_text"])
+        assert udm["metadata"]["event_type"] == "NETWORK_HTTP"
+        assert udm["principal"]["url"] == "https://example.com"
+
+    def test_cloud_resource_maps_to_resource_read(self) -> None:
+        adapter = ChronicleAdapter(_chronicle_config())
+        obs = _sample_observation(
+            entity_type="cloud_resource_id",
+            entity_identifier="arn:aws:s3:::bucket",
+            cloud_service="S3",
+        )
+        entry = adapter._map_observation_to_udm(obs, TENANT_ID)
+        udm = json.loads(entry["log_text"])
+        assert udm["metadata"]["event_type"] == "RESOURCE_READ"
+        assert udm["target"]["resource"]["product_object_id"] == "arn:aws:s3:::bucket"
+        assert udm["target"]["resource"]["resource_type"] == "S3"
+
+    def test_unknown_entity_defaults_to_network_uncategorized(self) -> None:
+        adapter = ChronicleAdapter(_chronicle_config())
+        obs = _sample_observation(entity_type="unknown_type")
+        entry = adapter._map_observation_to_udm(obs, TENANT_ID)
+        udm = json.loads(entry["log_text"])
+        assert udm["metadata"]["event_type"] == "NETWORK_UNCATEGORIZED"
+
+    def test_entity_type_in_additional_fields(self) -> None:
+        adapter = ChronicleAdapter(_chronicle_config())
+        obs = _sample_observation(entity_type="domain")
+        entry = adapter._map_observation_to_udm(obs, TENANT_ID)
+        udm = json.loads(entry["log_text"])
+        assert udm["additional"]["fields"]["entity_type"] == "domain"
+
+
+class TestBatchSizeLimits:
+    """Verify that each adapter respects batch_size and makes multiple HTTP calls."""
+
+    @respx.mock
+    async def test_splunk_batch_size_multiple_calls(self) -> None:
+        """With batch_size=2 and 5 observations, expect 3 HTTP POSTs."""
+        call_count = 0
+
+        def _side_effect(request: httpx.Request) -> httpx.Response:
+            nonlocal call_count
+            call_count += 1
+            return httpx.Response(200, json={"text": "Success", "code": 0})
+
+        respx.post(f"{SPLUNK_ENDPOINT}/services/collector/event").mock(
+            side_effect=_side_effect,
+        )
+
+        adapter = SplunkHECAdapter(_splunk_config(batch_size=2))
+        obs_list = [_sample_observation() for _ in range(5)]
+        result = await adapter.send_observations(obs_list, TENANT_ID)
+
+        assert result.success is True
+        assert result.events_sent == 5
+        assert call_count == 3  # ceil(5/2) = 3
+
+    @respx.mock
+    async def test_sentinel_batch_size_multiple_calls(self) -> None:
+        """With batch_size=2 and 5 observations, expect 3 HTTP POSTs."""
+        call_count = 0
+        api_url = f"https://{SENTINEL_WORKSPACE}.ods.opinsights.azure.com/api/logs"
+
+        def _side_effect(request: httpx.Request) -> httpx.Response:
+            nonlocal call_count
+            call_count += 1
+            return httpx.Response(200)
+
+        respx.post(url__startswith=api_url).mock(side_effect=_side_effect)
+
+        adapter = SentinelAdapter(
+            _sentinel_config(batch_size=2),
+            workspace_id=SENTINEL_WORKSPACE,
+        )
+        obs_list = [_sample_observation() for _ in range(5)]
+        result = await adapter.send_observations(obs_list, TENANT_ID)
+
+        assert result.success is True
+        assert result.events_sent == 5
+        assert call_count == 3
+
+    @respx.mock
+    async def test_chronicle_batch_size_multiple_calls(self) -> None:
+        """With batch_size=2 and 5 observations, expect 3 HTTP POSTs."""
+        call_count = 0
+        ingestion_url = f"{CHRONICLE_ENDPOINT}/v2/unstructuredlogentries:batchCreate"
+
+        def _side_effect(request: httpx.Request) -> httpx.Response:
+            nonlocal call_count
+            call_count += 1
+            return httpx.Response(200, json={})
+
+        respx.post(ingestion_url).mock(side_effect=_side_effect)
+
+        adapter = ChronicleAdapter(_chronicle_config(batch_size=2))
+        obs_list = [_sample_observation() for _ in range(5)]
+        result = await adapter.send_observations(obs_list, TENANT_ID)
+
+        assert result.success is True
+        assert result.events_sent == 5
+        assert call_count == 3
+
+    @respx.mock
+    async def test_splunk_batch_content_size_correct(self) -> None:
+        """Each batch POST contains at most batch_size events."""
+        captured_bodies: list[bytes] = []
+
+        def _side_effect(request: httpx.Request) -> httpx.Response:
+            captured_bodies.append(request.content)
+            return httpx.Response(200, json={"text": "Success", "code": 0})
+
+        respx.post(f"{SPLUNK_ENDPOINT}/services/collector/event").mock(
+            side_effect=_side_effect,
+        )
+
+        adapter = SplunkHECAdapter(_splunk_config(batch_size=3))
+        obs_list = [_sample_observation() for _ in range(7)]
+        result = await adapter.send_observations(obs_list, TENANT_ID)
+
+        assert result.success is True
+        assert result.events_sent == 7
+        assert len(captured_bodies) == 3  # 3 + 3 + 1
+
+        # First batch: 3 events (newline-delimited).
+        lines_1 = captured_bodies[0].decode().strip().split("\n")
+        assert len(lines_1) == 3
+
+        # Second batch: 3 events.
+        lines_2 = captured_bodies[1].decode().strip().split("\n")
+        assert len(lines_2) == 3
+
+        # Third batch: 1 event.
+        lines_3 = captured_bodies[2].decode().strip().split("\n")
+        assert len(lines_3) == 1

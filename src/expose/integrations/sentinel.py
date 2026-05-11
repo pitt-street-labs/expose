@@ -31,7 +31,12 @@ import httpx
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.hmac import HMAC
 
-from expose.integrations.siem import DeliveryResult, SIEMAdapter, SIEMConfig
+from expose.integrations.siem import (
+    CircuitBreakerOpen,
+    DeliveryResult,
+    SIEMAdapter,
+    SIEMConfig,
+)
 
 __all__ = ["SentinelAdapter"]
 
@@ -87,7 +92,7 @@ class SentinelAdapter(SIEMAdapter):
                     total_sent += len(batch)
                 else:
                     total_failed += len(batch)
-            except (httpx.HTTPError, httpx.HTTPStatusError):
+            except (httpx.HTTPError, httpx.HTTPStatusError, CircuitBreakerOpen):
                 total_failed += len(batch)
 
         return self._timed_result(
@@ -127,7 +132,7 @@ class SentinelAdapter(SIEMAdapter):
                 start=start,
                 error=None if success else f"HTTP {response.status_code}",
             )
-        except (httpx.HTTPError, httpx.HTTPStatusError) as exc:
+        except (httpx.HTTPError, httpx.HTTPStatusError, CircuitBreakerOpen) as exc:
             return self._timed_result(
                 success=False,
                 events_sent=0,
@@ -224,6 +229,7 @@ class SentinelAdapter(SIEMAdapter):
         return {
             "tenant_id_s": str(tenant_id),
             "entity_identifier_s": obs.get("entity_identifier", "unknown"),
+            "entity_type_s": obs.get("entity_type", ""),
             "observation_type_s": obs.get("observation_type", "unknown"),
             "collector_id_s": obs.get("collector_id", ""),
             "observed_at_t": obs.get("observed_at", ""),
@@ -246,6 +252,7 @@ class SentinelAdapter(SIEMAdapter):
             "severity_s": finding.get("severity", "info"),
             "description_s": finding.get("description", ""),
             "entity_identifier_s": finding.get("entity_identifier", ""),
+            "entity_type_s": finding.get("entity_type", ""),
             "indicators_s": json.dumps(finding.get("indicators"))
             if finding.get("indicators")
             else "",

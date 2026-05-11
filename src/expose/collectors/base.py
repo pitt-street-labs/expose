@@ -111,6 +111,7 @@ class ObservationType(StrEnum):
     HTTP_RESPONSE = "http_response"
     PORT_SCAN_RESULT = "port_scan_result"
     WAF_ORIGIN_DISCOVERY = "waf_origin_discovery"
+    DARK_WEB_MENTION = "dark_web_mention"
 
 
 class ObservationSubject(StrictModel):

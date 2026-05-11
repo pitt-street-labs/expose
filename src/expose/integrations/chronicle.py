@@ -20,7 +20,7 @@ from uuid import UUID
 
 import httpx
 
-from expose.integrations.siem import DeliveryResult, SIEMAdapter
+from expose.integrations.siem import CircuitBreakerOpen, DeliveryResult, SIEMAdapter
 
 __all__ = ["ChronicleAdapter"]
 
@@ -78,7 +78,7 @@ class ChronicleAdapter(SIEMAdapter):
                     total_sent += len(batch)
                 else:
                     total_failed += len(batch)
-            except (httpx.HTTPError, httpx.HTTPStatusError):
+            except (httpx.HTTPError, httpx.HTTPStatusError, CircuitBreakerOpen):
                 total_failed += len(batch)
 
         return self._timed_result(
@@ -123,7 +123,7 @@ class ChronicleAdapter(SIEMAdapter):
                 start=start,
                 error=None if success else f"HTTP {response.status_code}",
             )
-        except (httpx.HTTPError, httpx.HTTPStatusError) as exc:
+        except (httpx.HTTPError, httpx.HTTPStatusError, CircuitBreakerOpen) as exc:
             return self._timed_result(
                 success=False,
                 events_sent=0,
@@ -174,14 +174,35 @@ class ChronicleAdapter(SIEMAdapter):
         }
 
     @staticmethod
+    def _udm_event_type_for_entity(entity_type: str) -> str:
+        """Map EXPOSE entity type to the best-fit UDM event_type.
+
+        - ``domain`` / ``subdomain`` -> ``NETWORK_DNS`` (DNS resolution events)
+        - ``ip`` / ``cidr`` -> ``NETWORK_UNCATEGORIZED`` (general network)
+        - ``cloud_resource_id`` -> ``RESOURCE_READ`` (cloud resource observation)
+        - ``url`` -> ``NETWORK_HTTP`` (HTTP-level observation)
+        - default -> ``NETWORK_UNCATEGORIZED``
+        """
+        _map = {
+            "domain": "NETWORK_DNS",
+            "subdomain": "NETWORK_DNS",
+            "ip": "NETWORK_UNCATEGORIZED",
+            "cidr": "NETWORK_UNCATEGORIZED",
+            "cloud_resource_id": "RESOURCE_READ",
+            "url": "NETWORK_HTTP",
+        }
+        return _map.get(entity_type, "NETWORK_UNCATEGORIZED")
+
+    @staticmethod
     def _map_observation_to_udm(
         obs: dict[str, Any],
         tenant_id: UUID,
     ) -> dict[str, Any]:
         """Map an EXPOSE observation to a UDM-structured log entry."""
+        entity_type = obs.get("entity_type", "")
         udm_event: dict[str, Any] = {
             "metadata": {
-                "event_type": "NETWORK_UNCATEGORIZED",
+                "event_type": ChronicleAdapter._udm_event_type_for_entity(entity_type),
                 "product_name": "EXPOSE",
                 "vendor_name": "Korlogos",
                 "description": obs.get("observation_type", "unknown"),
@@ -191,7 +212,14 @@ class ChronicleAdapter(SIEMAdapter):
         # Principal (source of the observation).
         principal: dict[str, Any] = {}
         if obs.get("entity_identifier"):
-            principal["hostname"] = obs["entity_identifier"]
+            if entity_type in ("domain", "subdomain"):
+                principal["hostname"] = obs["entity_identifier"]
+            elif entity_type == "ip":
+                principal["ip"] = [obs["entity_identifier"]]
+            elif entity_type == "url":
+                principal["url"] = obs["entity_identifier"]
+            else:
+                principal["hostname"] = obs["entity_identifier"]
         if obs.get("source_ip"):
             principal["ip"] = [obs["source_ip"]]
         if principal:
@@ -214,6 +242,15 @@ class ChronicleAdapter(SIEMAdapter):
                 },
             }
 
+        # Cloud resource context.
+        if entity_type == "cloud_resource_id":
+            udm_event["target"] = udm_event.get("target", {})
+            udm_event["target"]["resource"] = {
+                "name": obs.get("entity_identifier", ""),
+                "product_object_id": obs.get("entity_identifier", ""),
+                "resource_type": obs.get("cloud_service", "UNSPECIFIED"),
+            }
+
         # Additional context as labels.
         udm_event["additional"] = {
             "fields": {
@@ -221,6 +258,7 @@ class ChronicleAdapter(SIEMAdapter):
                 "collector_id": obs.get("collector_id", ""),
                 "severity": obs.get("severity", "info"),
                 "observed_at": obs.get("observed_at", ""),
+                "entity_type": entity_type,
             },
         }
 
@@ -255,6 +293,7 @@ class ChronicleAdapter(SIEMAdapter):
                 "fields": {
                     "tenant_id": str(tenant_id),
                     "finding_id": finding.get("finding_id", ""),
+                    "entity_type": finding.get("entity_type", ""),
                 },
             },
         }

@@ -169,6 +169,11 @@ CREDENTIAL_SPECS: dict[str, CollectorCredentialSpec] = {
         required_keys=[],
         optional_keys=["api_key"],
     ),
+    "dark-web-indicators": CollectorCredentialSpec(
+        collector_id="dark-web-indicators",
+        required_keys=["hibp_api_key"],
+        optional_keys=["intelx_api_key", "dehashed_email", "dehashed_api_key"],
+    ),
 }
 
 
