@@ -159,18 +159,27 @@ class MailHeaderAnalyzerCollector(Collector):
         discovered_ips: set[str] = set()
         discovered_archives: list[dict[str, str]] = []
 
+        probe_timeout = httpx.Timeout(
+            connect=5.0,
+            read=10.0,
+            write=5.0,
+            pool=5.0,
+        )
         async with httpx.AsyncClient(
-            timeout=self.config.request_timeout_seconds,
+            timeout=probe_timeout,
             headers={"User-Agent": self.config.user_agent},
             follow_redirects=True,
         ) as client:
             for subdomain in _ARCHIVE_SUBDOMAINS:
                 base_url = f"https://{subdomain}.{domain}"
+                found_archive = False
                 for path in _ARCHIVE_PATHS:
                     url = f"{base_url}{path}"
                     try:
                         resp = await client.get(url)
                     except httpx.HTTPError:
+                        if not found_archive:
+                            break
                         continue
 
                     if resp.status_code != 200:  # noqa: PLR2004
@@ -180,6 +189,7 @@ class MailHeaderAnalyzerCollector(Collector):
                     if not content:
                         continue
 
+                    found_archive = True
                     # We found an accessible archive page.
                     software = _detect_software(content)
                     archive_info: dict[str, str] = {
