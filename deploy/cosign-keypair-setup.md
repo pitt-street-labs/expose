@@ -8,9 +8,9 @@ pulled image was built by the EXPOSE CI pipeline and has not been tampered with
 in transit or at rest.
 
 Per ADR-004, production deployments use cosign keyless signing via GitHub Actions
-OIDC. Lab deployments on internal Gitea (`git.int.korlogos.com:8084`) run
-**unsigned** -- the Helm chart's `image.verify` defaults to `false` and no
-signing infrastructure is required for internal use.
+OIDC. Internal or air-gapped lab deployments may run **unsigned** -- the Helm
+chart's `image.verify` defaults to `false` and no signing infrastructure is
+required for internal use.
 
 This document covers keypair-based signing for environments that need image
 verification but cannot use the keyless (OIDC) flow.
@@ -130,8 +130,8 @@ dependencies.
 
 ## Lab Policy
 
-Internal Gitea deployments (`git.int.korlogos.com:8084`) do **not** use cosign
-signing. Per ADR-004:
+Internal or air-gapped lab deployments do **not** use cosign signing.
+Per ADR-004:
 
 - Lab images are built and consumed locally; the threat model does not include
   registry tampering.

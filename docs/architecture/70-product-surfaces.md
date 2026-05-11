@@ -98,14 +98,14 @@ The critical structural property per ADR-009: **Core depends on no proprietary c
 Per ADR-009 §"Repository structure":
 
 ```
-github.com/korlogos/ff6k-core              (Apache 2.0, public — when consent gate lifts)
-github.com/korlogos/ff6k-threat-context    (proprietary, private — commercial customers only)
-github.com/korlogos/ff6k-identity-surface  (proprietary, private — commercial customers only)
-github.com/korlogos/ff6k-research          (CC BY 4.0 datasets + Apache 2.0 tooling, public)
-github.com/korlogos/ff6k-rulepacks         (proprietary, private — client-specific rule packs)
+github.com/korlogos/expose                 (Apache 2.0, public — when consent gate lifts)
+github.com/korlogos/expose-threat-context  (proprietary, private — commercial customers only)
+github.com/korlogos/expose-identity-surface (proprietary, private — commercial customers only)
+github.com/korlogos/expose-research        (CC BY 4.0 datasets + Apache 2.0 tooling, public)
+github.com/korlogos/expose-rulepacks       (proprietary, private — client-specific rule packs)
 ```
 
-Note: repository names use the internal `ff6k` prefix per the `pitt-street-labs/ff6k` lab convention; renaming Gitea / GitHub repos to `expose` is a separate decision deferred to pre-publication review per HISTORY.md.
+Note: repository names shown above are placeholders; final GitHub organization and repository naming will be determined at publication time.
 
 ## What each surface offers
 
@@ -209,5 +209,5 @@ The Federal CDM Engineer (the daily user paired with the Security Director buyer
 - ADR-009 — Commercial structure (open-core + 3 commercial modules + research)
 - ADR-006 — Repository and licensing (Apache 2.0 engine, private rule packs — predecessor decision)
 - positioning.md §6 — The product structure
-- HISTORY.md — Public name selection (EXPOSE) and codename history (FF6K)
+- HISTORY.md — Public name selection (EXPOSE) and codename lineage
 - `docs/strategy/persona-analysis.md` — Persona-by-surface fit

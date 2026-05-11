@@ -16,7 +16,7 @@
 
 global:
   # OCI image source — operators may override to point at internal registry
-  # mirrors (federal customers self-hosting per Session G deployment guide).
+  # mirrors (federal customers self-hosting per the federal deployment guide).
   imageRegistry: "ghcr.io/korlogos"
   imagePullSecrets: []
 

@@ -1,6 +1,6 @@
 # EXPOSE Smoke Test: cyberark.com (Tier-1 Passive Only)
 
-_Generated 2026-05-11. Zero packets sent to target infrastructure._
+_Zero packets sent to target infrastructure._
 
 ## Data Sources
 

@@ -66,14 +66,14 @@ The EXPOSE engine emits metrics via OpenTelemetry with these instrument names:
 | `expose.observations.emitted` | `expose_observations_emitted_total` | Counter | Implemented |
 | `expose.run.duration` | `expose_run_duration_milliseconds_*` | Histogram | Implemented |
 | `expose.runs.active` | `expose_runs_active` | UpDownCounter (gauge) | Implemented |
-| `expose.llm.cost.usd` | `expose_llm_cost_usd_total` | Counter | Planned (Sprint 5+) |
-| `expose.entity.lead.score` | `expose_entity_lead_score` | Gauge | Planned (Sprint 5+) |
+| `expose.llm.cost.usd` | `expose_llm_cost_usd_total` | Counter | Planned |
+| `expose.entity.lead.score` | `expose_entity_lead_score` | Gauge | Planned |
 
 Key label dimensions: `tenant_id`, `collector_id`, `status`, `run_id`,
 `state`, `attribution_status`, `entity_type`, `llm_provider`,
 `canonical_identifier`.
 
-### Planned Metrics (Sprint 5+)
+### Planned Metrics
 
 The following metrics are referenced in dashboard queries but not yet emitted
 by the engine. Panels using these will show "No data" until the metrics are

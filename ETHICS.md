@@ -168,6 +168,6 @@ If you believe EXPOSE is being used in ways that conflict with this document:
 
 ## Last Reviewed
 
-This document was last reviewed on **2026-05-10** at public launch preparation.
+This document is reviewed at each major release and updated as needed.
 
-Next scheduled review: **2026-08-10**.
+Next scheduled review: at v1.0 release.

@@ -1,8 +1,7 @@
 # EXPOSE — Problem Statement
 
 **Status:** Scaffold awaiting researcher-journey framing from project lead
-**Public name:** EXPOSE (selected 2026-05-10 in Session H)
-**Internal codename:** FF6K
+**Public name:** EXPOSE (EXtended Perimeter Ontology Security Evaluation)
 
 This document captures the problem EXPOSE solves, framed around the cybersecurity-researcher journey of the project lead. It is the foundational narrative document — the "why does this exist" answer — that drives README content, marketing positioning, and federal procurement narrative.
 

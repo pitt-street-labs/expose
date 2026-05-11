@@ -3,7 +3,7 @@
 **Version:** Phase 1 (in-memory, no persistent DB)
 **Application URL:** `http://localhost:8090`
 **Dashboard URL:** `http://localhost:8090/dashboard`
-**Date:** 2026-05-10
+**Status:** Current
 
 ---
 
@@ -316,7 +316,7 @@ These steps must be completed before running any test.
 - After clicking "Test" on the Shodan row (step 11):
   - Status message: "shodan_api_key: ok -- Shodan API Key is configured (health check not yet implemented)."
 - After clicking "Export" (step 12):
-  - A JSON file downloads with a name like `expose-credentials-2026-05-10.json`.
+  - A JSON file downloads with a name like `expose-credentials-YYYY-MM-DD.json`.
   - The status message reads "Credentials exported (values masked)."
 
 **Pass Criteria:** The credentials table displays all 10 slots, import updates status from "missing" to "configured" with masked values, the Test button returns a success response for configured credentials, and Export triggers a file download.
@@ -359,7 +359,7 @@ These steps must be completed before running any test.
   - A "Download CSV" button.
 - When "Download CSV" is clicked:
   - The button text changes to "Exporting..." briefly.
-  - A file downloads with a name like `expose-export-2026-05-10.csv`.
+  - A file downloads with a name like `expose-export-YYYY-MM-DD.csv`.
   - The button reverts to "Download CSV".
 - **CSV file contents** (unfiltered, placeholder data):
   - Header row: `entity_identifier,entity_type,attribution_tier,confidence,collectors,first_seen,last_seen,environment,risk_summary`

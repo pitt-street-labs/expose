@@ -1,9 +1,9 @@
 # EXPOSE — Operator Quickstart
 
 **Status:** Pre-release operator guide — tracks Phase 1 of the spec (`docs/SPEC.md` §11.1). Open for revision as the chart and CLI mature in Sprints 1-9.
-**Date:** 2026-05-11
+**Status:** Current
 **Audience:** Security engineers and DevOps engineers deploying EXPOSE Core in lab, internal-corporate, or boutique-consultancy contexts.
-**Public name:** EXPOSE / **Internal codename:** FF6K
+**Public name:** EXPOSE (EXtended Perimeter Ontology Security Evaluation)
 **Source files cited:** `docs/SPEC.md`, `docs/adr/ADR-007-multi-tenancy.md`, `docs/adr/ADR-008-authorized-use-and-ethics.md`, `deploy/helm-chart/values.yaml`, `examples/tenant-config.yaml.template`, `docker-compose.yml`, `src/expose/db/engine.py`, `deploy/grafana/README.md`.
 
 This is the **lighter on-ramp**. If you are a federal agency operator deploying EXPOSE Core inside an Authority To Operate boundary with NIST SP 800-53 control inheritance work, **stop reading this and use `docs/strategy/federal-customer-deployment-guide.md`** instead — it covers FedRAMP-ready posture, SSP boundary documentation, control mapping, CDM/SIEM integration, and 3PAO assessment touchpoints. This quickstart is for everyone else: a CTEM team mapping its own perimeter, a boutique red team standing up a per-engagement tenant, a research lab evaluating attribution methodology.

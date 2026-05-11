@@ -107,5 +107,5 @@ ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # Default command: print version. Real entry points (control-plane API,
 # collector worker, scanner worker, llm worker) are launched via the
-# `expose` CLI subcommands in Sprint 3+.
+# `expose` CLI subcommands (serve, worker, scan, etc.).
 CMD ["expose", "--version"]

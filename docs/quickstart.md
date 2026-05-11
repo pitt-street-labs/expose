@@ -1,7 +1,7 @@
 # EXPOSE -- Quickstart Guide
 
 **Status:** Advisory
-**Date:** 2026-05-11
+**Status:** Current
 **Audience:** Developers and operators evaluating EXPOSE for the first time.
 
 This guide walks through installing EXPOSE, running your first scan, and understanding the output. For the full specification, see `docs/SPEC.md`. For architecture diagrams, see `docs/architecture/`.

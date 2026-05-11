@@ -1,7 +1,7 @@
 # EXPOSE -- Collector Catalog
 
 **Status:** Advisory -- visual companion to the locked spec, not a substitute for it.
-**Date:** 2026-05-11
+**Status:** Current
 **Spec references:** SPEC.md section 6 (Collectors), section 6.3 (Tier Model), section 6.4 (Credentials), ADR-008 (Authorized Use), ADR-010 (FIPS Crypto)
 
 This document catalogs every built-in collector shipped with EXPOSE, their tier classification, data sources, accepted seed types, produced observation types, and credential requirements. It is generated from source and kept in sync with the implementation.

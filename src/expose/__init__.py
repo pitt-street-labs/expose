@@ -4,7 +4,7 @@ EXPOSE Core (Apache 2.0) is the deterministic discovery and bounded-enrichment p
 producing signed JSON artifacts. See docs/SPEC.md for the comprehensive specification and
 docs/positioning.md for strategic positioning.
 
-Internal codename: FF6K.
+See docs/HISTORY.md for project naming history.
 
 Sub-packages:
 

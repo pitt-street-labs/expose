@@ -1,7 +1,7 @@
 # EXPOSE -- Architecture Diagrams
 
 **Status:** Advisory -- visual companions to the locked spec, not a substitute for it.
-**Date:** 2026-05-11 (refreshed after Tier A-D sprint)
+**Status:** Current (refreshed with latest implementation)
 **Public name:** EXPOSE (EXtended Perimeter Ontology Security Evaluation)
 
 This directory holds Mermaid-rendered architecture diagrams for EXPOSE. Each diagram visualizes one slice of the system as defined in the locked spec (`docs/SPEC.md`) and the architecture decision records (`docs/adr/`). The diagrams are reference material for technical reviewers, federal customers, and onboarding engineers; the spec remains the source of truth when the two appear to disagree.
