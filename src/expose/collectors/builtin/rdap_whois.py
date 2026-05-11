@@ -234,16 +234,48 @@ class RdapWhoisCollector(Collector):
                 yield obs
         # All other seed types are silently skipped per contract.
 
+    @staticmethod
+    def _to_apex(domain: str) -> str:
+        """Strip subdomains to get the registered/apex domain for RDAP queries.
+
+        RDAP only has records for registered domains (e.g. cyberark.com),
+        not subdomains (e.g. www.cyberark.com).  Uses a simple heuristic:
+        keep the last two labels for standard TLDs.  For known compound
+        ccTLDs (co.uk, com.au, etc.) keep the last three.
+        """
+        _COMPOUND_TLDS = frozenset({
+            "co.uk", "org.uk", "ac.uk", "gov.uk",
+            "com.au", "net.au", "org.au",
+            "co.nz", "net.nz", "org.nz",
+            "co.jp", "or.jp", "ne.jp",
+            "co.kr", "or.kr",
+            "com.br", "org.br", "net.br",
+            "co.za", "org.za", "net.za",
+            "co.in", "net.in", "org.in",
+            "com.cn", "net.cn", "org.cn",
+            "co.il", "org.il",
+            "com.mx", "org.mx",
+            "com.sg", "org.sg",
+        })
+        parts = domain.lower().split(".")
+        if len(parts) <= 2:
+            return domain
+        suffix2 = ".".join(parts[-2:])
+        if suffix2 in _COMPOUND_TLDS and len(parts) >= 3:
+            return ".".join(parts[-3:])
+        return suffix2
+
     async def _expand_domain(self, seed: Seed) -> AsyncIterator[Observation]:
-        """Query RDAP for a domain seed."""
+        """Query RDAP for a domain seed (stripped to apex)."""
         canonical = canonicalize_domain(seed.value)
-        url = f"{_RDAP_BOOTSTRAP_BASE}/domain/{canonical}"
+        apex = self._to_apex(canonical)
+        url = f"{_RDAP_BOOTSTRAP_BASE}/domain/{apex}"
         data = await self._fetch_rdap(url)
 
         observation = self._parse_rdap_response(
             data=data,
             identifier_type=IdentifierType.DOMAIN,
-            identifier_value=canonical,
+            identifier_value=apex,
             raw_bytes=json.dumps(data, ensure_ascii=False).encode("utf-8"),
         )
         yield observation
