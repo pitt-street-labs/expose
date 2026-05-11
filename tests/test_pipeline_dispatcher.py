@@ -1,6 +1,6 @@
 """Tests for the pipeline dispatcher (PipelineDispatcher).
 
-Twelve tests covering the full dispatch lifecycle without live NATS or
+Eighteen tests covering the full dispatch lifecycle without live NATS or
 Postgres. All collector and registry interactions are satisfied by mock
 collector classes defined in this module.
 
@@ -18,12 +18,19 @@ Coverage:
 10. Multiple observations from a multi-yield collector.
 11. DispatchJob rejects unknown fields (Pydantic ``extra="forbid"``).
 12. DispatchResult is frozen (immutable).
+13. ScopeMatcher allows in-scope entity — dispatch proceeds normally.
+14. ScopeMatcher denies out-of-scope entity — returns DENIED.
+15. ScopeMatcher records enforcement log on denial.
+16. CredentialResolver injects credentials into CollectorConfig.
+17. CredentialResolver error returns COLLECTOR_ERROR.
+18. No scope_matcher (None) — behaviour unchanged (falls through).
 """
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
@@ -32,6 +39,7 @@ from pydantic import ValidationError
 from expose.collectors.base import (
     Collector,
     CollectorConfig,
+    CollectorCredential,
     CollectorError,
     CollectorHealthCheck,
     Observation,
@@ -42,6 +50,7 @@ from expose.collectors.base import (
 )
 from expose.collectors.registry import CollectorNotRegisteredError, CollectorRegistry
 from expose.collectors.tiers import CollectorTier, TenantAuthorizationScope
+from expose.pipeline.credential_resolver import CredentialResolutionError, CredentialResolver
 from expose.pipeline.dispatcher import (
     DispatchJob,
     DispatchResult,
@@ -49,6 +58,9 @@ from expose.pipeline.dispatcher import (
     PipelineDispatcher,
     current_tenant_id,
 )
+from expose.pipeline.enforcement import EnforcementLog
+from expose.scope.matcher import ScopeMatcher
+from expose.scope.models import AuthorizationScope, ScopeRule, ScopeRuleType
 from expose.types.canonical import CollectorStatus, ExtendedIdentifierType
 
 # === Synthetic IDs (UUIDv7-style, deterministic, greppable) ==================
@@ -506,3 +518,145 @@ class TestPipelineDispatcher:
         result = DispatchResult(status=DispatchStatus.SUCCESS)
         with pytest.raises(ValidationError):
             result.status = DispatchStatus.DENIED  # type: ignore[misc]
+
+    # === ScopeMatcher integration (A1) ========================================
+
+    @pytest.mark.asyncio
+    async def test_scope_matcher_allows_in_scope_entity(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """13. ScopeMatcher says in_scope=True — dispatch proceeds normally."""
+        auth_scope = AuthorizationScope(
+            tenant_id=TENANT_ID,
+            rules=[ScopeRule(rule_type=ScopeRuleType.APEX_DOMAIN, value="example.com")],
+            last_modified=_NOW,
+            modified_by="test",
+        )
+        matcher = ScopeMatcher(auth_scope)
+        dispatcher = PipelineDispatcher(
+            registry, scope_empty, TENANT_ID, scope_matcher=matcher,
+        )
+        result = await dispatcher.dispatch(_make_job("mock-tier1", seed))
+
+        assert result.status == DispatchStatus.SUCCESS
+        assert len(result.observations) == 1
+
+    @pytest.mark.asyncio
+    async def test_scope_matcher_denies_out_of_scope_entity(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """14. ScopeMatcher says in_scope=False — returns DENIED."""
+        auth_scope = AuthorizationScope(
+            tenant_id=TENANT_ID,
+            rules=[ScopeRule(rule_type=ScopeRuleType.APEX_DOMAIN, value="other.net")],
+            last_modified=_NOW,
+            modified_by="test",
+        )
+        matcher = ScopeMatcher(auth_scope)
+        dispatcher = PipelineDispatcher(
+            registry, scope_empty, TENANT_ID, scope_matcher=matcher,
+        )
+        result = await dispatcher.dispatch(_make_job("mock-tier1", seed))
+
+        assert result.status == DispatchStatus.DENIED
+        assert result.observations == []
+        assert result.error_message is not None
+
+    @pytest.mark.asyncio
+    async def test_scope_matcher_records_enforcement_log(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """15. ScopeMatcher denial records a ScopeRefusalEvent."""
+        auth_scope = AuthorizationScope(
+            tenant_id=TENANT_ID,
+            rules=[ScopeRule(rule_type=ScopeRuleType.APEX_DOMAIN, value="other.net")],
+            last_modified=_NOW,
+            modified_by="test",
+        )
+        matcher = ScopeMatcher(auth_scope)
+        log = EnforcementLog()
+        dispatcher = PipelineDispatcher(
+            registry, scope_empty, TENANT_ID,
+            enforcement_log=log, scope_matcher=matcher,
+        )
+        result = await dispatcher.dispatch(_make_job("mock-tier1", seed))
+
+        assert result.status == DispatchStatus.DENIED
+        assert log.refusal_count == 1
+        refusal = log.refusals[0]
+        assert refusal.entity_identifier == "example.com"
+        assert refusal.collector_id == "mock-tier1"
+
+    @pytest.mark.asyncio
+    async def test_no_scope_matcher_falls_through(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """18. scope_matcher=None — behaviour unchanged, dispatch proceeds."""
+        dispatcher = PipelineDispatcher(
+            registry, scope_empty, TENANT_ID, scope_matcher=None,
+        )
+        result = await dispatcher.dispatch(_make_job("mock-tier1", seed))
+
+        assert result.status == DispatchStatus.SUCCESS
+        assert len(result.observations) == 1
+
+    # === CredentialResolver integration (A2) ==================================
+
+    @pytest.mark.asyncio
+    async def test_credential_resolver_injects_credentials(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """16. Resolved credentials appear in CollectorConfig."""
+        MockConfigCapturingCollector.captured_config = None
+        cred = CollectorCredential(name="api_key", secret_value="s3cret")  # noqa: S106
+        resolver = AsyncMock(spec=CredentialResolver)
+        resolver.resolve = AsyncMock(return_value={"api_key": cred})
+
+        dispatcher = PipelineDispatcher(
+            registry, scope_empty, TENANT_ID, credential_resolver=resolver,
+        )
+        result = await dispatcher.dispatch(_make_job("mock-capture", seed))
+
+        assert result.status == DispatchStatus.SUCCESS
+        captured = MockConfigCapturingCollector.captured_config
+        assert captured is not None
+        assert "api_key" in captured.credentials
+        assert captured.credentials["api_key"].secret_value == "s3cret"  # noqa: S105
+        resolver.resolve.assert_awaited_once_with(TENANT_ID, "mock-capture")
+
+    @pytest.mark.asyncio
+    async def test_credential_resolver_error_returns_collector_error(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """17. CredentialResolutionError returns COLLECTOR_ERROR."""
+        resolver = AsyncMock(spec=CredentialResolver)
+        resolver.resolve = AsyncMock(
+            side_effect=CredentialResolutionError("missing api_key"),
+        )
+
+        dispatcher = PipelineDispatcher(
+            registry, scope_empty, TENANT_ID, credential_resolver=resolver,
+        )
+        result = await dispatcher.dispatch(_make_job("mock-tier1", seed))
+
+        assert result.status == DispatchStatus.COLLECTOR_ERROR
+        assert result.observations == []
+        assert result.error_message == "missing api_key"

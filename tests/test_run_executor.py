@@ -33,10 +33,17 @@ from expose.collectors.base import (
     Seed,
     SeedType,
 )
+from expose.compliance.misuse_detection import (
+    MisuseAlert,
+    MisuseDetector,
+    MisuseIndicator,
+)
 from expose.pipeline.run_executor import (
     DispatchResult,
     RunExecutor,
 )
+from expose.quotas.models import TenantQuota
+from expose.quotas.tracker import QuotaTracker
 from expose.types.canonical import IdentifierType
 
 # === Synthetic IDs ============================================================
@@ -109,6 +116,8 @@ def _build_executor(
     run_repo: AsyncMock | None = None,
     entity_repo: AsyncMock | None = None,
     run_state: str = "pending",
+    quota_tracker: QuotaTracker | None = None,
+    misuse_detector: MisuseDetector | None = None,
 ) -> tuple[RunExecutor, AsyncMock, AsyncMock, AsyncMock]:
     """Wire up a RunExecutor with mocked dependencies.
 
@@ -131,6 +140,8 @@ def _build_executor(
         dispatcher=disp,
         run_repo=r_repo,
         entity_repo=e_repo,
+        quota_tracker=quota_tracker,
+        misuse_detector=misuse_detector,
     )
     return executor, disp, r_repo, e_repo
 
@@ -416,3 +427,185 @@ async def test_all_denied_is_failed_state() -> None:
     assert result.denied_dispatches == 1
     assert result.successful_dispatches == 0
     assert result.final_state == "failed"
+
+
+# === QuotaTracker integration tests ==========================================
+
+
+async def test_quota_exceeded_fails_run() -> None:
+    """When quota_tracker raises QuotaExceededError, run state = failed with zero stats."""
+    tracker = QuotaTracker()
+    tracker.set_quota(TenantQuota(tenant_id=TENANT_ID, max_runs_per_day=0))
+
+    executor, disp, run_repo, _e_repo = _build_executor(quota_tracker=tracker)
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.DOMAIN, value="example.com")],
+        collector_ids=["dns-resolve"],
+    )
+
+    assert result.final_state == "failed"
+    assert result.total_dispatches == 0
+    assert result.total_seeds == 0
+    assert result.total_observations == 0
+    disp.dispatch.assert_not_called()
+
+    state_calls = run_repo.update_state.call_args_list
+    states = [c.kwargs["new_state"] for c in state_calls]
+    assert states == ["running", "failed"]
+
+
+async def test_quota_tracker_records_run_lifecycle() -> None:
+    """Verify record_run_start and record_run_complete called on normal run."""
+    tracker = QuotaTracker()
+    executor, disp, _r_repo, _e_repo = _build_executor(quota_tracker=tracker)
+    disp.dispatch = AsyncMock(return_value=_success_result())
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    usage = tracker.get_usage(TENANT_ID)
+    assert usage.runs_today == 1
+    assert usage.active_runs == 0
+
+
+async def test_quota_tracker_records_entities_added() -> None:
+    """Verify record_entities_added called with the count of successfully upserted entities."""
+    tracker = QuotaTracker()
+    obs1 = _make_observation(identifier_value="a.example.com")
+    obs2 = _make_observation(identifier_value="b.example.com")
+    executor, disp, _r_repo, _e_repo = _build_executor(quota_tracker=tracker)
+    disp.dispatch = AsyncMock(return_value=_success_result(obs1, obs2))
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    usage = tracker.get_usage(TENANT_ID)
+    assert usage.total_entities == 2
+
+
+async def test_quota_tracker_entities_excludes_upsert_failures() -> None:
+    """Entity count only includes successful upserts, not failures."""
+    tracker = QuotaTracker()
+    obs1 = _make_observation(identifier_value="a.example.com")
+    obs2 = _make_observation(identifier_value="b.example.com")
+
+    e_repo = AsyncMock()
+    e_repo.create_or_update = AsyncMock(
+        side_effect=[MagicMock(), RuntimeError("db error")]
+    )
+
+    executor, disp, _r_repo, _e_repo = _build_executor(
+        entity_repo=e_repo, quota_tracker=tracker
+    )
+    disp.dispatch = AsyncMock(return_value=_success_result(obs1, obs2))
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    usage = tracker.get_usage(TENANT_ID)
+    assert usage.total_entities == 1
+
+
+async def test_no_quota_tracker_unchanged() -> None:
+    """When quota_tracker=None, existing behavior is preserved (no misuse_alerts)."""
+    executor, disp, _r_repo, _e_repo = _build_executor()
+    disp.dispatch = AsyncMock(return_value=_success_result(_make_observation()))
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.DOMAIN, value="example.com")],
+        collector_ids=["dns-resolve"],
+    )
+
+    assert result.final_state == "completed"
+    assert result.misuse_alerts == []
+
+
+# === MisuseDetector integration tests ========================================
+
+
+async def test_misuse_detector_called_after_run() -> None:
+    """Verify evaluate_run is called with stats from the run."""
+    detector = MagicMock(spec=MisuseDetector)
+    detector.evaluate_run = MagicMock(return_value=[])
+
+    executor, disp, _r_repo, _e_repo = _build_executor(misuse_detector=detector)
+    disp.dispatch = AsyncMock(return_value=_success_result(_make_observation()))
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    detector.evaluate_run.assert_called_once()
+    call_kwargs = detector.evaluate_run.call_args.kwargs
+    assert call_kwargs["tenant_id"] == TENANT_ID
+    assert call_kwargs["run_id"] == RUN_ID
+    assert call_kwargs["in_scope"] == 1
+    assert call_kwargs["out_of_scope"] == 0
+    assert call_kwargs["tier3_dispatches"] == 0
+    assert call_kwargs["total_dispatches"] == 1
+    assert call_kwargs["denied"] == 0
+    assert result.final_state == "completed"
+
+
+async def test_misuse_alerts_in_run_result() -> None:
+    """Verify alerts from the detector appear in RunResult.misuse_alerts."""
+    alert = MisuseAlert(
+        indicator=MisuseIndicator.HIGH_DENIAL_RATE,
+        tenant_id=TENANT_ID,
+        severity="warning",
+        description="test alert",
+        evidence={"denied": 5, "total": 10, "denial_rate": 0.5},
+        detected_at=datetime(2026, 5, 10, 12, 0, 0, tzinfo=UTC),
+        run_id=RUN_ID,
+    )
+    detector = MagicMock(spec=MisuseDetector)
+    detector.evaluate_run = MagicMock(return_value=[alert])
+
+    executor, disp, _r_repo, _e_repo = _build_executor(misuse_detector=detector)
+    disp.dispatch = AsyncMock(return_value=_success_result(_make_observation()))
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    assert len(result.misuse_alerts) == 1
+    assert result.misuse_alerts[0].indicator == MisuseIndicator.HIGH_DENIAL_RATE
+    assert result.misuse_alerts[0].severity == "warning"
+
+
+async def test_misuse_detector_not_called_when_none() -> None:
+    """When misuse_detector=None, no misuse evaluation happens."""
+    executor, disp, _r_repo, _e_repo = _build_executor(misuse_detector=None)
+    disp.dispatch = AsyncMock(return_value=_success_result(_make_observation()))
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    assert result.misuse_alerts == []

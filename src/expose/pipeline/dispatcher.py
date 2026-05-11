@@ -28,6 +28,7 @@ from __future__ import annotations
 import logging
 import time
 from enum import StrEnum
+from typing import ClassVar
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -35,14 +36,17 @@ from pydantic import BaseModel, ConfigDict, Field
 from expose.collectors.base import (
     Collector,
     CollectorConfig,
+    CollectorCredential,
     CollectorError,
     CollectorHealthCheck,
     Observation,
     Seed,
+    SeedType,
 )
 from expose.collectors.registry import CollectorRegistry
 from expose.collectors.tiers import (
     CollectorTier,
+    EnforcementMode,
     EntityAttributionView,
     TenantAuthorizationScope,
     Tier3DispatchDeniedError,
@@ -50,7 +54,9 @@ from expose.collectors.tiers import (
 )
 from expose.egress.base import EgressProfile
 from expose.observability import current_tenant_id
+from expose.pipeline.credential_resolver import CredentialResolutionError, CredentialResolver
 from expose.pipeline.enforcement import EnforcementLog, ScopeRefusalEvent
+from expose.scope.matcher import ScopeMatcher
 from expose.types.canonical import CollectorStatus
 
 logger = logging.getLogger(__name__)
@@ -114,6 +120,16 @@ class PipelineDispatcher:
     6. Return a ``DispatchResult`` with status, observations, and timing.
     """
 
+    _SEED_TYPE_TO_ENTITY_TYPE: ClassVar[dict[SeedType, str]] = {
+        SeedType.DOMAIN: "domain",
+        SeedType.IP: "ip",
+        SeedType.CIDR: "cidr",
+        SeedType.ASN: "asn",
+        SeedType.CLOUD_ACCOUNT: "cloud_account",
+        SeedType.ORGANIZATION: "registrant_org",
+        SeedType.ENTITY: "domain",
+    }
+
     def __init__(
         self,
         registry: CollectorRegistry,
@@ -121,12 +137,16 @@ class PipelineDispatcher:
         tenant_id: UUID,
         egress_profile: EgressProfile | None = None,
         enforcement_log: EnforcementLog | None = None,
+        scope_matcher: ScopeMatcher | None = None,
+        credential_resolver: CredentialResolver | None = None,
     ) -> None:
         self._registry = registry
         self._tenant_scope = tenant_scope
         self._tenant_id = tenant_id
         self._egress_profile = egress_profile
         self._enforcement_log = enforcement_log or EnforcementLog()
+        self._scope_matcher = scope_matcher
+        self._credential_resolver = credential_resolver
 
     async def dispatch(self, job: DispatchJob) -> DispatchResult:
         """Execute one dispatch job and return a structured result.
@@ -143,6 +163,87 @@ class PipelineDispatcher:
         finally:
             current_tenant_id.reset(token)
 
+    def _check_scope_matcher(self, job: DispatchJob, start_ns: int) -> DispatchResult | None:
+        """Run the rich scope matcher if configured; return a DENIED result or None."""
+        if self._scope_matcher is None:
+            return None
+        entity_type = self._SEED_TYPE_TO_ENTITY_TYPE.get(
+            job.seed.seed_type, "domain",
+        )
+        match_result = self._scope_matcher.matches(entity_type, job.seed.value)
+        if match_result.in_scope:
+            return None
+
+        from datetime import UTC, datetime  # noqa: PLC0415
+
+        self._enforcement_log.record_refusal(ScopeRefusalEvent(
+            tenant_id=job.tenant_id,
+            entity_identifier=job.seed.value,
+            attribution_tier=None,
+            enforcement_mode=EnforcementMode.HARD,
+            collector_id=job.collector_id,
+            reason=match_result.reason,
+            timestamp=datetime.now(tz=UTC),
+        ))
+        return DispatchResult(
+            status=DispatchStatus.DENIED,
+            error_message=match_result.reason,
+            duration_ms=_elapsed_ms(start_ns),
+        )
+
+    async def _resolve_credentials(
+        self,
+        job: DispatchJob,
+        start_ns: int,
+    ) -> dict[str, CollectorCredential] | DispatchResult:
+        """Resolve credentials or return a COLLECTOR_ERROR result on failure."""
+        if self._credential_resolver is None:
+            return {}
+        try:
+            return await self._credential_resolver.resolve(
+                job.tenant_id, job.collector_id,
+            )
+        except CredentialResolutionError as exc:
+            return DispatchResult(
+                status=DispatchStatus.COLLECTOR_ERROR,
+                error_message=str(exc),
+                duration_ms=_elapsed_ms(start_ns),
+            )
+
+    def _check_tier3_gate(
+        self,
+        job: DispatchJob,
+        collector_cls: type[Collector],
+        start_ns: int,
+    ) -> DispatchResult | None:
+        """Enforce Tier-3 attribution gate; return a DENIED result or None."""
+        if collector_cls.tier != CollectorTier.TIER_3:
+            return None
+        entity = EntityAttributionView(
+            entity_identifier=job.seed.value,
+            attribution_tier=None,
+        )
+        try:
+            assert_tier_3_dispatch_allowed(entity, self._tenant_scope)
+        except Tier3DispatchDeniedError as exc:
+            from datetime import UTC, datetime  # noqa: PLC0415
+
+            self._enforcement_log.record_refusal(ScopeRefusalEvent(
+                tenant_id=job.tenant_id,
+                entity_identifier=job.seed.value,
+                attribution_tier=None,
+                enforcement_mode=self._tenant_scope.enforcement_mode,
+                collector_id=job.collector_id,
+                reason=str(exc),
+                timestamp=datetime.now(tz=UTC),
+            ))
+            return DispatchResult(
+                status=DispatchStatus.DENIED,
+                error_message=str(exc),
+                duration_ms=_elapsed_ms(start_ns),
+            )
+        return None
+
     async def _dispatch_inner(
         self,
         job: DispatchJob,
@@ -152,36 +253,23 @@ class PipelineDispatcher:
         # 1. Resolve collector class
         collector_cls = self._registry.get(job.collector_id)
 
-        # 2. Tier-3 gating (before constructing the collector instance)
-        if collector_cls.tier == CollectorTier.TIER_3:
-            entity = EntityAttributionView(
-                entity_identifier=job.seed.value,
-                attribution_tier=None,
-            )
-            try:
-                assert_tier_3_dispatch_allowed(entity, self._tenant_scope)
-            except Tier3DispatchDeniedError as exc:
-                from datetime import UTC, datetime  # noqa: PLC0415
+        # 2. Authorization gates (scope matcher then Tier-3)
+        auth_denial = (
+            self._check_scope_matcher(job, start_ns)
+            or self._check_tier3_gate(job, collector_cls, start_ns)
+        )
+        if auth_denial is not None:
+            return auth_denial
 
-                self._enforcement_log.record_refusal(ScopeRefusalEvent(
-                    tenant_id=job.tenant_id,
-                    entity_identifier=job.seed.value,
-                    attribution_tier=None,
-                    enforcement_mode=self._tenant_scope.enforcement_mode,
-                    collector_id=job.collector_id,
-                    reason=str(exc),
-                    timestamp=datetime.now(tz=UTC),
-                ))
-                return DispatchResult(
-                    status=DispatchStatus.DENIED,
-                    error_message=str(exc),
-                    duration_ms=_elapsed_ms(start_ns),
-                )
+        # 3. Resolve credentials (if resolver provided) and build config
+        cred_result = await self._resolve_credentials(job, start_ns)
+        if isinstance(cred_result, DispatchResult):
+            return cred_result
 
-        # 3. Build config and construct collector
         config = CollectorConfig(
             tenant_id=job.tenant_id,
             run_id=job.run_id,
+            credentials=cred_result,
         )
         collector: Collector = collector_cls(config)
 

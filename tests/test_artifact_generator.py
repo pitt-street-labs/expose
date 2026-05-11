@@ -25,6 +25,7 @@ import json
 import re
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
@@ -32,6 +33,8 @@ from uuid import UUID
 import pytest
 
 from expose.pipeline.artifact_generator import ArtifactGenerator
+from expose.storage import StorageBackend
+from expose.storage.local import LocalStorageBackend
 
 # === Synthetic IDs ============================================================
 
@@ -116,6 +119,7 @@ def _build_generator(
     entities: list[MagicMock] | None = None,
     relationships: list[MagicMock] | None = None,
     run_row: MagicMock | None = None,
+    storage: StorageBackend | None = None,
 ) -> ArtifactGenerator:
     """Wire up an ArtifactGenerator with mocked dependencies."""
     entity_repo = AsyncMock()
@@ -133,6 +137,7 @@ def _build_generator(
         entity_repo=entity_repo,
         relationship_repo=relationship_repo,
         run_repo=run_repo,
+        storage=storage,
     )
 
 
@@ -414,3 +419,67 @@ async def test_content_hash_deterministic() -> None:
     assert len(result2.content_hash) == 64
     assert re.fullmatch(r"[a-f0-9]{64}", result1.content_hash) is not None
     assert re.fullmatch(r"[a-f0-9]{64}", result2.content_hash) is not None
+
+
+# === Storage wiring tests =====================================================
+
+
+async def test_storage_backend_receives_artifact_json(tmp_path: Path) -> None:
+    """Storage backend receives artifact JSON when provided."""
+    storage = LocalStorageBackend(root=tmp_path)
+    entities = [_make_entity_row()]
+    gen = _build_generator(entities=entities, storage=storage)
+
+    result = await gen.generate(run_id=RUN_ID, tenant_id=TENANT_ID)
+
+    key = f"tenant/{TENANT_ID}/artifacts/{RUN_ID}.json"
+    assert await storage.exists(key)
+    assert result.storage_uri is not None
+
+
+async def test_storage_uri_in_result(tmp_path: Path) -> None:
+    """Result storage_uri is a file:// URI when LocalStorageBackend is used."""
+    storage = LocalStorageBackend(root=tmp_path)
+    entities = [_make_entity_row()]
+    gen = _build_generator(entities=entities, storage=storage)
+
+    result = await gen.generate(run_id=RUN_ID, tenant_id=TENANT_ID)
+
+    assert result.storage_uri is not None
+    assert result.storage_uri.startswith("file://")
+
+
+async def test_no_storage_backend_returns_none_uri() -> None:
+    """When storage=None (default), result.storage_uri is None."""
+    entities = [_make_entity_row()]
+    gen = _build_generator(entities=entities)
+
+    result = await gen.generate(run_id=RUN_ID, tenant_id=TENANT_ID)
+
+    assert result.storage_uri is None
+
+
+async def test_stored_json_matches_result_json_bytes(tmp_path: Path) -> None:
+    """Bytes read back from storage match result.json_bytes exactly."""
+    storage = LocalStorageBackend(root=tmp_path)
+    entities = [_make_entity_row()]
+    gen = _build_generator(entities=entities, storage=storage)
+
+    result = await gen.generate(run_id=RUN_ID, tenant_id=TENANT_ID)
+
+    key = f"tenant/{TENANT_ID}/artifacts/{RUN_ID}.json"
+    stored = await storage.get(key)
+    assert stored == result.json_bytes
+
+
+async def test_storage_key_follows_convention(tmp_path: Path) -> None:
+    """Storage key is tenant/{tenant_id}/artifacts/{run_id}.json."""
+    storage = LocalStorageBackend(root=tmp_path)
+    entities = [_make_entity_row()]
+    gen = _build_generator(entities=entities, storage=storage)
+
+    await gen.generate(run_id=RUN_ID, tenant_id=TENANT_ID)
+
+    expected_key = f"tenant/{TENANT_ID}/artifacts/{RUN_ID}.json"
+    keys = await storage.list_keys(prefix=f"tenant/{TENANT_ID}/artifacts/")
+    assert expected_key in keys

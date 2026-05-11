@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
@@ -31,7 +32,9 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from expose.collectors.base import Observation, Seed
+from expose.compliance.misuse_detection import MisuseAlert, MisuseDetector
 from expose.pipeline.seed_expansion import expand_seeds
+from expose.quotas.tracker import QuotaExceededError, QuotaTracker
 from expose.repositories.entity_repo import EntityRepository
 from expose.repositories.run_repo import RunRepository
 from expose.types.shared import RunId, TenantId
@@ -125,6 +128,7 @@ class RunResult(BaseModel):
     denied_dispatches: int
     total_observations: int
     duration_ms: float
+    misuse_alerts: list[MisuseAlert] = Field(default_factory=list)
 
 
 # === Executor =================================================================
@@ -143,12 +147,16 @@ class RunExecutor:
         dispatcher: DispatcherProtocol,
         run_repo: RunRepository,
         entity_repo: EntityRepository,
+        quota_tracker: QuotaTracker | None = None,
+        misuse_detector: MisuseDetector | None = None,
     ) -> None:
         self._dispatcher = dispatcher
         self._run_repo = run_repo
         self._entity_repo = entity_repo
+        self._quota_tracker = quota_tracker
+        self._misuse_detector = misuse_detector
 
-    async def execute(  # noqa: PLR0912
+    async def execute(  # noqa: PLR0912, PLR0915
         self,
         *,
         run_id: UUID,
@@ -187,6 +195,34 @@ class RunExecutor:
             new_state="running",
         )
 
+        # === Quota pre-flight check ===========================================
+        if self._quota_tracker is not None:
+            try:
+                self._quota_tracker.assert_run_allowed(tenant_id)
+            except QuotaExceededError:
+                self._quota_tracker.record_run_start(tenant_id)
+                await self._run_repo.update_state(
+                    tenant_id=TenantId(tenant_id),
+                    run_id=RunId(run_id),
+                    new_state="failed",
+                )
+                self._quota_tracker.record_run_complete(tenant_id)
+                duration_ms = (time.monotonic_ns() - start_ns) / 1_000_000
+                return RunResult(
+                    run_id=run_id,
+                    tenant_id=tenant_id,
+                    final_state="failed",
+                    total_seeds=0,
+                    expanded_seeds=0,
+                    total_dispatches=0,
+                    successful_dispatches=0,
+                    failed_dispatches=0,
+                    denied_dispatches=0,
+                    total_observations=0,
+                    duration_ms=duration_ms,
+                )
+            self._quota_tracker.record_run_start(tenant_id)
+
         total_seeds = len(seeds)
 
         # === Stage 1: Seed expansion ==========================================
@@ -224,7 +260,6 @@ class RunExecutor:
                 elif result.status == "denied":
                     denied += 1
                 else:
-                    # health_check_failed, collector_error, or any other non-success
                     failed += 1
 
         # === Stage 3: Sanitization (inside collectors per SPEC §7) ============
@@ -252,6 +287,10 @@ class RunExecutor:
                 )
                 upsert_failures += 1
 
+        entities_added = len(all_observations) - upsert_failures
+        if self._quota_tracker is not None and entities_added > 0:
+            self._quota_tracker.record_entities_added(tenant_id, entities_added)
+
         # TODO(stage-4b): LLM enrichment — out of scope for Sprint 3-4
         # When implemented, this stage will pass graph entities through the
         # LLM provider abstraction (ADR-005) for relationship inference,
@@ -267,15 +306,11 @@ class RunExecutor:
 
         # === Determine final state ============================================
         total_dispatches = successful + failed + denied
-        if total_dispatches == 0:
-            # No dispatches at all (empty seeds or empty collector_ids)
-            final_state = "completed"
-        elif successful > 0 and failed == 0:
+        if total_dispatches == 0 or (successful > 0 and failed == 0):
             final_state = "completed"
         elif successful > 0 and failed > 0:
             final_state = "partial"
         else:
-            # successful == 0 (all failed or denied, none succeeded)
             final_state = "failed"
 
         _validate_transition("running", final_state)
@@ -284,6 +319,23 @@ class RunExecutor:
             run_id=RunId(run_id),
             new_state=final_state,
         )
+
+        if self._quota_tracker is not None:
+            self._quota_tracker.record_run_complete(tenant_id)
+
+        # === Misuse detection =================================================
+        misuse_alerts: list[MisuseAlert] = []
+        if self._misuse_detector is not None:
+            misuse_alerts = self._misuse_detector.evaluate_run(
+                tenant_id=tenant_id,
+                run_id=run_id,
+                in_scope=successful,
+                out_of_scope=0,
+                tier3_dispatches=0,
+                total_dispatches=total_dispatches,
+                denied=denied,
+                run_timestamp=datetime.now(UTC),
+            )
 
         duration_ms = (time.monotonic_ns() - start_ns) / 1_000_000
 
@@ -299,6 +351,7 @@ class RunExecutor:
             denied_dispatches=denied,
             total_observations=len(all_observations),
             duration_ms=duration_ms,
+            misuse_alerts=misuse_alerts,
         )
 
 
