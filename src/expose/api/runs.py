@@ -71,6 +71,7 @@ def _entity_to_response(entity: Entity) -> EntityResponse:
         tenant_id=entity.tenant_id,
         entity_type=entity.entity_type,
         canonical_identifier=entity.canonical_identifier,
+        properties=entity.properties,
         attribution_status=entity.attribution_status,
         first_observed_at=entity.first_observed_at,
         last_observed_at=entity.last_observed_at,
@@ -118,6 +119,7 @@ async def _run_pipeline_background(
     from expose.pipeline.dispatcher import PipelineDispatcher  # noqa: PLC0415
     from expose.pipeline.run_executor import RunExecutor  # noqa: PLC0415
     from expose.repositories.entity_repo import EntityRepository  # noqa: PLC0415
+    from expose.repositories.relationship_repo import RelationshipRepository  # noqa: PLC0415
     from expose.repositories.run_repo import RunRepository  # noqa: PLC0415
 
     try:
@@ -125,6 +127,7 @@ async def _run_pipeline_background(
             try:
                 run_repo = RunRepository(session)
                 entity_repo = EntityRepository(session)
+                relationship_repo = RelationshipRepository(session)
 
                 seed_identifiers = frozenset(s.value for s in seeds)
                 scope = TenantAuthorizationScope(
@@ -142,6 +145,7 @@ async def _run_pipeline_background(
                     dispatcher=dispatcher,  # type: ignore[arg-type]
                     run_repo=run_repo,
                     entity_repo=entity_repo,
+                    relationship_repo=relationship_repo,
                 )
 
                 await executor.execute(

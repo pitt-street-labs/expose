@@ -41,8 +41,9 @@ from expose.pipeline.entity_seed_converter import (
 from expose.pipeline.seed_expansion import expand_seeds
 from expose.quotas.tracker import QuotaExceededError, QuotaTracker
 from expose.repositories.entity_repo import EntityRepository
+from expose.repositories.relationship_repo import RelationshipRepository
 from expose.repositories.run_repo import RunRepository
-from expose.types.shared import RunId, TenantId
+from expose.types.shared import EntityId, RunId, TenantId
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +161,7 @@ class RunExecutor:
         dispatcher: DispatcherProtocol,
         run_repo: RunRepository,
         entity_repo: EntityRepository,
+        relationship_repo: RelationshipRepository | None = None,
         quota_tracker: QuotaTracker | None = None,
         misuse_detector: MisuseDetector | None = None,
         enrichment_pipeline: EnrichmentPipeline | None = None,
@@ -167,6 +169,7 @@ class RunExecutor:
         self._dispatcher = dispatcher
         self._run_repo = run_repo
         self._entity_repo = entity_repo
+        self._relationship_repo = relationship_repo
         self._quota_tracker = quota_tracker
         self._misuse_detector = misuse_detector
         self._enrichment = enrichment_pipeline
@@ -500,7 +503,8 @@ class RunExecutor:
         """Upsert and enrich a batch of observations.
 
         Performs Stage 3 (no-op, sanitization done in collectors), Stage 4
-        (graph upsert), and Stage 4b (LLM enrichment) for the given batch.
+        (graph upsert + relationship extraction), and Stage 4b (LLM
+        enrichment) for the given batch.
 
         Returns ``(enrichment_count, upsert_failures)`` for the batch.
         """
@@ -508,7 +512,7 @@ class RunExecutor:
         upsert_failures = 0
         for obs in observations:
             try:
-                await self._entity_repo.create_or_update(
+                from_entity = await self._entity_repo.create_or_update(
                     tenant_id=TenantId(tenant_id),
                     entity_type=obs.subject.identifier_type.value,
                     canonical_identifier=obs.subject.identifier_value,
@@ -523,6 +527,15 @@ class RunExecutor:
                     obs.subject.identifier_value,
                 )
                 upsert_failures += 1
+                continue
+
+            # --- Stage 4 (cont): Relationship extraction ----------------------
+            if self._relationship_repo is not None:
+                await self._extract_relationships(
+                    obs=obs,
+                    from_entity_id=EntityId(from_entity.id),
+                    tenant_id=TenantId(tenant_id),
+                )
 
         # --- Stage 4b: LLM enrichment ----------------------------------------
         enrichment_count = 0
@@ -547,6 +560,83 @@ class RunExecutor:
                     )
 
         return enrichment_count, upsert_failures
+
+    async def _extract_relationships(
+        self,
+        *,
+        obs: Observation,
+        from_entity_id: EntityId,
+        tenant_id: TenantId,
+    ) -> None:
+        """Extract related entities from an observation's structured_payload
+        and create relationship rows.
+
+        Each recognized payload pattern produces:
+          1. An entity upsert for the related entity (IP, domain, etc.)
+          2. A relationship row linking ``from_entity_id`` to the new entity.
+
+        Failures are logged but never propagated — relationship extraction
+        is best-effort and must not block entity ingestion.
+        """
+        assert self._relationship_repo is not None  # caller guards  # noqa: S101
+        payload = obs.structured_payload
+        related: list[tuple[str, str, str]] = []  # (entity_type, identifier, edge_type)
+
+        # --- A/AAAA values from active_dns -----------------------------------
+        if "values" in payload and payload.get("record_type") in ("A", "AAAA"):
+            for ip_val in payload["values"]:
+                related.append(("ip", str(ip_val), "resolves_to"))
+
+        # --- resolved_ips from dns_subdomain_enum ----------------------------
+        for ip_val in payload.get("resolved_ips", []):
+            related.append(("ip", str(ip_val), "resolves_to"))
+
+        # --- CNAME target from active_dns ------------------------------------
+        if "target" in payload and payload.get("record_type") == "CNAME":
+            related.append(("domain", str(payload["target"]), "cname_for"))
+
+        # --- cname_chain from dns_subdomain_enum -----------------------------
+        for cname_target in payload.get("cname_chain", []):
+            related.append(("domain", str(cname_target), "cname_for"))
+
+        # --- MX exchanges from active_dns ------------------------------------
+        for mx in payload.get("exchanges", []):
+            exchange = mx.get("exchange") if isinstance(mx, dict) else None
+            if exchange:
+                related.append(("domain", str(exchange), "mx_for"))
+
+        # --- NS nameservers from active_dns ----------------------------------
+        for ns in payload.get("nameservers", []):
+            related.append(("domain", str(ns), "ns_for"))
+
+        # --- Create entities and relationships for each related reference -----
+        for entity_type, identifier, edge_type in related:
+            try:
+                to_entity = await self._entity_repo.create_or_update(
+                    tenant_id=tenant_id,
+                    entity_type=entity_type,
+                    canonical_identifier=identifier,
+                    properties={},
+                    attribution_status="unattributed",
+                    attribution_confidence=Decimal("0.000"),
+                )
+                await self._relationship_repo.create_or_update(
+                    tenant_id=tenant_id,
+                    from_entity_id=from_entity_id,
+                    to_entity_id=EntityId(to_entity.id),
+                    edge_type=edge_type,
+                    confidence=Decimal("0.900"),
+                    observed_at=obs.observed_at,
+                    collector_id=obs.collector_id,
+                )
+            except Exception:
+                logger.exception(
+                    "Relationship extraction failed for %s -[%s]-> %s/%s",
+                    obs.subject.identifier_value,
+                    edge_type,
+                    entity_type,
+                    identifier,
+                )
 
 
 def _observation_properties(obs: Observation) -> dict[str, Any]:

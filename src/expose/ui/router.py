@@ -204,6 +204,7 @@ async def entities_partial(request: Request, tenant_id: UUID) -> HTMLResponse:
             "id": str(e.id),
             "entity_type": e.entity_type,
             "canonical_identifier": e.canonical_identifier,
+            "properties": e.properties or {},
             "attribution_status": e.attribution_status,
             "first_observed_at": (
                 e.first_observed_at.isoformat() if e.first_observed_at else ""

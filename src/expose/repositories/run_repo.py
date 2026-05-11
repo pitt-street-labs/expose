@@ -18,7 +18,7 @@ the manifest schema's ``run.state`` enum:
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -122,8 +122,12 @@ class RunRepository:
             )
 
         run.state = new_state
+        # Auto-set completed_at for terminal states when not explicitly provided.
+        _terminal_states = {"completed", "partial", "failed"}
         if completed_at is not None:
             run.completed_at = completed_at
+        elif new_state in _terminal_states and run.completed_at is None:
+            run.completed_at = datetime.now(UTC)
         if canonical_artifact_ref is not None:
             run.canonical_artifact_ref = canonical_artifact_ref
         if manifest_ref is not None:

@@ -863,3 +863,360 @@ async def test_run_result_backward_compat_defaults() -> None:
 
     assert result.passes_completed == 1
     assert result.entities_discovered_per_pass == []
+
+
+# === Relationship extraction tests ==========================================
+
+
+def _build_executor_with_rel_repo(
+    dispatcher: AsyncMock | None = None,
+    run_repo: AsyncMock | None = None,
+    entity_repo: AsyncMock | None = None,
+    relationship_repo: AsyncMock | None = None,
+    run_state: str = "pending",
+) -> tuple[RunExecutor, AsyncMock, AsyncMock, AsyncMock, AsyncMock]:
+    """Wire up a RunExecutor with mocked dependencies including relationship_repo.
+
+    Returns (executor, dispatcher_mock, run_repo_mock, entity_repo_mock, rel_repo_mock).
+    """
+    disp = dispatcher or AsyncMock()
+    r_repo = run_repo or AsyncMock()
+    e_repo = entity_repo or AsyncMock()
+    rel_repo = relationship_repo or AsyncMock()
+
+    if not run_repo:
+        r_repo.get_by_id = AsyncMock(return_value=_make_run_row(run_state))
+        r_repo.update_state = AsyncMock()
+
+    if not entity_repo:
+        # Return a mock entity with a unique id for each create_or_update call
+        def _make_entity_with_id(**kwargs):
+            entity = MagicMock()
+            entity.id = UUID("018f1f00-0000-7000-8000-0000000000FF")
+            return entity
+
+        e_repo.create_or_update = AsyncMock(side_effect=_make_entity_with_id)
+
+    if not relationship_repo:
+        rel_repo.create_or_update = AsyncMock(return_value=MagicMock())
+
+    executor = RunExecutor(
+        dispatcher=disp,
+        run_repo=r_repo,
+        entity_repo=e_repo,
+        relationship_repo=rel_repo,
+    )
+    return executor, disp, r_repo, e_repo, rel_repo
+
+
+def _make_dns_a_observation(
+    identifier_value: str = "example.com",
+    ips: list[str] | None = None,
+) -> Observation:
+    """Build an Observation with A-record structured_payload."""
+    return Observation(
+        collector_id="active-dns",
+        collector_version="1.0.0",
+        tenant_id=TENANT_ID,
+        observation_type=ObservationType.DNS_RESOLUTION,
+        subject=ObservationSubject(
+            identifier_type=IdentifierType.DOMAIN,
+            identifier_value=identifier_value,
+        ),
+        observed_at=OBSERVED,
+        structured_payload={
+            "record_type": "A",
+            "values": ips or ["93.184.216.34"],
+        },
+    )
+
+
+def _make_subdomain_enum_observation(
+    identifier_value: str = "www.example.com",
+    resolved_ips: list[str] | None = None,
+    cname_chain: list[str] | None = None,
+) -> Observation:
+    """Build an Observation with dns_subdomain_enum structured_payload."""
+    payload: dict = {
+        "subdomain": identifier_value,
+        "resolved_ips": resolved_ips or ["93.184.216.34"],
+    }
+    if cname_chain:
+        payload["cname_chain"] = cname_chain
+    return Observation(
+        collector_id="dns-subdomain-enum",
+        collector_version="1.0.0",
+        tenant_id=TENANT_ID,
+        observation_type=ObservationType.DNS_RESOLUTION,
+        subject=ObservationSubject(
+            identifier_type=IdentifierType.DOMAIN,
+            identifier_value=identifier_value,
+        ),
+        observed_at=OBSERVED,
+        structured_payload=payload,
+    )
+
+
+def _make_ns_observation(
+    identifier_value: str = "example.com",
+    nameservers: list[str] | None = None,
+) -> Observation:
+    """Build an Observation with NS-record structured_payload."""
+    return Observation(
+        collector_id="active-dns",
+        collector_version="1.0.0",
+        tenant_id=TENANT_ID,
+        observation_type=ObservationType.DNS_RESOLUTION,
+        subject=ObservationSubject(
+            identifier_type=IdentifierType.DOMAIN,
+            identifier_value=identifier_value,
+        ),
+        observed_at=OBSERVED,
+        structured_payload={
+            "record_type": "NS",
+            "nameservers": nameservers or ["ns1.example.com", "ns2.example.com"],
+        },
+    )
+
+
+def _make_mx_observation(
+    identifier_value: str = "example.com",
+    exchanges: list[dict] | None = None,
+) -> Observation:
+    """Build an Observation with MX-record structured_payload."""
+    return Observation(
+        collector_id="active-dns",
+        collector_version="1.0.0",
+        tenant_id=TENANT_ID,
+        observation_type=ObservationType.DNS_RESOLUTION,
+        subject=ObservationSubject(
+            identifier_type=IdentifierType.DOMAIN,
+            identifier_value=identifier_value,
+        ),
+        observed_at=OBSERVED,
+        structured_payload={
+            "record_type": "MX",
+            "exchanges": exchanges
+            or [
+                {"priority": 10, "exchange": "mail.example.com"},
+                {"priority": 20, "exchange": "mail2.example.com"},
+            ],
+        },
+    )
+
+
+def _make_cname_observation(
+    identifier_value: str = "www.example.com",
+    target: str = "cdn.example.net",
+) -> Observation:
+    """Build an Observation with CNAME-record structured_payload."""
+    return Observation(
+        collector_id="active-dns",
+        collector_version="1.0.0",
+        tenant_id=TENANT_ID,
+        observation_type=ObservationType.DNS_RESOLUTION,
+        subject=ObservationSubject(
+            identifier_type=IdentifierType.DOMAIN,
+            identifier_value=identifier_value,
+        ),
+        observed_at=OBSERVED,
+        structured_payload={
+            "record_type": "CNAME",
+            "target": target,
+        },
+    )
+
+
+async def test_relationship_created_for_dns_a_record() -> None:
+    """A-record observations create resolves_to relationships to IP entities."""
+    obs = _make_dns_a_observation(ips=["93.184.216.34", "93.184.216.35"])
+    executor, disp, _r_repo, e_repo, rel_repo = _build_executor_with_rel_repo()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["active-dns"],
+    )
+
+    # entity_repo.create_or_update: 1 for subject + 2 for IPs = 3 calls
+    assert e_repo.create_or_update.call_count == 3
+    # relationship_repo.create_or_update: 2 relationships (one per IP)
+    assert rel_repo.create_or_update.call_count == 2
+    edge_types = {
+        c.kwargs["edge_type"] for c in rel_repo.create_or_update.call_args_list
+    }
+    assert edge_types == {"resolves_to"}
+
+
+async def test_relationship_created_for_ns_records() -> None:
+    """NS-record observations create ns_for relationships."""
+    obs = _make_ns_observation(nameservers=["ns1.example.com"])
+    executor, disp, _r_repo, e_repo, rel_repo = _build_executor_with_rel_repo()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["active-dns"],
+    )
+
+    assert rel_repo.create_or_update.call_count == 1
+    call_kwargs = rel_repo.create_or_update.call_args_list[0].kwargs
+    assert call_kwargs["edge_type"] == "ns_for"
+
+
+async def test_relationship_created_for_mx_records() -> None:
+    """MX-record observations create mx_for relationships."""
+    obs = _make_mx_observation()
+    executor, disp, _r_repo, e_repo, rel_repo = _build_executor_with_rel_repo()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["active-dns"],
+    )
+
+    assert rel_repo.create_or_update.call_count == 2
+    edge_types = {
+        c.kwargs["edge_type"] for c in rel_repo.create_or_update.call_args_list
+    }
+    assert edge_types == {"mx_for"}
+
+
+async def test_relationship_created_for_cname_record() -> None:
+    """CNAME-record observations create cname_for relationships."""
+    obs = _make_cname_observation()
+    executor, disp, _r_repo, e_repo, rel_repo = _build_executor_with_rel_repo()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["active-dns"],
+    )
+
+    assert rel_repo.create_or_update.call_count == 1
+    call_kwargs = rel_repo.create_or_update.call_args_list[0].kwargs
+    assert call_kwargs["edge_type"] == "cname_for"
+
+
+async def test_relationship_created_for_subdomain_enum_resolved_ips() -> None:
+    """Subdomain enum observations with resolved_ips create resolves_to relationships."""
+    obs = _make_subdomain_enum_observation(
+        resolved_ips=["198.51.100.1", "198.51.100.2"],
+    )
+    executor, disp, _r_repo, e_repo, rel_repo = _build_executor_with_rel_repo()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["dns-subdomain-enum"],
+    )
+
+    assert rel_repo.create_or_update.call_count == 2
+    edge_types = {
+        c.kwargs["edge_type"] for c in rel_repo.create_or_update.call_args_list
+    }
+    assert edge_types == {"resolves_to"}
+
+
+async def test_relationship_created_for_subdomain_enum_cname_chain() -> None:
+    """Subdomain enum observations with cname_chain create cname_for relationships."""
+    obs = _make_subdomain_enum_observation(
+        resolved_ips=["198.51.100.1"],
+        cname_chain=["cdn.example.net"],
+    )
+    executor, disp, _r_repo, e_repo, rel_repo = _build_executor_with_rel_repo()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["dns-subdomain-enum"],
+    )
+
+    # 1 resolves_to for IP + 1 cname_for for CNAME target = 2 relationships
+    assert rel_repo.create_or_update.call_count == 2
+    edge_types = {
+        c.kwargs["edge_type"] for c in rel_repo.create_or_update.call_args_list
+    }
+    assert edge_types == {"resolves_to", "cname_for"}
+
+
+async def test_no_relationships_without_relationship_repo() -> None:
+    """When relationship_repo is None, no relationship extraction happens."""
+    obs = _make_dns_a_observation(ips=["93.184.216.34"])
+    executor, disp, _r_repo, e_repo = _build_executor()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["active-dns"],
+    )
+
+    # Only the subject entity is upserted (no related entity upserts)
+    assert e_repo.create_or_update.call_count == 1
+    assert result.final_state == "completed"
+
+
+async def test_relationship_extraction_failure_does_not_crash_run() -> None:
+    """If relationship extraction fails, the run still completes."""
+    obs = _make_dns_a_observation(ips=["93.184.216.34"])
+
+    e_repo = AsyncMock()
+    entity_mock = MagicMock()
+    entity_mock.id = UUID("018f1f00-0000-7000-8000-0000000000FF")
+    e_repo.create_or_update = AsyncMock(
+        side_effect=[entity_mock, RuntimeError("related entity upsert failed")]
+    )
+
+    rel_repo = AsyncMock()
+    rel_repo.create_or_update = AsyncMock(return_value=MagicMock())
+
+    executor, disp, _r_repo, _e_repo, _rel_repo = _build_executor_with_rel_repo(
+        entity_repo=e_repo,
+        relationship_repo=rel_repo,
+    )
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["active-dns"],
+    )
+
+    # Run completes despite the related entity upsert failure
+    assert result.final_state == "completed"
+    # The subject entity upsert succeeded; only the related entity failed
+    assert result.total_observations == 1
+
+
+async def test_no_relationships_for_plain_observation() -> None:
+    """Observations without recognized payload patterns produce no relationships."""
+    obs = _make_observation()  # structured_payload = {"resolved_ip": "93.184.216.34"}
+    executor, disp, _r_repo, e_repo, rel_repo = _build_executor_with_rel_repo()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["test-collector"],
+    )
+
+    # No relationship patterns matched -> no relationship upserts
+    rel_repo.create_or_update.assert_not_called()
+    # Only the subject entity upserted
+    assert e_repo.create_or_update.call_count == 1

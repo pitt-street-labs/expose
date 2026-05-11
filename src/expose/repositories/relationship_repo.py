@@ -78,6 +78,62 @@ class RelationshipRepository:
         await self._session.flush()
         return rel
 
+    async def create_or_update(
+        self,
+        *,
+        tenant_id: TenantId,
+        from_entity_id: EntityId,
+        to_entity_id: EntityId,
+        edge_type: str,
+        confidence: Decimal,
+        observed_at: datetime,
+        collector_id: str,
+        evidence_ref: str | None = None,
+        properties: dict[str, Any] | None = None,
+    ) -> Relationship:
+        """Idempotent upsert: create edge or update if same
+        ``(tenant_id, from_entity_id, to_entity_id, edge_type, collector_id)``
+        already exists.
+
+        This avoids unbounded edge duplication when the same collector
+        re-observes the same relationship across runs.  On conflict the
+        ``observed_at``, ``confidence``, and ``properties`` are refreshed;
+        the existing row id is preserved.
+
+        The caller controls transaction boundaries — no commit is issued here.
+        """
+        # Check for an existing row with the same logical key.
+        stmt = select(Relationship).where(
+            Relationship.tenant_id == tenant_id,
+            Relationship.from_entity_id == from_entity_id,
+            Relationship.to_entity_id == to_entity_id,
+            Relationship.edge_type == edge_type,
+            Relationship.collector_id == collector_id,
+        )
+        result = await self._session.execute(stmt)
+        existing = result.scalar_one_or_none()
+
+        if existing is not None:
+            existing.confidence = confidence
+            existing.observed_at = observed_at
+            existing.properties = properties if properties is not None else {}
+            if evidence_ref is not None:
+                existing.evidence_ref = evidence_ref
+            await self._session.flush()
+            return existing
+
+        return await self.create(
+            tenant_id=tenant_id,
+            from_entity_id=from_entity_id,
+            to_entity_id=to_entity_id,
+            edge_type=edge_type,
+            confidence=confidence,
+            observed_at=observed_at,
+            collector_id=collector_id,
+            evidence_ref=evidence_ref,
+            properties=properties,
+        )
+
     async def find_for_entity(
         self,
         *,

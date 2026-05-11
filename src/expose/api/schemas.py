@@ -8,6 +8,7 @@ can populate them from the inbound JSON body.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -104,6 +105,7 @@ class EntityResponse(BaseModel):
     tenant_id: UUID
     entity_type: str
     canonical_identifier: str
+    properties: dict[str, Any]
     attribution_status: str
     first_observed_at: datetime | None
     last_observed_at: datetime | None
