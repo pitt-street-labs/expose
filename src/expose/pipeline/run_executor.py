@@ -69,6 +69,23 @@ _MAX_CONCURRENT_DISPATCHES = 15
 # large scans (e.g., subdomain enumeration returning 10k+ results).
 _OBSERVATION_BATCH_SIZE = 500
 
+# Maximum number of unique entities to LLM-enrich per flush batch.  When a
+# batch contains more unique entities than this cap, only the first N are
+# enriched, prioritised by entity type (domains first, then IPs, then
+# everything else).  This prevents a single subdomain-enumeration batch from
+# burning 200+ LLM calls.
+_MAX_LLM_ENRICHMENTS_PER_BATCH = 50
+
+# Priority ordering for entity-type enrichment selection.  Lower index =
+# higher priority.  Types not listed sort last.
+_ENRICHMENT_TYPE_PRIORITY: dict[str, int] = {
+    "domain": 0,
+    "subdomain": 1,
+    "ip": 2,
+    "cidr": 3,
+    "cloud_resource": 4,
+}
+
 
 # === State machine ============================================================
 
@@ -781,7 +798,10 @@ class RunExecutor:
         # The sentinel ``supports_batch_upsert`` is ``True`` (a real bool)
         # on ``EntityRepository``; on ``AsyncMock`` objects ``getattr``
         # returns another Mock (not ``True``), so ``is True`` rejects it.
-        if getattr(self._entity_repo, "supports_batch_upsert", False) is True:
+        use_batch = getattr(self._entity_repo, "supports_batch_upsert", False) is True
+        batch_succeeded = False
+
+        if use_batch:
             entity_dicts: list[dict[str, Any]] = []
             for obs in observations:
                 entity_dicts.append({
@@ -801,12 +821,19 @@ class RunExecutor:
                         f"New entity: {entity.entity_type} "
                         f"{entity.canonical_identifier}",
                     )
+                batch_succeeded = True
             except Exception:
-                logger.exception("Batch entity upsert failed")
-                self._log("error", "Batch entity upsert failed")
-                upsert_failures += len(observations)
-        else:
-            # Fallback: per-observation upsert (legacy path / mocked tests).
+                logger.exception(
+                    "Batch entity upsert failed; falling back to per-entity upserts"
+                )
+                self._log(
+                    "warn",
+                    "Batch entity upsert failed — falling back to per-entity upserts",
+                )
+
+        if not use_batch or not batch_succeeded:
+            # Fallback: per-observation upsert (legacy path / mocked tests /
+            # batch failure recovery).
             for obs in observations:
                 try:
                     from_entity = await self._entity_repo.create_or_update(
@@ -843,9 +870,53 @@ class RunExecutor:
                 tenant_id=TenantId(tenant_id),
             )
 
-        # --- Stage 4b: LLM enrichment (parallel, bounded to 5 concurrent) ---
+        # --- Stage 4b: LLM enrichment (deduplicated, capped, parallel) ------
+        #
+        # Many observations may reference the same entity (e.g., 391 dns-chaos
+        # subdomains producing 391 observations but only ~200 unique entities).
+        # Deduplicate by (entity_type, canonical_identifier) before enriching
+        # to avoid redundant LLM calls.  A configurable cap
+        # (_MAX_LLM_ENRICHMENTS_PER_BATCH) further limits spend; entities are
+        # prioritised by type (domains first, then IPs, then others).
         enrichment_count = 0
         if self._enrichment is not None:
+            # --- Deduplicate: collect first observation per unique entity -----
+            seen_entities: dict[tuple[str, str], Observation] = {}
+            for obs in observations:
+                key = (
+                    obs.subject.identifier_type.value,
+                    obs.subject.identifier_value,
+                )
+                if key not in seen_entities:
+                    seen_entities[key] = obs
+
+            unique_obs = list(seen_entities.values())
+
+            if len(unique_obs) < len(observations):
+                self._log(
+                    "info",
+                    f"Enrichment dedup: {len(observations)} observations -> "
+                    f"{len(unique_obs)} unique entities",
+                )
+
+            # --- Cap + prioritise by entity type -----------------------------
+            if len(unique_obs) > _MAX_LLM_ENRICHMENTS_PER_BATCH:
+                def _type_priority(obs: Observation) -> int:
+                    return _ENRICHMENT_TYPE_PRIORITY.get(
+                        obs.subject.identifier_type.value, 999
+                    )
+
+                unique_obs.sort(key=_type_priority)
+                skipped = len(unique_obs) - _MAX_LLM_ENRICHMENTS_PER_BATCH
+                unique_obs = unique_obs[:_MAX_LLM_ENRICHMENTS_PER_BATCH]
+                self._log(
+                    "info",
+                    f"Enrichment cap: enriching {_MAX_LLM_ENRICHMENTS_PER_BATCH} "
+                    f"of {_MAX_LLM_ENRICHMENTS_PER_BATCH + skipped} unique "
+                    f"entities ({skipped} deferred)",
+                )
+
+            # --- Parallel enrichment with bounded concurrency ----------------
             enrichment_sem = asyncio.Semaphore(5)
 
             async def _enrich_one(obs: Observation) -> bool:
@@ -869,7 +940,7 @@ class RunExecutor:
                         return False
 
             results = await asyncio.gather(
-                *[_enrich_one(obs) for obs in observations],
+                *[_enrich_one(obs) for obs in unique_obs],
             )
             enrichment_count = sum(1 for r in results if r)
 

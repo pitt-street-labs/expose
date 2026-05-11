@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import socket
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
@@ -1414,3 +1415,260 @@ async def test_dns_filter_no_domains_resolve(
     assert result.expanded_seeds == 0
     assert result.total_dispatches == 0
     assert result.final_state == "completed"
+
+
+# === Batch upsert fallback tests ============================================
+
+
+def _build_executor_with_batch_repo(
+    batch_fails: bool = False,
+    enrichment_pipeline: Any = None,
+) -> tuple[RunExecutor, AsyncMock, AsyncMock, AsyncMock]:
+    """Wire up a RunExecutor with an entity_repo that supports batch_upsert.
+
+    When ``batch_fails`` is True, ``batch_upsert`` raises an exception but
+    ``create_or_update`` succeeds — simulating the fallback path.
+
+    Returns (executor, dispatcher_mock, run_repo_mock, entity_repo_mock).
+    """
+    disp = AsyncMock()
+    r_repo = AsyncMock()
+    e_repo = AsyncMock()
+
+    r_repo.get_by_id = AsyncMock(return_value=_make_run_row("pending"))
+    r_repo.update_state = AsyncMock()
+
+    # Mark as supporting batch upsert (real bool, not Mock)
+    e_repo.supports_batch_upsert = True
+
+    if batch_fails:
+        e_repo.batch_upsert = AsyncMock(
+            side_effect=RuntimeError("ON CONFLICT constraint mismatch")
+        )
+    else:
+        entity_mock = MagicMock()
+        entity_mock.canonical_identifier = "example.com"
+        entity_mock.entity_type = "domain"
+        e_repo.batch_upsert = AsyncMock(return_value=[entity_mock])
+
+    # Fallback per-entity upsert always succeeds
+    e_repo.create_or_update = AsyncMock(return_value=MagicMock())
+    e_repo.list_for_tenant = AsyncMock(return_value=[])
+    e_repo.update_attribution_scores = AsyncMock(return_value=0)
+
+    executor = RunExecutor(
+        dispatcher=disp,
+        run_repo=r_repo,
+        entity_repo=e_repo,
+        enrichment_pipeline=enrichment_pipeline,
+    )
+    return executor, disp, r_repo, e_repo
+
+
+async def test_batch_upsert_success_path() -> None:
+    """When batch_upsert succeeds, create_or_update is NOT called."""
+    obs = _make_observation()
+    executor, disp, _r_repo, e_repo = _build_executor_with_batch_repo(
+        batch_fails=False,
+    )
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    assert result.final_state == "completed"
+    assert result.total_observations == 1
+    # batch_upsert was called, create_or_update was NOT
+    e_repo.batch_upsert.assert_called_once()
+    e_repo.create_or_update.assert_not_called()
+
+
+async def test_batch_upsert_failure_falls_back_to_per_entity() -> None:
+    """When batch_upsert fails, _flush_batch falls back to per-entity upserts."""
+    obs1 = _make_observation(identifier_value="a.example.com")
+    obs2 = _make_observation(identifier_value="b.example.com")
+    executor, disp, _r_repo, e_repo = _build_executor_with_batch_repo(
+        batch_fails=True,
+    )
+    disp.dispatch = AsyncMock(return_value=_success_result(obs1, obs2))
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    assert result.final_state == "completed"
+    assert result.total_observations == 2
+    # batch_upsert was attempted and failed
+    e_repo.batch_upsert.assert_called_once()
+    # Fallback: create_or_update called once per observation
+    assert e_repo.create_or_update.call_count == 2
+    upsert_ids = {
+        c.kwargs["canonical_identifier"]
+        for c in e_repo.create_or_update.call_args_list
+    }
+    assert upsert_ids == {"a.example.com", "b.example.com"}
+    # No upsert failures since the fallback succeeded
+    assert result.entities_discovered_per_pass[0] == 2
+
+
+async def test_batch_upsert_failure_counts_per_entity_failures() -> None:
+    """When batch fails and some per-entity upserts also fail, upsert_failures counted."""
+    obs1 = _make_observation(identifier_value="a.example.com")
+    obs2 = _make_observation(identifier_value="b.example.com")
+    executor, disp, _r_repo, e_repo = _build_executor_with_batch_repo(
+        batch_fails=True,
+    )
+    # One per-entity upsert succeeds, one fails
+    e_repo.create_or_update = AsyncMock(
+        side_effect=[MagicMock(), RuntimeError("db constraint violation")]
+    )
+    disp.dispatch = AsyncMock(return_value=_success_result(obs1, obs2))
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    # 2 observations, 1 upsert failure -> 1 entity discovered
+    assert result.entities_discovered_per_pass[0] == 1
+    # Run still completes (upsert failures are not dispatch failures)
+    assert result.final_state == "completed"
+
+
+# === LLM enrichment deduplication tests =====================================
+
+
+def _build_executor_with_enrichment(
+    enrichment_mock: AsyncMock | None = None,
+) -> tuple[RunExecutor, AsyncMock, AsyncMock, AsyncMock, AsyncMock]:
+    """Wire up a RunExecutor with a mock enrichment pipeline.
+
+    Returns (executor, dispatcher, run_repo, entity_repo, enrichment_mock).
+    """
+    disp = AsyncMock()
+    r_repo = AsyncMock()
+    e_repo = AsyncMock()
+
+    r_repo.get_by_id = AsyncMock(return_value=_make_run_row("pending"))
+    r_repo.update_state = AsyncMock()
+    e_repo.create_or_update = AsyncMock(return_value=MagicMock())
+    e_repo.list_for_tenant = AsyncMock(return_value=[])
+    e_repo.update_attribution_scores = AsyncMock(return_value=0)
+
+    enrich = enrichment_mock or AsyncMock()
+    enrich.enrich_entity = AsyncMock(return_value={"attribution": {}})
+
+    from expose.pipeline.enrichment import EnrichmentPipeline
+
+    executor = RunExecutor(
+        dispatcher=disp,
+        run_repo=r_repo,
+        entity_repo=e_repo,
+        enrichment_pipeline=enrich,
+    )
+    return executor, disp, r_repo, e_repo, enrich
+
+
+async def test_enrichment_deduplicates_same_entity() -> None:
+    """Multiple observations for the same entity result in a single LLM call."""
+    # 5 observations all pointing to the same entity
+    observations = [_make_observation(identifier_value="example.com") for _ in range(5)]
+    executor, disp, _r_repo, _e_repo, enrich = _build_executor_with_enrichment()
+    disp.dispatch = AsyncMock(return_value=_success_result(*observations))
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    # 5 observations but only 1 unique entity -> 1 enrichment call
+    assert enrich.enrich_entity.call_count == 1
+    assert result.enrichment_count == 1
+    assert result.total_observations == 5
+
+
+async def test_enrichment_deduplicates_multiple_entities() -> None:
+    """Observations for N unique entities result in exactly N LLM calls."""
+    observations = [
+        _make_observation(identifier_value="a.example.com"),
+        _make_observation(identifier_value="b.example.com"),
+        _make_observation(identifier_value="a.example.com"),  # duplicate
+        _make_observation(identifier_value="c.example.com"),
+        _make_observation(identifier_value="b.example.com"),  # duplicate
+    ]
+    executor, disp, _r_repo, _e_repo, enrich = _build_executor_with_enrichment()
+    disp.dispatch = AsyncMock(return_value=_success_result(*observations))
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    # 5 observations, 3 unique entities -> 3 enrichment calls
+    assert enrich.enrich_entity.call_count == 3
+    assert result.enrichment_count == 3
+    enriched_ids = {
+        c.kwargs["canonical_identifier"]
+        for c in enrich.enrich_entity.call_args_list
+    }
+    assert enriched_ids == {"a.example.com", "b.example.com", "c.example.com"}
+
+
+async def test_enrichment_cap_limits_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When unique entities exceed the cap, only the first N are enriched."""
+    from expose.pipeline import run_executor as mod
+
+    # Set cap to 3 for this test
+    monkeypatch.setattr(mod, "_MAX_LLM_ENRICHMENTS_PER_BATCH", 3)
+
+    # 10 unique entities
+    observations = [
+        _make_observation(identifier_value=f"host{i}.example.com")
+        for i in range(10)
+    ]
+    executor, disp, _r_repo, _e_repo, enrich = _build_executor_with_enrichment()
+    disp.dispatch = AsyncMock(return_value=_success_result(*observations))
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    # Cap = 3 -> only 3 enrichment calls despite 10 unique entities
+    assert enrich.enrich_entity.call_count == 3
+    assert result.enrichment_count == 3
+    assert result.total_observations == 10
+
+
+async def test_enrichment_no_enrichment_pipeline() -> None:
+    """When enrichment_pipeline is None, enrichment_count is 0."""
+    obs = _make_observation()
+    executor, disp, _r_repo, _e_repo = _build_executor()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    assert result.enrichment_count == 0
+    assert result.total_observations == 1
