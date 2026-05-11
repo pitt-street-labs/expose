@@ -42,6 +42,8 @@ dependencies = [
     "opentelemetry-instrumentation-httpx>=0.49b,<1",
     "opentelemetry-instrumentation-sqlalchemy>=0.49b,<1",
     "opentelemetry-exporter-otlp>=1.28,<2",
+    "opentelemetry-exporter-prometheus>=0.49b,<1",
+    "prometheus-client>=0.21,<1",
     "structlog>=24.4,<25",
     # JSON Schema validation (verify Pydantic stays in sync with schemas/)
     "jsonschema>=4.23,<5",
