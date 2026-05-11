@@ -8,6 +8,7 @@ import expose.collectors.builtin.bgp_he_toolkit
 import expose.collectors.builtin.bgp_ripestat
 import expose.collectors.builtin.bgp_team_cymru
 import expose.collectors.builtin.cloud_ranges
+import expose.collectors.builtin.ct_certspotter
 import expose.collectors.builtin.ct_certstream
 import expose.collectors.builtin.ct_censys
 import expose.collectors.builtin.ct_crtsh
