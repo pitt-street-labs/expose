@@ -166,7 +166,9 @@ async def load_configs_from_db() -> None:
             result = await session.execute(select(Tenant))
             for tenant in result.scalars().all():
                 if tenant.config_jsonb:
-                    _configs[tenant.id] = dict(tenant.config_jsonb)
+                    merged = _default_config(tenant.id)
+                    merged.update(tenant.config_jsonb)
+                    _configs[tenant.id] = merged
                     logger.info("Loaded config from DB for tenant %s", tenant.id)
     except Exception:
         logger.debug("Config DB load failed (non-fatal)", exc_info=True)
@@ -285,7 +287,12 @@ async def get_tenant_config(
 
     If no configuration has been set, sensible defaults are returned.
     """
-    cfg = _configs.get(tenant_id, _default_config(tenant_id))
+    stored = _configs.get(tenant_id)
+    if stored is None:
+        cfg = _default_config(tenant_id)
+    else:
+        cfg = _default_config(tenant_id)
+        cfg.update(stored)
     return _to_response(cfg)
 
 
