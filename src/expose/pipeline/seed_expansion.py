@@ -25,8 +25,35 @@ even from internal expansion.
 
 from __future__ import annotations
 
+import re
+
 from expose.collectors.base import Seed, SeedType
 from expose.sanitization.canonicalize import canonicalize_domain
+
+# TLDs to probe when generating domain seeds from organization names.
+# .gov is included for federal-customer trajectory (issue #83).
+_COMMON_TLDS = [
+    ".com",
+    ".net",
+    ".org",
+    ".io",
+    ".cloud",
+    ".dev",
+    ".ai",
+    ".co",
+    ".us",
+    ".gov",
+]
+
+# Corporate suffixes stripped before slug generation so
+# "Acme Technologies Inc." -> slug "acme-technologies" / "acmetechnologies",
+# not "acmetechnologiesinc".
+_ORG_SUFFIXES_RE = re.compile(
+    r"\s*\b(?:Inc\.?|Corp\.?|LLC|Ltd\.?|L\.?P\.?|PLC"
+    r"|Software|Technologies|Technology|Systems|Solutions"
+    r"|Group|Holdings|Enterprises?|Services|International)\s*$",
+    re.IGNORECASE,
+)
 
 
 def _is_apex_domain(domain: str) -> bool:
@@ -54,13 +81,100 @@ def _expand_domain_seed(seed: Seed) -> list[Seed]:
     ]
 
 
-def _expand_organization_seed(seed: Seed) -> list[Seed]:
-    """Generate brand-string variants for organization seeds.
+def _strip_org_suffix(name: str) -> str:
+    """Strip common corporate suffixes from an organization name.
 
-    Transforms applied:
+    ``"CyberArk Software Ltd."`` -> ``"CyberArk"``
+    ``"Acme Corp"`` -> ``"Acme"``
+
+    If stripping would leave an empty string, the original is returned.
+    """
+    stripped = _ORG_SUFFIXES_RE.sub("", name).strip()
+    return stripped if stripped else name
+
+
+def _org_name_to_slugs(raw: str) -> list[str]:
+    """Derive deduplicated domain-slug variants from an org name.
+
+    For ``"Cyber Ark Software Inc."`` produces slugs like:
+    ``["cyberark", "cyber-ark", "cyberarksoftwareinc", "cyber-ark-software-inc"]``
+
+    Suffix-stripped variants come first (they are more likely to be real
+    registered domains), followed by full-name variants that include the
+    corporate suffix.
+    """
+    slugs: list[str] = []
+    seen: set[str] = set()
+
+    def _add(slug: str) -> None:
+        if slug and slug not in seen:
+            seen.add(slug)
+            slugs.append(slug)
+
+    lowercase = raw.lower()
+
+    # Suffix-stripped variants first (higher signal).
+    stripped = _strip_org_suffix(raw).lower()
+    if stripped != lowercase:
+        _add(re.sub(r"[^a-z0-9]", "", stripped))
+        _add(re.sub(r"[^a-z0-9]+", "-", stripped).strip("-"))
+
+    # Full-name variants (may be identical to stripped for orgs without suffixes).
+    _add(re.sub(r"[^a-z0-9]", "", lowercase))    # concatenated
+    _add(re.sub(r"[^a-z0-9]+", "-", lowercase).strip("-"))  # dash-separated
+
+    return slugs
+
+
+def _generate_org_domain_seeds(
+    seed: Seed, *, max_domains: int = 30,
+) -> list[Seed]:
+    """Generate DOMAIN seeds from an ORGANIZATION seed.
+
+    Combines org-name slug variants with ``_COMMON_TLDS``.  The total
+    number of generated domains is capped at ``max_domains`` to avoid
+    overwhelming the pipeline.  No DNS pre-check is performed — collectors
+    already handle failures gracefully.
+    """
+    raw = seed.value.strip()
+    if not raw:
+        return []
+
+    slugs = _org_name_to_slugs(raw)
+    domains: list[Seed] = []
+    seen: set[str] = set()
+
+    for slug in slugs:
+        for tld in _COMMON_TLDS:
+            if len(domains) >= max_domains:
+                return domains
+            domain = f"{slug}{tld}"
+            if domain not in seen:
+                seen.add(domain)
+                domains.append(
+                    Seed(
+                        seed_type=SeedType.DOMAIN,
+                        value=domain,
+                        properties=seed.properties,
+                    )
+                )
+
+    return domains
+
+
+def _expand_organization_seed(seed: Seed) -> list[Seed]:
+    """Generate brand-string variants and domain seeds for organization seeds.
+
+    Organization string transforms:
     - Lowercase (``Acme Corp`` -> ``acme corp``)
     - Dash-separated (``Acme Corp`` -> ``acme-corp``)
     - No-space / concatenated (``Acme Corp`` -> ``acmecorp``)
+
+    Domain expansion (issue #83):
+    - Generates DOMAIN seeds by combining org-name slugs with common TLDs.
+    - Strips corporate suffixes (Inc, Corp, Ltd, etc.) to produce
+      additional slug variants before TLD expansion.
+    - Capped at ~30 domain seeds to avoid pipeline overload.
 
     Deduplication happens at the caller level; this function may produce
     variants that are identical to the original (e.g., a single-word org
@@ -87,6 +201,9 @@ def _expand_organization_seed(seed: Seed) -> list[Seed]:
                     properties=seed.properties,
                 )
             )
+
+    # Multi-TLD domain generation (issue #83).
+    variants.extend(_generate_org_domain_seeds(seed))
 
     return variants
 
@@ -130,4 +247,10 @@ def expand_seeds(seeds: list[Seed]) -> list[Seed]:
     return result
 
 
-__all__ = ["expand_seeds"]
+__all__ = [
+    "_COMMON_TLDS",
+    "_generate_org_domain_seeds",
+    "_org_name_to_slugs",
+    "_strip_org_suffix",
+    "expand_seeds",
+]

@@ -240,6 +240,33 @@ class TestWikidataHappyPath:
         assert len(zilla_obs) == 1
         assert "zillasecurity.com" in zilla_obs[0].structured_payload["acquired_domains"]
 
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_wikidata_guesses_multi_tld_domains(self) -> None:
+        """Domain guessing covers multiple TLDs, not just .com (issue #83)."""
+        respx.get("https://query.wikidata.org/sparql").mock(
+            return_value=httpx.Response(200, json=_WIKIDATA_RESPONSE)
+        )
+        respx.get("https://en.wikipedia.org/w/api.php").mock(
+            return_value=httpx.Response(200, json=_WIKIPEDIA_EMPTY)
+        )
+
+        seed = Seed(seed_type=SeedType.ORGANIZATION, value="CyberArk")
+        observations = await _collect(seed)
+
+        zilla_obs = [
+            o for o in observations
+            if o.structured_payload["acquired_organization"] == "Zilla Security"
+        ]
+        assert len(zilla_obs) == 1
+        domains = zilla_obs[0].structured_payload["acquired_domains"]
+        # Multi-TLD: .com, .net, .org, .io, .gov all present.
+        assert "zillasecurity.com" in domains
+        assert "zillasecurity.net" in domains
+        assert "zillasecurity.org" in domains
+        assert "zillasecurity.io" in domains
+        assert "zillasecurity.gov" in domains
+
 
 # ======================================================================
 # 4. Wikipedia API happy path
@@ -265,6 +292,30 @@ class TestWikipediaHappyPath:
         ]
         assert "Idaptive" in acquired_names
         assert "Conjur" in acquired_names
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_wikipedia_multi_tld_domains(self) -> None:
+        """Wikipedia-sourced acquisitions also get multi-TLD domains (issue #83)."""
+        respx.get("https://query.wikidata.org/sparql").mock(
+            return_value=httpx.Response(200, json=_WIKIDATA_EMPTY)
+        )
+        respx.get("https://en.wikipedia.org/w/api.php").mock(
+            return_value=httpx.Response(200, json=_WIKIPEDIA_RESPONSE)
+        )
+
+        seed = Seed(seed_type=SeedType.ORGANIZATION, value="CyberArk")
+        observations = await _collect(seed)
+
+        idaptive_obs = [
+            o for o in observations
+            if o.structured_payload["acquired_organization"] == "Idaptive"
+        ]
+        assert len(idaptive_obs) == 1
+        domains = idaptive_obs[0].structured_payload["acquired_domains"]
+        assert "idaptive.com" in domains
+        assert "idaptive.io" in domains
+        assert "idaptive.gov" in domains
 
 
 # ======================================================================

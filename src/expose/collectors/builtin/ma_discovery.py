@@ -74,6 +74,10 @@ LIMIT 50
 """
 
 
+# TLDs to probe when guessing domains for acquired companies (issue #83).
+_GUESS_TLDS = [".com", ".net", ".org", ".io", ".cloud", ".dev", ".ai", ".co", ".us", ".gov"]
+
+
 def _normalize_org_for_domain(name: str) -> str:
     """Convert an organization name to a plausible domain slug.
 
@@ -82,6 +86,18 @@ def _normalize_org_for_domain(name: str) -> str:
     """
     # Remove common suffixes and punctuation.
     return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def _guess_domains_for_name(name: str) -> list[str]:
+    """Generate candidate domains for an acquired company across multiple TLDs.
+
+    Returns up to ``len(_GUESS_TLDS)`` domain strings derived from the
+    organization name slug. Falls back to empty list if the slug is empty.
+    """
+    slug = _normalize_org_for_domain(name)
+    if not slug:
+        return []
+    return [f"{slug}{tld}" for tld in _GUESS_TLDS]
 
 
 def _extract_domain_from_url(url: str) -> str | None:
@@ -243,11 +259,9 @@ class MADiscoveryCollector(Collector):
                 if domain:
                     acquired_domains.append(domain)
 
-            # Fallback: guess domain from name.
+            # Fallback: guess domains from name across multiple TLDs.
             if not acquired_domains:
-                slug = _normalize_org_for_domain(label)
-                if slug:
-                    acquired_domains.append(f"{slug}.com")
+                acquired_domains = _guess_domains_for_name(label)
 
             results.append({
                 "acquired_name": label,
@@ -311,8 +325,7 @@ class MADiscoveryCollector(Collector):
             page_url = f"https://en.wikipedia.org/wiki/{title.replace(' ', '_')}"
 
             for name in acquired_names:
-                slug = _normalize_org_for_domain(name)
-                acquired_domains = [f"{slug}.com"] if slug else []
+                acquired_domains = _guess_domains_for_name(name)
                 results.append({
                     "acquired_name": name,
                     "acquisition_date": None,

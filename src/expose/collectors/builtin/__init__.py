@@ -28,5 +28,6 @@ import expose.collectors.builtin.scan_binaryedge
 import expose.collectors.builtin.scan_censys
 import expose.collectors.builtin.scan_shodan
 import expose.collectors.builtin.wayback_machine
+import expose.collectors.builtin.sip_discovery
 import expose.collectors.builtin.waf_detection  # noqa: F401
 import expose.collectors.builtin.wikipedia_edits  # noqa: F401
