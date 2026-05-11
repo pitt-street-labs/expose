@@ -74,6 +74,131 @@
         </div>
     </div>
 
+    <!-- ===== API Keys panel ===== -->
+    <div class="card" x-show="selectedTenantId" x-cloak
+         style="margin: 0 var(--space-lg); margin-top: 0;">
+        <div style="display: flex; align-items: center; justify-content: space-between; cursor: pointer;"
+             @click="showCredentialsPanel = !showCredentialsPanel; if (showCredentialsPanel && !credentialSlots) loadCredentials();">
+            <h2 class="pane-title" style="margin: 0;">
+                API Keys
+                <span x-show="credentialSlots" x-cloak
+                      style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;"
+                      x-text="credentialConfiguredCount + '/' + credentialTotalCount + ' configured'"></span>
+            </h2>
+            <span style="color: var(--text-muted); font-size: 0.8rem;"
+                  x-text="showCredentialsPanel ? '&#9650; Collapse' : '&#9660; Expand'"></span>
+        </div>
+        <div x-show="showCredentialsPanel" x-cloak x-transition>
+            <div style="margin-top: var(--space-md);">
+
+                <!-- Loading state -->
+                <div x-show="!credentialSlots" style="color: var(--text-muted); font-size: 0.8rem; padding: var(--space-sm) 0;">
+                    Loading credentials...
+                </div>
+
+                <!-- Credential slots table -->
+                <div x-show="credentialSlots" x-cloak>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem;">
+                        <thead>
+                            <tr style="border-bottom: 1px solid var(--border); text-align: left;">
+                                <th style="padding: 0.5rem 0.5rem; color: var(--text-muted); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;">Credential</th>
+                                <th style="padding: 0.5rem 0.5rem; color: var(--text-muted); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;">Status</th>
+                                <th style="padding: 0.5rem 0.5rem; color: var(--text-muted); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;">Value</th>
+                                <th style="padding: 0.5rem 0.5rem; color: var(--text-muted); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;">Collectors</th>
+                                <th style="padding: 0.5rem 0.5rem; color: var(--text-muted); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="slot in credentialSlots" :key="slot.credential_id">
+                                <tr style="border-bottom: 1px solid var(--border);">
+                                    <td style="padding: 0.5rem; font-weight: 500;" x-text="slot.display_name"></td>
+                                    <td style="padding: 0.5rem;">
+                                        <span :style="{
+                                            display: 'inline-block',
+                                            padding: '2px 8px',
+                                            borderRadius: '4px',
+                                            fontSize: '0.7rem',
+                                            fontWeight: '600',
+                                            textTransform: 'uppercase',
+                                            background: slot.status === 'configured' ? 'rgba(52, 211, 153, 0.15)' : 'rgba(156, 163, 175, 0.15)',
+                                            color: slot.status === 'configured' ? 'var(--green, #34d399)' : 'var(--text-muted, #9ca3af)'
+                                        }" x-text="slot.status"></span>
+                                    </td>
+                                    <td style="padding: 0.5rem; font-family: monospace; font-size: 0.75rem; color: var(--text-muted);"
+                                        x-text="slot.masked_value || '---'"></td>
+                                    <td style="padding: 0.5rem; font-size: 0.7rem; color: var(--text-muted);"
+                                        x-text="slot.collector_ids.length > 0 ? slot.collector_ids.join(', ') : 'none'"></td>
+                                    <td style="padding: 0.5rem;">
+                                        <button class="btn btn-ghost"
+                                                style="padding: 2px 8px; font-size: 0.7rem;"
+                                                @click="testCredential(slot.credential_id)"
+                                                :disabled="slot.status !== 'configured'">
+                                            Test
+                                        </button>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+
+                    <!-- Import / Export buttons -->
+                    <div style="display: flex; gap: 8px; margin-top: var(--space-md); flex-wrap: wrap;">
+                        <button class="btn btn-ghost" style="font-size: 0.75rem;"
+                                @click="showSfImportModal = true">
+                            Import SpiderFoot
+                        </button>
+                        <button class="btn btn-ghost" style="font-size: 0.75rem;"
+                                @click="showBundleImportModal = true">
+                            Import JSON
+                        </button>
+                        <button class="btn btn-ghost" style="font-size: 0.75rem;"
+                                @click="exportCredentialBundle()">
+                            Export
+                        </button>
+                    </div>
+
+                    <!-- Status message -->
+                    <div x-show="credentialMessage" x-text="credentialMessage"
+                         style="margin-top: var(--space-sm); font-size: 0.8rem; color: var(--text-muted);"></div>
+                </div>
+            </div>
+
+            <!-- SpiderFoot Import Modal -->
+            <div x-show="showSfImportModal" x-cloak x-transition
+                 style="margin-top: var(--space-md); padding: var(--space-sm); border: 1px solid var(--border); border-radius: var(--radius-md);">
+                <h3 style="font-size: 0.85rem; margin: 0 0 var(--space-sm) 0;">Import SpiderFoot Credentials</h3>
+                <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: var(--space-sm);">
+                    Paste SpiderFoot credentials as JSON. Keys should be in the format
+                    <code>sfp_module.api_key</code>, e.g., <code>{"sfp_shodan.api_key": "your-key"}</code>.
+                </p>
+                <textarea x-model="sfImportText" rows="6"
+                          style="width: 100%; font-family: monospace; font-size: 0.75rem; background: var(--bg-secondary, #1a1a2e); color: var(--text-primary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-xs);"
+                          placeholder='{"sfp_shodan.api_key": "your-key", "sfp_securitytrails.api_key": "your-key"}'></textarea>
+                <div style="display: flex; gap: 8px; margin-top: var(--space-sm);">
+                    <button class="btn btn-primary" style="font-size: 0.75rem;" @click="importSpiderFoot()">Import</button>
+                    <button class="btn btn-ghost" style="font-size: 0.75rem;" @click="showSfImportModal = false; sfImportText = '';">Cancel</button>
+                </div>
+            </div>
+
+            <!-- Bundle Import Modal -->
+            <div x-show="showBundleImportModal" x-cloak x-transition
+                 style="margin-top: var(--space-md); padding: var(--space-sm); border: 1px solid var(--border); border-radius: var(--radius-md);">
+                <h3 style="font-size: 0.85rem; margin: 0 0 var(--space-sm) 0;">Import JSON Bundle</h3>
+                <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: var(--space-sm);">
+                    Paste an EXPOSE credential bundle JSON. Keys should be credential slot IDs,
+                    e.g., <code>{"shodan_api_key": "your-key"}</code>.
+                </p>
+                <textarea x-model="bundleImportText" rows="6"
+                          style="width: 100%; font-family: monospace; font-size: 0.75rem; background: var(--bg-secondary, #1a1a2e); color: var(--text-primary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-xs);"
+                          placeholder='{"shodan_api_key": "your-key", "github_token": "ghp_..."}'></textarea>
+                <div style="display: flex; gap: 8px; margin-top: var(--space-sm);">
+                    <button class="btn btn-primary" style="font-size: 0.75rem;" @click="importBundle()">Import</button>
+                    <button class="btn btn-ghost" style="font-size: 0.75rem;" @click="showBundleImportModal = false; bundleImportText = '';">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- ===== Split pane ===== -->
     <main class="split-pane">
 

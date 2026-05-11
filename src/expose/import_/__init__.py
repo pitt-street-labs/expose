@@ -24,6 +24,12 @@ Sub-modules:
   ``expose import spiderfoot`` subcommand.
 """
 
+from expose.import_.credential_bundle import (
+    CredentialBundle,
+    export_bundle,
+    import_bundle,
+    mask_value,
+)
 from expose.import_.spiderfoot import (
     SPIDERFOOT_MODULE_MAP,
     ImportedKey,
@@ -33,7 +39,11 @@ from expose.import_.spiderfoot import (
 
 __all__ = [
     "SPIDERFOOT_MODULE_MAP",
+    "CredentialBundle",
     "ImportSummary",
     "ImportedKey",
     "SpiderFootImporter",
+    "export_bundle",
+    "import_bundle",
+    "mask_value",
 ]

@@ -54,6 +54,17 @@ function exposeApp() {
         exportFilter: { entityType: "", tier: "", collector: "", environment: "" },
         exporting: false,
 
+        // Credential management panel
+        showCredentialsPanel: false,
+        credentialSlots: null,
+        credentialConfiguredCount: 0,
+        credentialTotalCount: 0,
+        credentialMessage: "",
+        showSfImportModal: false,
+        showBundleImportModal: false,
+        sfImportText: "",
+        bundleImportText: "",
+
         /**
          * Handle tenant selection change.
          * Updates HTMX polling targets, resets graph state, and starts
@@ -73,6 +84,13 @@ function exposeApp() {
             this.showConfigPanel = false;
             this.tenantConfig = null;
             this.configMessage = "";
+
+            // Reset credentials panel
+            this.showCredentialsPanel = false;
+            this.credentialSlots = null;
+            this.credentialMessage = "";
+            this.showSfImportModal = false;
+            this.showBundleImportModal = false;
 
             if (!this.selectedTenantId) {
                 this.entityCount = 0;
@@ -484,6 +502,165 @@ function exposeApp() {
                 .finally(function () {
                     self.exporting = false;
                 });
+        },
+
+        /* ==================================================================
+           Credential Management
+           ================================================================== */
+
+        /**
+         * Fetch credential slot statuses from the API.
+         */
+        async loadCredentials() {
+            if (!this.selectedTenantId) return;
+            this.credentialMessage = "";
+            try {
+                var resp = await fetch(
+                    "/v1/tenants/" + this.selectedTenantId + "/credentials/"
+                );
+                if (!resp.ok) {
+                    this.credentialMessage = "Failed to load credentials (HTTP " + resp.status + ")";
+                    return;
+                }
+                var data = await resp.json();
+                this.credentialSlots = data.slots || [];
+                this.credentialConfiguredCount = data.configured_count || 0;
+                this.credentialTotalCount = data.total_count || 0;
+            } catch (e) {
+                this.credentialMessage = "Error loading credentials: " + e.message;
+                console.error("[EXPOSE] Credentials load error:", e);
+            }
+        },
+
+        /**
+         * Test a credential by calling the test endpoint.
+         */
+        async testCredential(credentialId) {
+            if (!this.selectedTenantId) return;
+            this.credentialMessage = "Testing " + credentialId + "...";
+            try {
+                var resp = await fetch(
+                    "/v1/tenants/" + this.selectedTenantId + "/credentials/" + credentialId + "/test",
+                    { method: "POST" }
+                );
+                if (!resp.ok) {
+                    this.credentialMessage = "Test failed (HTTP " + resp.status + ")";
+                    return;
+                }
+                var result = await resp.json();
+                this.credentialMessage = credentialId + ": " + result.status + " — " + result.message;
+            } catch (e) {
+                this.credentialMessage = "Test error: " + e.message;
+                console.error("[EXPOSE] Credential test error:", e);
+            }
+        },
+
+        /**
+         * Import SpiderFoot credentials from the modal textarea.
+         */
+        async importSpiderFoot() {
+            if (!this.selectedTenantId || !this.sfImportText.trim()) {
+                this.credentialMessage = "Paste SpiderFoot credentials JSON first.";
+                return;
+            }
+            this.credentialMessage = "Importing SpiderFoot credentials...";
+            try {
+                var creds = JSON.parse(this.sfImportText);
+                var resp = await fetch(
+                    "/v1/tenants/" + this.selectedTenantId + "/credentials/import/spiderfoot",
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ credentials: creds }),
+                    }
+                );
+                if (!resp.ok) {
+                    var errText = await resp.text();
+                    this.credentialMessage = "Import failed (" + resp.status + "): " + errText;
+                    return;
+                }
+                var result = await resp.json();
+                this.credentialMessage = "Imported " + result.imported_count + " credentials" +
+                    (result.skipped_count > 0 ? ", skipped " + result.skipped_count : "") + ".";
+                this.showSfImportModal = false;
+                this.sfImportText = "";
+                await this.loadCredentials();
+            } catch (e) {
+                this.credentialMessage = "Import error: " + e.message;
+                console.error("[EXPOSE] SpiderFoot import error:", e);
+            }
+        },
+
+        /**
+         * Import a native JSON bundle from the modal textarea.
+         */
+        async importBundle() {
+            if (!this.selectedTenantId || !this.bundleImportText.trim()) {
+                this.credentialMessage = "Paste credential bundle JSON first.";
+                return;
+            }
+            this.credentialMessage = "Importing credential bundle...";
+            try {
+                var parsed = JSON.parse(this.bundleImportText);
+                // Accept either the full bundle format or just a flat dict
+                var creds = parsed.credentials || parsed;
+                var resp = await fetch(
+                    "/v1/tenants/" + this.selectedTenantId + "/credentials/import/bundle",
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            format_version: parsed.format_version || "1.0",
+                            credentials: creds,
+                        }),
+                    }
+                );
+                if (!resp.ok) {
+                    var errText = await resp.text();
+                    this.credentialMessage = "Import failed (" + resp.status + "): " + errText;
+                    return;
+                }
+                var result = await resp.json();
+                this.credentialMessage = "Imported " + result.imported_count + " credentials" +
+                    (result.skipped_count > 0 ? ", skipped " + result.skipped_count : "") + ".";
+                if (result.errors && result.errors.length > 0) {
+                    this.credentialMessage += " Errors: " + result.errors.join("; ");
+                }
+                this.showBundleImportModal = false;
+                this.bundleImportText = "";
+                await this.loadCredentials();
+            } catch (e) {
+                this.credentialMessage = "Import error: " + e.message;
+                console.error("[EXPOSE] Bundle import error:", e);
+            }
+        },
+
+        /**
+         * Export credentials as a JSON bundle and trigger a download.
+         */
+        async exportCredentialBundle() {
+            if (!this.selectedTenantId) return;
+            this.credentialMessage = "Exporting credentials...";
+            try {
+                var resp = await fetch(
+                    "/v1/tenants/" + this.selectedTenantId + "/credentials/export/bundle"
+                );
+                if (!resp.ok) {
+                    this.credentialMessage = "Export failed (HTTP " + resp.status + ")";
+                    return;
+                }
+                var data = await resp.json();
+                var blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+                var a = document.createElement("a");
+                a.href = URL.createObjectURL(blob);
+                a.download = "expose-credentials-" + new Date().toISOString().slice(0, 10) + ".json";
+                a.click();
+                URL.revokeObjectURL(a.href);
+                this.credentialMessage = "Credentials exported (values masked).";
+            } catch (e) {
+                this.credentialMessage = "Export error: " + e.message;
+                console.error("[EXPOSE] Credential export error:", e);
+            }
         },
 
         /**

@@ -16,7 +16,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from expose import __version__
+from expose.api.credentials import router as credentials_router
 from expose.api.events import router as events_router
+from expose.api.export import router as export_router
 from expose.api.graph import router as graph_router
 from expose.api.runs import router as runs_router
 from expose.api.tenant_config import router as tenant_config_router
@@ -122,6 +124,8 @@ def create_app(
     app.include_router(graph_router)
     app.include_router(events_router)
     app.include_router(tenant_config_router)
+    app.include_router(credentials_router)
+    app.include_router(export_router)
     app.include_router(ui_router)
 
     # -- Static files (CSS, JS for dashboard) ----------------------------------
