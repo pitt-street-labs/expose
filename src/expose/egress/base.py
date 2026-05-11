@@ -64,6 +64,7 @@ class EgressHealthCheck(BaseModel):
     latency_ms: float | None = None
     error_message: str | None = None
     checked_at: datetime
+    egress_anonymized: bool = False
 
 
 class EgressProfile(ABC):
@@ -74,6 +75,18 @@ class EgressProfile(ABC):
     """
 
     profile_type: EgressProfileType
+
+    @property
+    @abstractmethod
+    def is_anonymizing(self) -> bool:
+        """Whether this profile routes through anonymizing infrastructure.
+
+        Returns ``True`` when the egress path masks the operator's origin
+        (e.g. Tor circuits, public SOCKS5 proxies with DNS-through-proxy).
+        Downstream consumers use this flag — surfaced as
+        ``egress_anonymized`` in :class:`EgressHealthCheck` — to record
+        provenance about scan origin visibility.
+        """
 
     @abstractmethod
     def configure_httpx_client(self, **kwargs: Any) -> dict[str, Any]:

@@ -141,6 +141,23 @@ In addition to the quarterly cadence, an ad-hoc review is initiated when any of 
 
 For each trigger event, the outcome (no change, clarification, or substantive amendment) is documented in the next release notes. Substantive amendments to intent, non-goals, or scope posture also receive a corresponding ADR amendment so the architectural rationale is preserved alongside this document.
 
+## Anonymized Egress
+
+EXPOSE supports routing active scanner traffic through anonymizing infrastructure
+(SOCKS5 proxies, Tor circuits) via configurable egress profiles. When anonymized
+egress is active, scan artifacts record `egress_anonymized: true` in their
+provenance metadata so downstream consumers know the scan origin was masked.
+
+This capability exists to serve legitimate use cases:
+- Geographic distribution testing
+- IP-reputation impact assessment
+- Authorized adversary emulation (red team)
+- Research scenarios (censorship, CDN behavior)
+
+Operators are responsible for ensuring anonymized egress complies with their
+organization's policies and applicable law. The EXPOSE Core engine documents
+the capability honestly; it does not encourage or facilitate unauthorized use.
+
 ## Reporting Concerns
 
 If you believe EXPOSE is being used in ways that conflict with this document:

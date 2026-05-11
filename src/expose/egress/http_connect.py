@@ -31,6 +31,17 @@ class HttpConnectEgressProfile(EgressProfile):
 
     profile_type: EgressProfileType = EgressProfileType.HTTP_CONNECT
 
+    @property
+    def is_anonymizing(self) -> bool:
+        """HTTP CONNECT proxies are not anonymizing by default.
+
+        Corporate forward proxies (Squid, tinyproxy) are operator-controlled
+        infrastructure — they change the exit IP but do not anonymize in the
+        Tor/public-proxy sense. Operators deploying through an anonymizing
+        HTTP proxy should subclass and override this property.
+        """
+        return False
+
     def __init__(self, proxy_url: str = "http://127.0.0.1:3128") -> None:
         self._proxy_url = proxy_url
 

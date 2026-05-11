@@ -41,6 +41,17 @@ class Socks5EgressProfile(EgressProfile):
         self._proxy_url = proxy_url
         self._dns_through_proxy = dns_through_proxy
 
+    @property
+    def is_anonymizing(self) -> bool:
+        """SOCKS5 is anonymizing when DNS is also routed through the proxy.
+
+        When ``dns_through_proxy`` is ``True``, both TCP traffic and DNS
+        resolution exit through the proxy — the operator's origin is fully
+        masked. When ``False``, the operator's system resolver is exposed,
+        so the profile is not fully anonymizing.
+        """
+        return self._dns_through_proxy
+
     def configure_httpx_client(self, **kwargs: Any) -> dict[str, Any]:
         """Return httpx proxy kwargs for SOCKS5 tunnelling.
 

@@ -384,4 +384,8 @@ class TestRunLoop:
         # Schedule should still have advanced next_run_at despite failure.
         updated = sched.get_schedule(TENANT_A)
         assert updated is not None
-        assert updated.last_run_at is not None
+        # On failure, last_run_at stays None (only set on success);
+        # last_attempted_at records when the attempt happened.
+        assert updated.last_run_at is None
+        assert updated.last_attempted_at is not None
+        assert updated.next_run_at is not None

@@ -21,6 +21,8 @@ from expose.llm.models import (
     LLMHealthCheck,
     LLMRequest,
     LLMResponse,
+    TiebreakerPolicy,
+    TiebreakerResolution,
 )
 
 __all__ = [
@@ -33,4 +35,6 @@ __all__ = [
     "LLMRequest",
     "LLMResponse",
     "SafeLLMClient",
+    "TiebreakerPolicy",
+    "TiebreakerResolution",
 ]

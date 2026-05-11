@@ -1,0 +1,758 @@
+{
+  "schema_version": "1.0",
+  "products": [
+    {
+      "product_id": "cyberark-pam",
+      "vendor": "CyberArk",
+      "product_name": "Privileged Access Manager",
+      "category": "identity_security",
+      "signatures": [
+        {
+          "type": "url_path",
+          "pattern": "/PasswordVault/.*",
+          "confidence": 0.9
+        },
+        {
+          "type": "url_path",
+          "pattern": "/pvwa/.*",
+          "confidence": 0.85
+        },
+        {
+          "type": "header",
+          "name": "server",
+          "value_pattern": "Microsoft-IIS",
+          "confidence": 0.2,
+          "pattern": "Microsoft-IIS"
+        },
+        {
+          "type": "tls_san",
+          "pattern": "pvwa\\..*",
+          "confidence": 0.7
+        }
+      ],
+      "expected_ports": [
+        443,
+        1858
+      ],
+      "related_products": [
+        "cyberark-conjur",
+        "cyberark-identity"
+      ]
+    },
+    {
+      "product_id": "cyberark-conjur",
+      "vendor": "CyberArk",
+      "product_name": "Conjur Secrets Manager",
+      "category": "secrets_management",
+      "signatures": [
+        {
+          "type": "url_path",
+          "pattern": "/conjur/.*",
+          "confidence": 0.85
+        },
+        {
+          "type": "url_path",
+          "pattern": "/api/authn/.*",
+          "confidence": 0.6
+        },
+        {
+          "type": "header",
+          "name": "x-conjur-version",
+          "value_pattern": ".*",
+          "confidence": 0.95,
+          "pattern": ".*"
+        }
+      ],
+      "expected_ports": [
+        443,
+        5432
+      ],
+      "related_products": [
+        "cyberark-pam"
+      ]
+    },
+    {
+      "product_id": "okta",
+      "vendor": "Okta",
+      "product_name": "Okta Identity Cloud",
+      "category": "identity_sso",
+      "signatures": [
+        {
+          "type": "url_path",
+          "pattern": "/oauth2/.*",
+          "confidence": 0.4
+        },
+        {
+          "type": "url_path",
+          "pattern": "/api/v1/authn.*",
+          "confidence": 0.8
+        },
+        {
+          "type": "dns_cname",
+          "pattern": ".*\\.okta\\.com$",
+          "confidence": 0.95
+        },
+        {
+          "type": "tls_san",
+          "pattern": ".*\\.okta\\.com$",
+          "confidence": 0.95
+        },
+        {
+          "type": "header",
+          "name": "x-okta-request-id",
+          "value_pattern": ".*",
+          "confidence": 0.95,
+          "pattern": ".*"
+        }
+      ],
+      "expected_ports": [
+        443
+      ],
+      "related_products": [
+        "okta-asa"
+      ]
+    },
+    {
+      "product_id": "azure-entra-id",
+      "vendor": "Microsoft",
+      "product_name": "Entra ID (Azure AD)",
+      "category": "identity_sso",
+      "signatures": [
+        {
+          "type": "url_path",
+          "pattern": "/\\.well-known/openid-configuration.*",
+          "confidence": 0.3
+        },
+        {
+          "type": "dns_cname",
+          "pattern": ".*\\.login\\.microsoftonline\\.com$",
+          "confidence": 0.95
+        },
+        {
+          "type": "tls_san",
+          "pattern": "login\\.microsoftonline\\.com$",
+          "confidence": 0.95
+        },
+        {
+          "type": "header",
+          "name": "x-ms-request-id",
+          "value_pattern": ".*",
+          "confidence": 0.5,
+          "pattern": ".*"
+        }
+      ],
+      "expected_ports": [
+        443
+      ],
+      "related_products": [
+        "microsoft-365",
+        "azure"
+      ]
+    },
+    {
+      "product_id": "ping-identity",
+      "vendor": "Ping Identity",
+      "product_name": "PingFederate",
+      "category": "identity_sso",
+      "signatures": [
+        {
+          "type": "url_path",
+          "pattern": "/pf/heartbeat\\.ping$",
+          "confidence": 0.9
+        },
+        {
+          "type": "url_path",
+          "pattern": "/sp/startSSO\\.ping.*",
+          "confidence": 0.85
+        },
+        {
+          "type": "header",
+          "name": "x-powered-by",
+          "value_pattern": "PingFederate",
+          "confidence": 0.95,
+          "pattern": "PingFederate"
+        },
+        {
+          "type": "tls_san",
+          "pattern": ".*\\.pingidentity\\.com$",
+          "confidence": 0.8
+        }
+      ],
+      "expected_ports": [
+        443,
+        9031,
+        9999
+      ],
+      "related_products": []
+    },
+    {
+      "product_id": "onelogin",
+      "vendor": "OneLogin",
+      "product_name": "OneLogin SSO",
+      "category": "identity_sso",
+      "signatures": [
+        {
+          "type": "dns_cname",
+          "pattern": ".*\\.onelogin\\.com$",
+          "confidence": 0.95
+        },
+        {
+          "type": "tls_san",
+          "pattern": ".*\\.onelogin\\.com$",
+          "confidence": 0.95
+        },
+        {
+          "type": "url_path",
+          "pattern": "/trust/saml2/http-post/sso/.*",
+          "confidence": 0.85
+        },
+        {
+          "type": "header",
+          "name": "x-onelogin-request-id",
+          "value_pattern": ".*",
+          "confidence": 0.95,
+          "pattern": ".*"
+        }
+      ],
+      "expected_ports": [
+        443
+      ],
+      "related_products": []
+    },
+    {
+      "product_id": "venafi-tpp",
+      "vendor": "Venafi",
+      "product_name": "Trust Protection Platform",
+      "category": "security",
+      "signatures": [
+        {
+          "type": "url_path",
+          "pattern": "/vedsdk/.*",
+          "confidence": 0.9
+        },
+        {
+          "type": "url_path",
+          "pattern": "/aperture/.*",
+          "confidence": 0.8
+        },
+        {
+          "type": "header",
+          "name": "x-venafi-api-version",
+          "value_pattern": ".*",
+          "confidence": 0.95,
+          "pattern": ".*"
+        },
+        {
+          "type": "tls_san",
+          "pattern": "venafi\\..*",
+          "confidence": 0.5
+        }
+      ],
+      "expected_ports": [
+        443
+      ],
+      "related_products": []
+    },
+    {
+      "product_id": "hashicorp-vault",
+      "vendor": "HashiCorp",
+      "product_name": "Vault",
+      "category": "secrets_management",
+      "signatures": [
+        {
+          "type": "url_path",
+          "pattern": "/v1/sys/health$",
+          "confidence": 0.9
+        },
+        {
+          "type": "url_path",
+          "pattern": "/v1/secret/.*",
+          "confidence": 0.7
+        },
+        {
+          "type": "url_path",
+          "pattern": "/ui/vault/.*",
+          "confidence": 0.85
+        },
+        {
+          "type": "header",
+          "name": "x-vault-request",
+          "value_pattern": ".*",
+          "confidence": 0.95,
+          "pattern": ".*"
+        }
+      ],
+      "expected_ports": [
+        443,
+        8200
+      ],
+      "related_products": [
+        "hashicorp-consul"
+      ]
+    },
+    {
+      "product_id": "crowdstrike-falcon",
+      "vendor": "CrowdStrike",
+      "product_name": "Falcon Platform",
+      "category": "security",
+      "signatures": [
+        {
+          "type": "dns_cname",
+          "pattern": ".*\\.crowdstrike\\.com$",
+          "confidence": 0.9
+        },
+        {
+          "type": "dns_cname",
+          "pattern": ".*\\.falcon\\.crowdstrike\\.com$",
+          "confidence": 0.95
+        },
+        {
+          "type": "tls_san",
+          "pattern": ".*\\.crowdstrike\\.com$",
+          "confidence": 0.9
+        },
+        {
+          "type": "url_path",
+          "pattern": "/sensors/entities/.*",
+          "confidence": 0.8
+        }
+      ],
+      "expected_ports": [
+        443
+      ],
+      "related_products": []
+    },
+    {
+      "product_id": "aws-generic",
+      "vendor": "Amazon",
+      "product_name": "Amazon Web Services",
+      "category": "infrastructure",
+      "signatures": [
+        {
+          "type": "dns_cname",
+          "pattern": ".*\\.amazonaws\\.com$",
+          "confidence": 0.9
+        },
+        {
+          "type": "dns_cname",
+          "pattern": ".*\\.cloudfront\\.net$",
+          "confidence": 0.85
+        },
+        {
+          "type": "tls_issuer",
+          "pattern": "Amazon$",
+          "confidence": 0.6
+        },
+        {
+          "type": "header",
+          "name": "x-amz-request-id",
+          "value_pattern": ".*",
+          "confidence": 0.9,
+          "pattern": ".*"
+        },
+        {
+          "type": "header",
+          "name": "server",
+          "value_pattern": "AmazonS3",
+          "confidence": 0.95,
+          "pattern": "AmazonS3"
+        }
+      ],
+      "expected_ports": [
+        443,
+        80
+      ],
+      "related_products": []
+    },
+    {
+      "product_id": "azure",
+      "vendor": "Microsoft",
+      "product_name": "Microsoft Azure",
+      "category": "infrastructure",
+      "signatures": [
+        {
+          "type": "dns_cname",
+          "pattern": ".*\\.azure\\.com$",
+          "confidence": 0.85
+        },
+        {
+          "type": "dns_cname",
+          "pattern": ".*\\.azurewebsites\\.net$",
+          "confidence": 0.9
+        },
+        {
+          "type": "dns_cname",
+          "pattern": ".*\\.blob\\.core\\.windows\\.net$",
+          "confidence": 0.95
+        },
+        {
+          "type": "header",
+          "name": "x-ms-request-id",
+          "value_pattern": ".*",
+          "confidence": 0.5,
+          "pattern": ".*"
+        },
+        {
+          "type": "tls_issuer",
+          "pattern": "Microsoft.*",
+          "confidence": 0.4
+        }
+      ],
+      "expected_ports": [
+        443,
+        80
+      ],
+      "related_products": [
+        "azure-entra-id",
+        "microsoft-365"
+      ]
+    },
+    {
+      "product_id": "gcp",
+      "vendor": "Google",
+      "product_name": "Google Cloud Platform",
+      "category": "infrastructure",
+      "signatures": [
+        {
+          "type": "dns_cname",
+          "pattern": ".*\\.googleapis\\.com$",
+          "confidence": 0.9
+        },
+        {
+          "type": "dns_cname",
+          "pattern": ".*\\.run\\.app$",
+          "confidence": 0.9
+        },
+        {
+          "type": "dns_cname",
+          "pattern": ".*\\.appspot\\.com$",
+          "confidence": 0.9
+        },
+        {
+          "type": "header",
+          "name": "server",
+          "value_pattern": "Google Frontend",
+          "confidence": 0.8,
+          "pattern": "Google Frontend"
+        },
+        {
+          "type": "header",
+          "name": "x-goog-generation",
+          "value_pattern": ".*",
+          "confidence": 0.9,
+          "pattern": ".*"
+        }
+      ],
+      "expected_ports": [
+        443,
+        80
+      ],
+      "related_products": []
+    },
+    {
+      "product_id": "cloudflare",
+      "vendor": "Cloudflare",
+      "product_name": "Cloudflare CDN/WAF",
+      "category": "infrastructure",
+      "signatures": [
+        {
+          "type": "header",
+          "name": "server",
+          "value_pattern": "cloudflare",
+          "confidence": 0.95,
+          "pattern": "cloudflare"
+        },
+        {
+          "type": "header",
+          "name": "cf-ray",
+          "value_pattern": ".*",
+          "confidence": 0.95,
+          "pattern": ".*"
+        },
+        {
+          "type": "header",
+          "name": "cf-cache-status",
+          "value_pattern": ".*",
+          "confidence": 0.9,
+          "pattern": ".*"
+        },
+        {
+          "type": "tls_issuer",
+          "pattern": "Cloudflare.*",
+          "confidence": 0.8
+        }
+      ],
+      "expected_ports": [
+        443,
+        80,
+        8443,
+        2053
+      ],
+      "related_products": []
+    },
+    {
+      "product_id": "atlassian-jira",
+      "vendor": "Atlassian",
+      "product_name": "Jira",
+      "category": "collaboration",
+      "signatures": [
+        {
+          "type": "url_path",
+          "pattern": "/rest/api/.*/issue/.*",
+          "confidence": 0.8
+        },
+        {
+          "type": "url_path",
+          "pattern": "/browse/[A-Z]+-\\d+",
+          "confidence": 0.75
+        },
+        {
+          "type": "header",
+          "name": "x-aaccountid",
+          "value_pattern": ".*",
+          "confidence": 0.7,
+          "pattern": ".*"
+        },
+        {
+          "type": "dns_cname",
+          "pattern": ".*\\.atlassian\\.net$",
+          "confidence": 0.9
+        },
+        {
+          "type": "favicon_hash",
+          "pattern": "sha256:a7f3b3505b0014e0c1d5a4e605a91a89b0c3b2e4d8f6a0c3e5b7d9a1c3e5f7a9",
+          "confidence": 0.85
+        }
+      ],
+      "expected_ports": [
+        443
+      ],
+      "related_products": [
+        "atlassian-confluence"
+      ]
+    },
+    {
+      "product_id": "atlassian-confluence",
+      "vendor": "Atlassian",
+      "product_name": "Confluence",
+      "category": "collaboration",
+      "signatures": [
+        {
+          "type": "url_path",
+          "pattern": "/wiki/spaces/.*",
+          "confidence": 0.8
+        },
+        {
+          "type": "url_path",
+          "pattern": "/rest/api/content.*",
+          "confidence": 0.7
+        },
+        {
+          "type": "header",
+          "name": "x-confluence-request-time",
+          "value_pattern": ".*",
+          "confidence": 0.9,
+          "pattern": ".*"
+        },
+        {
+          "type": "dns_cname",
+          "pattern": ".*\\.atlassian\\.net$",
+          "confidence": 0.7
+        }
+      ],
+      "expected_ports": [
+        443
+      ],
+      "related_products": [
+        "atlassian-jira"
+      ]
+    },
+    {
+      "product_id": "slack",
+      "vendor": "Slack",
+      "product_name": "Slack",
+      "category": "collaboration",
+      "signatures": [
+        {
+          "type": "dns_cname",
+          "pattern": ".*\\.slack\\.com$",
+          "confidence": 0.9
+        },
+        {
+          "type": "url_path",
+          "pattern": "/api/chat\\.postMessage.*",
+          "confidence": 0.85
+        },
+        {
+          "type": "header",
+          "name": "x-slack-req-id",
+          "value_pattern": ".*",
+          "confidence": 0.95,
+          "pattern": ".*"
+        },
+        {
+          "type": "tls_san",
+          "pattern": ".*\\.slack\\.com$",
+          "confidence": 0.9
+        }
+      ],
+      "expected_ports": [
+        443
+      ],
+      "related_products": []
+    },
+    {
+      "product_id": "microsoft-365",
+      "vendor": "Microsoft",
+      "product_name": "Microsoft 365",
+      "category": "collaboration",
+      "signatures": [
+        {
+          "type": "dns_cname",
+          "pattern": ".*\\.outlook\\.com$",
+          "confidence": 0.85
+        },
+        {
+          "type": "dns_cname",
+          "pattern": ".*\\.sharepoint\\.com$",
+          "confidence": 0.9
+        },
+        {
+          "type": "dns_cname",
+          "pattern": ".*\\.office\\.com$",
+          "confidence": 0.85
+        },
+        {
+          "type": "tls_san",
+          "pattern": ".*\\.office365\\.com$",
+          "confidence": 0.9
+        },
+        {
+          "type": "header",
+          "name": "x-ms-ags-diagnostic",
+          "value_pattern": ".*",
+          "confidence": 0.7,
+          "pattern": ".*"
+        }
+      ],
+      "expected_ports": [
+        443,
+        587,
+        993
+      ],
+      "related_products": [
+        "azure-entra-id",
+        "azure"
+      ]
+    },
+    {
+      "product_id": "gitlab",
+      "vendor": "GitLab",
+      "product_name": "GitLab",
+      "category": "devops",
+      "signatures": [
+        {
+          "type": "url_path",
+          "pattern": "/api/v4/projects.*",
+          "confidence": 0.8
+        },
+        {
+          "type": "url_path",
+          "pattern": "/-/ide/.*",
+          "confidence": 0.85
+        },
+        {
+          "type": "header",
+          "name": "x-gitlab-meta",
+          "value_pattern": ".*",
+          "confidence": 0.95,
+          "pattern": ".*"
+        },
+        {
+          "type": "dns_cname",
+          "pattern": ".*\\.gitlab\\.com$",
+          "confidence": 0.9
+        }
+      ],
+      "expected_ports": [
+        443,
+        22
+      ],
+      "related_products": []
+    },
+    {
+      "product_id": "jenkins",
+      "vendor": "Jenkins",
+      "product_name": "Jenkins CI",
+      "category": "devops",
+      "signatures": [
+        {
+          "type": "header",
+          "name": "x-jenkins",
+          "value_pattern": ".*",
+          "confidence": 0.95,
+          "pattern": ".*"
+        },
+        {
+          "type": "header",
+          "name": "x-jenkins-session",
+          "value_pattern": ".*",
+          "confidence": 0.9,
+          "pattern": ".*"
+        },
+        {
+          "type": "url_path",
+          "pattern": "/job/.*/build$",
+          "confidence": 0.8
+        },
+        {
+          "type": "url_path",
+          "pattern": "/api/json\\?.*",
+          "confidence": 0.6
+        }
+      ],
+      "expected_ports": [
+        443,
+        8080
+      ],
+      "related_products": []
+    },
+    {
+      "product_id": "argocd",
+      "vendor": "Argo",
+      "product_name": "Argo CD",
+      "category": "devops",
+      "signatures": [
+        {
+          "type": "url_path",
+          "pattern": "/api/v1/applications.*",
+          "confidence": 0.7
+        },
+        {
+          "type": "url_path",
+          "pattern": "/applications\\?.*",
+          "confidence": 0.6
+        },
+        {
+          "type": "header",
+          "name": "x-argocd-version",
+          "value_pattern": ".*",
+          "confidence": 0.95,
+          "pattern": ".*"
+        },
+        {
+          "type": "header",
+          "name": "grpc-metadata-argocd-session",
+          "value_pattern": ".*",
+          "confidence": 0.9,
+          "pattern": ".*"
+        }
+      ],
+      "expected_ports": [
+        443,
+        8080
+      ],
+      "related_products": []
+    }
+  ]
+}

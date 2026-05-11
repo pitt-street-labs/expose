@@ -27,6 +27,7 @@ from uuid import UUID
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from nats.errors import TimeoutError as NatsTimeoutError
 
 from expose.api.tenant_config import _configs
 from expose.api.tenant_config import router as tenant_config_router
@@ -130,7 +131,7 @@ async def test_nats_dispatcher_timeout() -> None:
     """Dispatch to a subject with no worker, verify timeout error result."""
 
     async def _raise_timeout(*args: Any, **kwargs: Any) -> None:
-        raise TimeoutError("NATS request timeout")
+        raise NatsTimeoutError("NATS request timeout")
 
     raw_nats = AsyncMock()
     raw_nats.request = _raise_timeout

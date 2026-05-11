@@ -2,10 +2,32 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class TiebreakerPolicy(StrEnum):
+    """Determines which result wins when both primary and tiebreaker produce output."""
+
+    PRIMARY_WINS = "primary_wins"
+    CONSERVATIVE = "conservative"
+    HIGHER_CONFIDENCE = "higher_confidence"
+    ESCALATE = "escalate"
+
+
+class TiebreakerResolution(BaseModel):
+    """Audit record of how the tiebreaker policy resolved a dual-result scenario."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    policy: TiebreakerPolicy
+    primary_used: bool
+    tiebreaker_used: bool
+    reason: str
+    disagreement_detected: bool = False
 
 
 class LLMRequest(BaseModel):
@@ -59,6 +81,8 @@ class EnrichmentResult(BaseModel):
     retries_used: int = 0
     cost_usd: float = 0.0
     tiebreaker_used: bool = False
+    needs_review: bool = False
+    tiebreaker_resolution: TiebreakerResolution | None = None
 
 
 class CostCeilingExceededError(Exception):
@@ -93,4 +117,6 @@ __all__ = [
     "LLMHealthCheck",
     "LLMRequest",
     "LLMResponse",
+    "TiebreakerPolicy",
+    "TiebreakerResolution",
 ]

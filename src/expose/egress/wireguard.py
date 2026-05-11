@@ -64,6 +64,17 @@ class WireguardEgressProfile(EgressProfile):
 
     profile_type: EgressProfileType = EgressProfileType.WIREGUARD
 
+    @property
+    def is_anonymizing(self) -> bool:
+        """WireGuard tunnels are operator-controlled, not anonymizing.
+
+        WG tunnels route traffic through infrastructure the operator owns
+        or controls — they change the exit IP but do not anonymize in the
+        Tor/public-proxy sense. Operators who need anonymizing WG egress
+        should subclass and override.
+        """
+        return False
+
     def __init__(
         self, interface_name: str = "wg0", source_address: str | None = None
     ) -> None:

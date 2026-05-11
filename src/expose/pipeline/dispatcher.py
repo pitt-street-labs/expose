@@ -104,6 +104,7 @@ class DispatchResult(BaseModel):
     collector_health: CollectorHealthCheck | None = None
     error_message: str | None = None
     duration_ms: float = 0.0
+    egress_anonymized: bool = False
 
 
 # === Dispatcher =============================================================
@@ -315,11 +316,17 @@ class PipelineDispatcher:
                 duration_ms=_elapsed_ms(start_ns),
             )
 
+        egress_anon = (
+            self._egress_profile.is_anonymizing
+            if self._egress_profile is not None
+            else False
+        )
         return DispatchResult(
             status=DispatchStatus.SUCCESS,
             observations=observations,
             collector_health=health,
             duration_ms=_elapsed_ms(start_ns),
+            egress_anonymized=egress_anon,
         )
 
 

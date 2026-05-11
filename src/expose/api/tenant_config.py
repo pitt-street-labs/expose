@@ -20,6 +20,8 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict
 
+from expose.pipeline.scheduler import CronExpression
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -103,6 +105,11 @@ class TenantConfigUpdate(BaseModel):
 
 _configs: dict[UUID, dict[str, object]] = {}
 
+logger.warning(
+    "Tenant configuration is stored in-memory only (Phase 1). "
+    "Configuration will be lost on process restart."
+)
+
 
 def _default_config(tenant_id: UUID) -> dict[str, object]:
     """Return sensible defaults for a tenant that has no stored config."""
@@ -150,6 +157,17 @@ def _validate_egress_profile(profile: str) -> None:
         )
 
 
+def _validate_schedule_cron(expression: str) -> None:
+    """Raise ``HTTPException(422)`` if the cron expression is invalid."""
+    try:
+        CronExpression(expression)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid cron expression: {exc}",
+        ) from exc
+
+
 # ---------------------------------------------------------------------------
 # Router
 # ---------------------------------------------------------------------------
@@ -192,6 +210,7 @@ async def replace_tenant_config(
     if body.enabled_collectors is not None:
         new_cfg["enabled_collectors"] = body.enabled_collectors
     if body.schedule_cron is not None:
+        _validate_schedule_cron(body.schedule_cron)
         new_cfg["schedule_cron"] = body.schedule_cron
     if body.egress_profile is not None:
         _validate_egress_profile(body.egress_profile)
@@ -242,6 +261,7 @@ async def patch_tenant_config(
     if body.enabled_collectors is not None:
         merged["enabled_collectors"] = body.enabled_collectors
     if body.schedule_cron is not None:
+        _validate_schedule_cron(body.schedule_cron)
         merged["schedule_cron"] = body.schedule_cron
     if body.egress_profile is not None:
         _validate_egress_profile(body.egress_profile)

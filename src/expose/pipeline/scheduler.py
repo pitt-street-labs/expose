@@ -281,6 +281,10 @@ class CronExpression:
 # === Schedule entry model =====================================================
 
 
+_MAX_CONSECUTIVE_FAILURES = 5
+"""Auto-disable a schedule after this many consecutive callback failures."""
+
+
 class ScheduleEntry(BaseModel):
     """Immutable record of a tenant's run schedule."""
 
@@ -291,8 +295,11 @@ class ScheduleEntry(BaseModel):
     collector_ids: list[str] = Field(default_factory=list)
     seeds: list[dict] = Field(default_factory=list)
     last_run_at: datetime | None = None
+    last_attempted_at: datetime | None = None
     next_run_at: datetime | None = None
     enabled: bool = True
+    consecutive_failures: int = 0
+    last_error: str | None = None
 
 
 # === Run scheduler ============================================================
@@ -412,13 +419,17 @@ class RunScheduler:
 
                 # Fire the trigger.
                 logger.info("Triggering run for tenant %s", tenant_id)
+                trigger_failed = False
+                trigger_error_msg: str | None = None
                 try:
                     await self._on_run_trigger(
                         tenant_id,
                         list(entry.collector_ids),
                         list(entry.seeds),
                     )
-                except Exception:
+                except Exception as exc:
+                    trigger_failed = True
+                    trigger_error_msg = str(exc)
                     logger.exception(
                         "Run trigger failed for tenant %s", tenant_id
                     )
@@ -428,12 +439,34 @@ class RunScheduler:
                 cron = self._get_cron(entry.cron_expression)
                 next_run = cron.next_occurrence(now)
 
-                self._schedules[tenant_id] = entry.model_copy(
-                    update={
-                        "last_run_at": now,
+                if trigger_failed:
+                    new_failures = entry.consecutive_failures + 1
+                    update: dict[str, object] = {
+                        "last_attempted_at": now,
                         "next_run_at": next_run,
-                    },
-                )
+                        "consecutive_failures": new_failures,
+                        "last_error": trigger_error_msg,
+                    }
+
+                    if new_failures >= _MAX_CONSECUTIVE_FAILURES:
+                        update["enabled"] = False
+                        logger.error(
+                            "Schedule auto-disabled for tenant %s after %d "
+                            "consecutive failures (last error: %s)",
+                            tenant_id,
+                            new_failures,
+                            trigger_error_msg,
+                        )
+                else:
+                    update = {
+                        "last_run_at": now,
+                        "last_attempted_at": now,
+                        "next_run_at": next_run,
+                        "consecutive_failures": 0,
+                        "last_error": None,
+                    }
+
+                self._schedules[tenant_id] = entry.model_copy(update=update)
 
             # Wait for the check interval or shutdown, whichever comes first.
             with contextlib.suppress(TimeoutError):

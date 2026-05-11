@@ -28,6 +28,11 @@ class DirectEgressProfile(EgressProfile):
 
     profile_type: EgressProfileType = EgressProfileType.DIRECT
 
+    @property
+    def is_anonymizing(self) -> bool:
+        """Direct egress is never anonymizing — traffic exits from the operator's IP."""
+        return False
+
     def configure_httpx_client(self, **kwargs: Any) -> dict[str, Any]:
         """Return empty dict — no proxy configuration needed."""
         return {}

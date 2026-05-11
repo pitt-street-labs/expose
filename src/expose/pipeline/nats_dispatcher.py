@@ -42,12 +42,23 @@ Design constraints:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
+import traceback
 from datetime import UTC, datetime
 from typing import Any
 
 from nats.aio.msg import Msg
+from nats.errors import (
+    ConnectionClosedError as NatsConnectionClosedError,
+)
+from nats.errors import (
+    NoServersError as NatsNoServersError,
+)
+from nats.errors import (
+    TimeoutError as NatsTimeoutError,
+)
 from pydantic import BaseModel, ConfigDict, Field
 
 from expose.broker.nats_client import NatsBrokerClient
@@ -186,19 +197,47 @@ class NatsDispatcher:
                 job_message.to_bytes(),
                 timeout=self._timeout_seconds,
             )
-        except Exception as exc:
-            # nats.errors.TimeoutError or any connection-level error.
+        except asyncio.CancelledError:
+            # Shutdown signal — let it propagate so the caller can clean up.
+            raise
+        except NatsTimeoutError:
             elapsed_ms = (time.monotonic_ns() - start_ns) / 1_000_000
-            error_msg = "timeout" if "timeout" in type(exc).__name__.lower() else str(exc)
-            logger.warning(
-                "NATS dispatch failed for collector=%s tenant=%s: %s",
+            logger.error(
+                "NATS dispatch timed out for collector=%s tenant=%s after %.0fms",
                 job.collector_id,
                 job.tenant_id,
-                error_msg,
+                elapsed_ms,
             )
             return DispatchResult(
                 status="collector_error",
-                error_message=error_msg,
+                error_message="timeout",
+                duration_ms=elapsed_ms,
+            )
+        except (NatsConnectionClosedError, NatsNoServersError, ConnectionError, OSError) as exc:
+            elapsed_ms = (time.monotonic_ns() - start_ns) / 1_000_000
+            logger.error(
+                "NATS connection error for collector=%s tenant=%s: %s",
+                job.collector_id,
+                job.tenant_id,
+                exc,
+            )
+            return DispatchResult(
+                status="collector_error",
+                error_message=str(exc),
+                duration_ms=elapsed_ms,
+            )
+        except Exception as exc:
+            elapsed_ms = (time.monotonic_ns() - start_ns) / 1_000_000
+            logger.error(
+                "Unexpected NATS dispatch error for collector=%s tenant=%s: %s\n%s",
+                job.collector_id,
+                job.tenant_id,
+                exc,
+                traceback.format_exc(),
+            )
+            return DispatchResult(
+                status="collector_error",
+                error_message=str(exc),
                 duration_ms=elapsed_ms,
             )
 
@@ -220,21 +259,38 @@ class NatsDispatcher:
 
         # Reconstruct Observation models from the wire dicts.
         observations: list[Observation] = []
+        dropped_count = 0
         for obs_dict in wire_result.observations:
             try:
                 observations.append(Observation.model_validate(obs_dict))
             except Exception as exc:
-                logger.warning(
-                    "Skipping malformed observation in dispatch result: %s",
+                dropped_count += 1
+                logger.error(
+                    "Dropped malformed observation in dispatch result "
+                    "(collector=%s, tenant=%s): %s",
+                    job.collector_id,
+                    job.tenant_id,
                     exc,
                 )
 
         elapsed_ms = (time.monotonic_ns() - start_ns) / 1_000_000
 
+        # If the worker reported success but ALL observations were dropped,
+        # downgrade to "partial" so callers know the result is incomplete.
+        status = wire_result.status
+        error_message = wire_result.error_message
+        if dropped_count > 0:
+            drop_msg = f"dropped {dropped_count} malformed observation(s)"
+            if dropped_count == len(wire_result.observations) and status == "success":
+                status = "partial"
+            error_message = (
+                f"{error_message}; {drop_msg}" if error_message else drop_msg
+            )
+
         return DispatchResult(
-            status=wire_result.status,
+            status=status,
             observations=observations,
-            error_message=wire_result.error_message,
+            error_message=error_message,
             duration_ms=elapsed_ms,
         )
 
