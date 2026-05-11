@@ -192,6 +192,12 @@ async def _run_pipeline_background(
 
                 log_sink = make_log_sink(run_id)
 
+                # --- Wire credential resolver from secrets backend ---
+                from expose.pipeline.credential_resolver import CredentialResolver  # noqa: PLC0415
+                from expose.api.credentials import _backend as secrets_backend  # noqa: PLC0415
+
+                credential_resolver = CredentialResolver(secrets_backend)
+
                 dispatcher = PipelineDispatcher(
                     registry=DEFAULT_REGISTRY,
                     tenant_scope=scope,
@@ -199,6 +205,7 @@ async def _run_pipeline_background(
                     egress_profile=DirectEgressProfile(),
                     egress_fallbacks=egress_fallbacks,
                     log_sink=log_sink,
+                    credential_resolver=credential_resolver,
                 )
 
                 # --- Stage 4b: LLM enrichment pipeline (opt-in per tenant) ---

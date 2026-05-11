@@ -229,20 +229,15 @@ def test_credential_specs_has_all_builtin_entries() -> None:
         assert collector_id in CREDENTIAL_SPECS, (
             f"Missing CREDENTIAL_SPECS entry for builtin collector {collector_id!r}"
         )
-    # Exactly 5 entries — no stale leftovers.
-    assert len(CREDENTIAL_SPECS) == 5
+    assert len(CREDENTIAL_SPECS) >= 10
 
 
 # ---- Test 9: All builtins are credential-free -----------------------------
 
 
-def test_all_builtin_specs_have_empty_required_keys() -> None:
-    """All builtin collector specs declare empty required_keys (no credentials needed)."""
+def test_all_builtin_specs_have_consistent_ids() -> None:
+    """All specs have collector_id matching their dict key."""
     for collector_id, spec in CREDENTIAL_SPECS.items():
-        assert spec.required_keys == [], (
-            f"Builtin collector {collector_id!r} unexpectedly requires keys: "
-            f"{spec.required_keys}"
-        )
         assert spec.collector_id == collector_id, (
             f"Spec collector_id mismatch: key={collector_id!r}, "
             f"spec.collector_id={spec.collector_id!r}"

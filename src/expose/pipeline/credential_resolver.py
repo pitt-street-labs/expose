@@ -42,12 +42,18 @@ class CollectorCredentialSpec(BaseModel):
     dispatch time. Collectors with ``required_keys == []`` (e.g., Tier-1
     passive collectors like ``ct-crtsh``) need no credentials and will
     always receive an empty credentials dict.
+
+    ``key_mapping`` overrides the default backend key derivation
+    (``collector.{collector_id}.{key}``) for keys that are stored under
+    a different path (e.g., shared across collectors or using the
+    ``unmapped.*`` convention from SpiderFoot imports).
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     collector_id: str = Field(min_length=1)
     required_keys: list[str] = Field(default_factory=list)
+    key_mapping: dict[str, str] = Field(default_factory=dict)
 
 
 class CredentialResolutionError(Exception):
@@ -74,6 +80,14 @@ CREDENTIAL_SPECS: dict[str, CollectorCredentialSpec] = {
         collector_id="ct-crtsh",
         required_keys=[],
     ),
+    "ct-censys": CollectorCredentialSpec(
+        collector_id="ct-censys",
+        required_keys=["censys_api_id", "censys_api_secret"],
+        key_mapping={
+            "censys_api_id": "collector.scan-censys.api_id",
+            "censys_api_secret": "collector.scan-censys.api_secret",
+        },
+    ),
     "cloud-ranges": CollectorCredentialSpec(
         collector_id="cloud-ranges",
         required_keys=[],
@@ -90,15 +104,48 @@ CREDENTIAL_SPECS: dict[str, CollectorCredentialSpec] = {
         collector_id="active-http-fingerprint",
         required_keys=[],
     ),
-    # Future Tier-2 collectors that need keys:
-    # "shodan": CollectorCredentialSpec(
-    #     collector_id="shodan",
-    #     required_keys=["api_key"],
-    # ),
-    # "securitytrails": CollectorCredentialSpec(
-    #     collector_id="securitytrails",
-    #     required_keys=["api_key"],
-    # ),
+    "shodan-iwide": CollectorCredentialSpec(
+        collector_id="shodan-iwide",
+        required_keys=["api_key"],
+    ),
+    "scan-censys": CollectorCredentialSpec(
+        collector_id="scan-censys",
+        required_keys=["api_id", "api_secret"],
+    ),
+    "scan-binaryedge": CollectorCredentialSpec(
+        collector_id="scan-binaryedge",
+        required_keys=["api_key"],
+    ),
+    "pdns-securitytrails": CollectorCredentialSpec(
+        collector_id="pdns-securitytrails",
+        required_keys=["api_key"],
+    ),
+    "dns-passive-history": CollectorCredentialSpec(
+        collector_id="dns-passive-history",
+        required_keys=["securitytrails_api_key", "virustotal_api_key"],
+        key_mapping={
+            "securitytrails_api_key": "collector.pdns-securitytrails.api_key",
+            "virustotal_api_key": "unmapped.sfp_virustotal.api_key",
+        },
+    ),
+    "github-exposed": CollectorCredentialSpec(
+        collector_id="github-exposed",
+        required_keys=["token"],
+    ),
+    "git-commit-emails": CollectorCredentialSpec(
+        collector_id="git-commit-emails",
+        required_keys=["token"],
+        key_mapping={"token": "collector.github-exposed.token"},
+    ),
+    "paste-monitor": CollectorCredentialSpec(
+        collector_id="paste-monitor",
+        required_keys=["api_key"],
+        key_mapping={"api_key": "collector.github-exposed.token"},
+    ),
+    "dns-chaos": CollectorCredentialSpec(
+        collector_id="dns-chaos",
+        required_keys=[],
+    ),
 }
 
 
@@ -138,7 +185,7 @@ class CredentialResolver:
         missing: list[str] = []
 
         for key in spec.required_keys:
-            backend_key = f"collector.{collector_id}.{key}"
+            backend_key = spec.key_mapping.get(key, f"collector.{collector_id}.{key}")
             try:
                 value = await self._backend.get(tenant_id=tenant_id, key=backend_key)
                 credentials[key] = CollectorCredential(name=key, secret_value=value)
