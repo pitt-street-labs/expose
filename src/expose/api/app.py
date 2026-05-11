@@ -52,6 +52,7 @@ from expose.api.webhooks import router as webhooks_router
 from expose.api.soc import router as soc_router
 from expose.api.reports import router as reports_router
 from expose.api.timeline import router as timeline_router
+from expose.api.identity import router as identity_router
 from expose.db.engine import (
     DatabaseSettings,
     create_async_engine_from_settings,
@@ -355,6 +356,7 @@ def create_app(
     app.include_router(soc_router)
     app.include_router(reports_router)
     app.include_router(timeline_router)
+    app.include_router(identity_router)
 
     app.include_router(ui_router)
 

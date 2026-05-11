@@ -18,6 +18,7 @@ from expose.crypto.fips_adapter import compute_sha256_hex
 from expose.crypto.signing import (
     ArtifactSignature,
     ArtifactSigner,
+    SecureBytes,
     SignatureResult,
     SigningKeyPair,
     SLSAProvenance,
@@ -42,7 +43,7 @@ class TestEd25519KeyGeneration:
     def test_generate_ed25519_key_pair(self) -> None:
         signer, key_info = ArtifactSigner.generate_key_pair(algorithm="ed25519")
         assert key_info.algorithm == "ed25519"
-        assert len(key_info.key_id) >= 1
+        assert len(key_info.key_id) == 32  # 128-bit NIST minimum (#158)
         assert "BEGIN PUBLIC KEY" in key_info.public_key_pem
         assert key_info.created_at is not None
         assert signer is not None
@@ -118,7 +119,7 @@ class TestEcdsaP256:
     def test_generate_ecdsa_p256_key_pair(self) -> None:
         signer, key_info = ArtifactSigner.generate_key_pair(algorithm="ecdsa-p256")
         assert key_info.algorithm == "ecdsa-p256"
-        assert len(key_info.key_id) >= 1
+        assert len(key_info.key_id) == 32  # 128-bit NIST minimum (#158)
         assert "BEGIN PUBLIC KEY" in key_info.public_key_pem
         assert signer is not None
 
@@ -434,7 +435,7 @@ class TestSignArtifactConvenience:
 
         assert isinstance(result, SignatureResult)
         assert result.algorithm == "ed25519"
-        assert len(result.key_id) >= 1
+        assert len(result.key_id) == 32  # 128-bit NIST minimum (#158)
         assert len(result.signature_b64) > 0
         assert result.signed_at is not None
         assert len(result.content_hash) == 64  # SHA-256 hex
@@ -557,3 +558,150 @@ class TestSignatureResultModel:
                 signed_at=_now(),
                 content_hash="a" * 64,
             )
+
+
+# ---------------------------------------------------------------------------
+# Key ID length — 128-bit NIST minimum (Issue #158)
+# ---------------------------------------------------------------------------
+
+
+class TestKeyIdLength:
+    """Verify key IDs are 32 hex chars (128 bits) per NIST guidance."""
+
+    def test_ed25519_key_id_is_32_hex_chars(self) -> None:
+        _signer, key_info = ArtifactSigner.generate_key_pair("ed25519")
+        assert len(key_info.key_id) == 32
+        # Must be valid lowercase hex
+        int(key_info.key_id, 16)
+
+    def test_ecdsa_key_id_is_32_hex_chars(self) -> None:
+        _signer, key_info = ArtifactSigner.generate_key_pair("ecdsa-p256")
+        assert len(key_info.key_id) == 32
+        int(key_info.key_id, 16)
+
+    def test_key_id_is_lowercase_hex(self) -> None:
+        """Key IDs must be lowercase hex to match SHA-256 hex convention."""
+        _signer, key_info = ArtifactSigner.generate_key_pair("ed25519")
+        assert key_info.key_id == key_info.key_id.lower()
+
+    def test_key_id_matches_between_signer_and_key_info(self) -> None:
+        """The signer's internal key ID must match the published key_info."""
+        signer, key_info = ArtifactSigner.generate_key_pair("ed25519")
+        artifact = b"key-id-match-test"
+        sig = signer.sign(artifact)
+        assert sig.key_id == key_info.key_id
+        assert len(sig.key_id) == 32
+
+    def test_sign_artifact_convenience_key_id_length(self) -> None:
+        """sign_artifact() convenience function also produces 32-char key IDs."""
+        signer, _key_info = ArtifactSigner.generate_key_pair("ed25519")
+        result = sign_artifact(b"convenience key id test", signer)
+        assert len(result.key_id) == 32
+
+
+# ---------------------------------------------------------------------------
+# SecureBytes — zeroization and lifecycle (Issue #159)
+# ---------------------------------------------------------------------------
+
+
+class TestSecureBytes:
+    """Verify SecureBytes provides best-effort key material zeroization."""
+
+    def test_stores_data_correctly(self) -> None:
+        data = b"sensitive key material"
+        sb = SecureBytes(data)
+        assert sb.to_bytes() == data
+        assert not sb.is_zeroed
+
+    def test_zero_overwrites_buffer(self) -> None:
+        data = b"secret-key-bytes-1234567890abcdef"
+        sb = SecureBytes(data)
+        sb.zero()
+        assert sb.is_zeroed
+        assert sb.to_bytes() == b"\x00" * len(data)
+
+    def test_zero_is_idempotent(self) -> None:
+        sb = SecureBytes(b"idempotent test")
+        sb.zero()
+        sb.zero()  # should not raise
+        assert sb.is_zeroed
+
+    def test_context_manager_zeros_on_exit(self) -> None:
+        data = b"context-manager-key-material"
+        with SecureBytes(data) as sb:
+            assert sb.to_bytes() == data
+            assert not sb.is_zeroed
+        assert sb.is_zeroed
+        assert sb.to_bytes() == b"\x00" * len(data)
+
+    def test_context_manager_zeros_on_exception(self) -> None:
+        """Buffer is zeroed even if an exception occurs inside the with block."""
+        data = b"exception-path-key"
+        sb_ref = None
+        with pytest.raises(RuntimeError, match="deliberate"):
+            with SecureBytes(data) as sb:
+                sb_ref = sb
+                raise RuntimeError("deliberate")
+        assert sb_ref is not None
+        assert sb_ref.is_zeroed
+        assert sb_ref.to_bytes() == b"\x00" * len(data)
+
+    def test_del_zeros_buffer(self) -> None:
+        """__del__ should zero the buffer if not already zeroed."""
+        data = b"del-test-key-material"
+        sb = SecureBytes(data)
+        assert not sb.is_zeroed
+        sb.__del__()  # Explicit call to simulate GC
+        assert sb.is_zeroed
+        assert sb.to_bytes() == b"\x00" * len(data)
+
+    def test_del_skips_if_already_zeroed(self) -> None:
+        """__del__ should be a no-op if zero() was already called."""
+        sb = SecureBytes(b"already-zeroed")
+        sb.zero()
+        assert sb.is_zeroed
+        sb.__del__()  # Should not raise or change state
+        assert sb.is_zeroed
+
+    def test_to_bytes_warns_after_zeroing(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Accessing key material after zeroing should log a warning."""
+        sb = SecureBytes(b"warn-test")
+        sb.zero()
+
+        import logging
+        with caplog.at_level(logging.WARNING, logger="expose.crypto.signing"):
+            result = sb.to_bytes()
+
+        assert result == b"\x00" * len(b"warn-test")
+        assert "zeroization" in caplog.text
+
+    def test_len(self) -> None:
+        data = b"length-check"
+        sb = SecureBytes(data)
+        assert len(sb) == len(data)
+        sb.zero()
+        assert len(sb) == len(data)  # length preserved after zeroing
+
+    def test_repr_live(self) -> None:
+        sb = SecureBytes(b"repr-test")
+        r = repr(sb)
+        assert "live" in r
+        assert "9" in r  # len=9
+
+    def test_repr_zeroed(self) -> None:
+        sb = SecureBytes(b"repr-test")
+        sb.zero()
+        r = repr(sb)
+        assert "zeroed" in r
+
+    def test_accepts_bytearray_input(self) -> None:
+        data = bytearray(b"bytearray input")
+        sb = SecureBytes(data)
+        assert sb.to_bytes() == bytes(data)
+
+    def test_empty_data(self) -> None:
+        sb = SecureBytes(b"")
+        assert len(sb) == 0
+        sb.zero()
+        assert sb.is_zeroed
+        assert sb.to_bytes() == b""

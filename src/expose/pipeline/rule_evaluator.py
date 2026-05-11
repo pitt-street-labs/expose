@@ -17,7 +17,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Callable
 
 from expose.types.pipeline import EntityData, ScopeContext
 from expose.types.rulepack import (
@@ -384,29 +384,64 @@ _PREDICATE_EVALUATORS: dict[Predicate, Any] = {
 # =============================================================================
 
 
+def _eval_predicate_condition(
+    condition: PredicateCondition,
+    entity: EntityData,
+    scope: ScopeContext,
+) -> bool:
+    """Evaluate a leaf predicate condition against entity data."""
+    evaluator = _PREDICATE_EVALUATORS.get(condition.predicate)
+    if evaluator is None:
+        # This should not happen if validation passed at load time
+        raise ValueError(f"Unknown predicate: {condition.predicate}")
+    return evaluator(entity, condition.params, scope)
+
+
+def _eval_and_condition(
+    condition: AndCondition,
+    entity: EntityData,
+    scope: ScopeContext,
+) -> bool:
+    """Evaluate an AND condition — all sub-conditions must be true."""
+    return all(_evaluate_condition(c, entity, scope) for c in condition.all_of)
+
+
+def _eval_or_condition(
+    condition: OrCondition,
+    entity: EntityData,
+    scope: ScopeContext,
+) -> bool:
+    """Evaluate an OR condition — at least one sub-condition must be true."""
+    return any(_evaluate_condition(c, entity, scope) for c in condition.any_of)
+
+
+def _eval_not_condition(
+    condition: NotCondition,
+    entity: EntityData,
+    scope: ScopeContext,
+) -> bool:
+    """Evaluate a NOT condition — negate the sub-condition."""
+    return not _evaluate_condition(condition.not_, entity, scope)
+
+
+_CONDITION_DISPATCH: dict[type, Callable] = {
+    PredicateCondition: _eval_predicate_condition,
+    AndCondition: _eval_and_condition,
+    OrCondition: _eval_or_condition,
+    NotCondition: _eval_not_condition,
+}
+
+
 def _evaluate_condition(
     condition: Condition,
     entity: EntityData,
     scope: ScopeContext,
 ) -> bool:
     """Recursively evaluate a condition tree against entity data."""
-    if isinstance(condition, PredicateCondition):
-        evaluator = _PREDICATE_EVALUATORS.get(condition.predicate)
-        if evaluator is None:
-            # This should not happen if validation passed at load time
-            raise ValueError(f"Unknown predicate: {condition.predicate}")
-        return evaluator(entity, condition.params, scope)
-
-    if isinstance(condition, AndCondition):
-        return all(_evaluate_condition(c, entity, scope) for c in condition.all_of)
-
-    if isinstance(condition, OrCondition):
-        return any(_evaluate_condition(c, entity, scope) for c in condition.any_of)
-
-    if isinstance(condition, NotCondition):
-        return not _evaluate_condition(condition.not_, entity, scope)
-
-    raise TypeError(f"Unknown condition type: {type(condition)}")
+    handler = _CONDITION_DISPATCH.get(type(condition))
+    if handler is None:
+        raise TypeError(f"Unknown condition type: {type(condition)}")
+    return handler(condition, entity, scope)
 
 
 # =============================================================================

@@ -65,6 +65,20 @@ from expose.types.pipeline import (
     ProvenanceRuleApplication,
     ScopeContext,
 )
+from expose.types.collector_payloads import (
+    CookieIssue,
+    CorsMisconfig,
+    DnsPayload,
+    HttpPayload,
+    MxExchange,
+    PortScanPayload,
+    TlsPayload,
+    as_dns_payload,
+    as_http_payload,
+    as_port_scan_payload,
+    as_tls_payload,
+)
+from expose.types.observation_props import ObservationProps
 from expose.types.shared import EntityId, RunId, TenantId
 
 __all__ = [
@@ -116,4 +130,17 @@ __all__ = [
     "TechStack",
     "TenantId",
     "TierThresholds",
+    # -- Collector payload types (additive, #130) --
+    "CookieIssue",
+    "CorsMisconfig",
+    "DnsPayload",
+    "HttpPayload",
+    "MxExchange",
+    "ObservationProps",
+    "PortScanPayload",
+    "TlsPayload",
+    "as_dns_payload",
+    "as_http_payload",
+    "as_port_scan_payload",
+    "as_tls_payload",
 ]

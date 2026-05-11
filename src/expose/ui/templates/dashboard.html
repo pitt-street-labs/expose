@@ -601,7 +601,9 @@
                     <span :class="'attribution-badge attribution-' + (provenanceData?.attribution_status || '')"
                           x-text="provenanceData?.attribution_status"
                           style="font-size: 0.65rem;"></span>
-                    <span style="font-family: var(--font-mono); font-size: 0.85rem; font-weight: 600; color: var(--accent);"
+                    <!-- Color-coded confidence badge: green=confirmed, yellow=high, orange=medium, red=unattributed -->
+                    <span class="provenance-confidence-badge"
+                          :class="'provenance-confidence-' + (provenanceData?.attribution_status || 'unattributed')"
                           x-text="provenanceData ? (provenanceData.attribution_confidence * 100).toFixed(1) + '%' : '--'"></span>
                 </div>
             </div>

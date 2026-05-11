@@ -21,11 +21,30 @@ Key algorithms
 
 Neither algorithm requires ``hashlib`` or ``secrets``; key generation uses
 ``cryptography``'s own CSPRNG path.
+
+Key material lifecycle — accepted risk
+---------------------------------------
+Python's CPython runtime does not support deterministic zeroing of heap-
+allocated ``bytes`` / ``str`` objects.  The :class:`SecureBytes` wrapper in
+this module provides **best-effort** zeroization by storing key material in
+a mutable ``bytearray`` and overwriting it on ``__del__`` / context-manager
+exit.  This mitigates casual memory inspection but does NOT eliminate all
+copies:
+
+- The ``cryptography`` library's own internal OpenSSL buffers are outside
+  our control and may retain key material until the process exits.
+- CPython's memory allocator may leave freed pages mapped and un-zeroed.
+- The GC does not guarantee prompt ``__del__`` invocation.
+
+This is an **accepted risk** for the current threat model (server-side
+process, not a shared-memory environment).  For higher-assurance key
+protection, use an HSM / KMS backend (SPEC §10.1 Secrets Management).
 """
 
 from __future__ import annotations
 
 import base64
+import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -39,7 +58,84 @@ from expose.crypto.fips_adapter import compute_sha256_hex
 if TYPE_CHECKING:
     from cryptography.hazmat.primitives.asymmetric.types import PrivateKeyTypes
 
+logger = logging.getLogger(__name__)
+
 _SUPPORTED_ALGORITHMS = frozenset({"ed25519", "ecdsa-p256"})
+
+
+# ---------------------------------------------------------------------------
+# SecureBytes — best-effort key material zeroization
+# ---------------------------------------------------------------------------
+
+
+class SecureBytes:
+    """Best-effort secure wrapper for sensitive key material.
+
+    Stores data in a mutable ``bytearray`` so it can be explicitly zeroed,
+    unlike immutable ``bytes`` objects.  Provides both ``__del__`` (GC
+    cleanup) and context-manager (``with`` block) interfaces for
+    zeroization.
+
+    **Limitations (accepted risk):**
+
+    - CPython does not guarantee prompt ``__del__`` invocation.
+    - The ``cryptography`` library's internal OpenSSL buffers may retain
+      copies of key material beyond our control.
+    - The CPython allocator may leave freed memory pages un-zeroed.
+
+    For higher-assurance key protection, use an HSM / KMS backend.
+    """
+
+    def __init__(self, data: bytes | bytearray) -> None:
+        self._buf = bytearray(data)
+        self._zeroed = False
+
+    # -- Context manager ----------------------------------------------------
+
+    def __enter__(self) -> SecureBytes:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.zero()
+
+    # -- Access -------------------------------------------------------------
+
+    def to_bytes(self) -> bytes:
+        """Return an immutable snapshot of the key material.
+
+        Logs a warning if accessed after zeroization.
+        """
+        if self._zeroed:
+            logger.warning(
+                "SecureBytes.to_bytes() called after zeroization — "
+                "returned data is all-zeros and not valid key material"
+            )
+        return bytes(self._buf)
+
+    # -- Zeroization --------------------------------------------------------
+
+    def zero(self) -> None:
+        """Overwrite the internal buffer with zeros."""
+        for i in range(len(self._buf)):
+            self._buf[i] = 0
+        self._zeroed = True
+
+    @property
+    def is_zeroed(self) -> bool:
+        """Whether :meth:`zero` has been called."""
+        return self._zeroed
+
+    def __del__(self) -> None:
+        """Best-effort zeroization on garbage collection."""
+        if not self._zeroed:
+            self.zero()
+
+    def __len__(self) -> int:
+        return len(self._buf)
+
+    def __repr__(self) -> str:
+        state = "zeroed" if self._zeroed else "live"
+        return f"<SecureBytes len={len(self._buf)} {state}>"
 
 
 # ---------------------------------------------------------------------------
@@ -112,9 +208,17 @@ class ArtifactSigner:
             raise ValueError(msg)
 
         self._algorithm = algorithm
-        self._private_key: PrivateKeyTypes = serialization.load_pem_private_key(
-            private_key_pem, password=None,
-        )
+
+        # Wrap the PEM bytes in SecureBytes for best-effort zeroization.
+        # The PEM material is consumed during load and zeroed immediately
+        # afterward — only the parsed key object is retained.
+        secure_pem = SecureBytes(private_key_pem)
+        try:
+            self._private_key: PrivateKeyTypes = serialization.load_pem_private_key(
+                secure_pem.to_bytes(), password=None,
+            )
+        finally:
+            secure_pem.zero()
 
         # Validate that the loaded key matches the declared algorithm.
         if algorithm == "ed25519" and not isinstance(
@@ -129,11 +233,13 @@ class ArtifactSigner:
             raise ValueError(msg)
 
         # Derive the key ID from the SHA-256 fingerprint of the public key DER.
+        # Truncated to 32 hex chars (128 bits) per NIST identifier-uniqueness
+        # minimum (see security finding #158).
         pub_der = self._private_key.public_key().public_bytes(
             serialization.Encoding.DER,
             serialization.PublicFormat.SubjectPublicKeyInfo,
         )
-        self._key_id = compute_sha256_hex(pub_der)[:16]
+        self._key_id = compute_sha256_hex(pub_der)[:32]
 
     # -- Key generation -----------------------------------------------------
 
@@ -160,17 +266,25 @@ class ArtifactSigner:
         else:  # ecdsa-p256
             private_key = ec.generate_private_key(ec.SECP256R1())
 
-        private_pem = private_key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.PKCS8,
-            serialization.NoEncryption(),
+        # Wrap private PEM in SecureBytes and zero after the signer has
+        # consumed it (the signer's __init__ also wraps + zeros its copy).
+        secure_private_pem = SecureBytes(
+            private_key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            )
         )
         public_pem = private_key.public_key().public_bytes(
             serialization.Encoding.PEM,
             serialization.PublicFormat.SubjectPublicKeyInfo,
         )
 
-        signer = cls(private_pem, algorithm=algorithm)
+        try:
+            signer = cls(secure_private_pem.to_bytes(), algorithm=algorithm)
+        finally:
+            secure_private_pem.zero()
+
         key_info = SigningKeyPair(
             key_id=signer._key_id,
             algorithm=algorithm,
@@ -347,6 +461,7 @@ __all__ = [
     "ArtifactSignature",
     "ArtifactSigner",
     "SLSAProvenance",
+    "SecureBytes",
     "SignatureResult",
     "SigningKeyPair",
     "sign_artifact",

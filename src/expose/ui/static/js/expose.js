@@ -1830,6 +1830,70 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     /**
+     * Map an attribution status string to its confidence badge color.
+     * green=confirmed, yellow=high, orange=medium, red=unattributed.
+     *
+     * @param {string} status - Attribution status string
+     * @returns {string} CSS color value
+     */
+    function attributionBadgeColor(status) {
+        var colors = {
+            "confirmed":       "#22c55e",  /* green  */
+            "high":            "#eab308",  /* yellow */
+            "medium":          "#f97316",  /* orange */
+            "requires_review": "#f97316",  /* orange */
+            "unattributed":    "#ef4444",  /* red    */
+            "not_yours":       "#64748b",  /* gray   */
+        };
+        return colors[(status || "").toLowerCase()] || "#ef4444";
+    }
+
+    /**
+     * Create a "Show Provenance" button that triggers a provenance
+     * chain load for the given entity ID.
+     *
+     * @param {string} entityId - UUID of the entity
+     * @param {string} status - Attribution status string
+     * @returns {HTMLElement}
+     */
+    function createProvenanceButton(entityId, status) {
+        var wrapper = document.createElement("div");
+        wrapper.className = "entity-detail-provenance-action";
+
+        var btn = document.createElement("button");
+        btn.className = "btn btn-ghost entity-detail-provenance-btn";
+        btn.type = "button";
+        btn.textContent = "Show Provenance";
+
+        // Color-coded confidence indicator dot
+        var dot = document.createElement("span");
+        dot.className = "provenance-status-dot";
+        dot.style.background = attributionBadgeColor(status);
+        btn.insertBefore(dot, btn.firstChild);
+
+        btn.addEventListener("click", function (e) {
+            e.stopPropagation();
+            var appEl = document.querySelector("[x-data]");
+            if (appEl && appEl._x_dataStack) {
+                var appData = appEl._x_dataStack[0];
+                if (appData && typeof appData.loadProvenance === "function") {
+                    appData.loadProvenance(entityId);
+                    // Scroll to the provenance panel
+                    setTimeout(function () {
+                        var panel = document.querySelector(".provenance-panel");
+                        if (panel) {
+                            panel.scrollIntoView({ behavior: "smooth", block: "start" });
+                        }
+                    }, 150);
+                }
+            }
+        });
+
+        wrapper.appendChild(btn);
+        return wrapper;
+    }
+
+    /**
      * Create a single property row DOM element (label + value).
      * Uses textContent exclusively to prevent XSS.
      *
@@ -2022,6 +2086,12 @@ document.addEventListener("DOMContentLoaded", function () {
         detailCell.setAttribute("colspan", String(colCount));
         detailCell.className = "entity-detail-cell";
         detailCell.appendChild(buildDetailDOM(props));
+
+        // Add "Show Provenance" button with color-coded confidence dot
+        var attrStatus = row.getAttribute("data-search-text") || "";
+        var statusMatch = attrStatus.match(/(confirmed|high|medium|requires_review|unattributed|not_yours)/);
+        var resolvedStatus = statusMatch ? statusMatch[1] : "unattributed";
+        detailCell.appendChild(createProvenanceButton(entityId, resolvedStatus));
 
         detailRow.appendChild(detailCell);
         row.classList.add("entity-row-expanded");

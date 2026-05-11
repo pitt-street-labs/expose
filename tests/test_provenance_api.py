@@ -672,3 +672,166 @@ async def test_correlation_response_structure(client: AsyncClient) -> None:
         assert "source_entity" in ev
         assert "source_status" in ev
         assert "predicate" in ev
+
+
+# ---------------------------------------------------------------------------
+# 16. Provenance panel UI contract — entity header fields
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_provenance_panel_header_fields(client: AsyncClient) -> None:
+    """The provenance response must include the entity_identifier,
+    entity_type, attribution_status, and attribution_confidence fields
+    that the dashboard provenance panel header renders."""
+    resp = await client.get(
+        f"/v1/tenants/{TENANT_ID}/entities/{ENTITY_A_ID}/provenance"
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    # The panel header renders these four fields directly via Alpine x-text
+    assert data["entity_identifier"] == "example.com"
+    assert data["entity_type"] in (
+        "domain", "subdomain", "ip", "ip_address", "cidr", "url",
+        "cloud_resource_id", "certificate_fingerprint", "organization", "provider",
+    )
+    assert data["attribution_status"] in (
+        "confirmed", "high", "medium", "requires_review", "unattributed", "not_yours",
+    )
+    assert 0.0 <= data["attribution_confidence"] <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# 17. Provenance panel UI contract — observations list shape
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_provenance_panel_observations_shape(client: AsyncClient) -> None:
+    """Each observation must have collector_id, observed_at, and
+    observation_type fields that the timeline template iterates over."""
+    resp = await client.get(
+        f"/v1/tenants/{TENANT_ID}/entities/{ENTITY_A_ID}/provenance"
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert len(data["observations"]) >= 1
+    for obs in data["observations"]:
+        assert "collector_id" in obs
+        assert "observed_at" in obs
+        assert "observation_type" in obs
+
+
+# ---------------------------------------------------------------------------
+# 18. Provenance panel UI contract — rules_applied list shape
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_provenance_panel_rules_shape(client: AsyncClient) -> None:
+    """Each rule must have rule_id, outcome, and confidence_delta fields
+    that the rules-applied section renders."""
+    resp = await client.get(
+        f"/v1/tenants/{TENANT_ID}/entities/{ENTITY_A_ID}/provenance"
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert len(data["rules_applied"]) >= 1
+    for rule in data["rules_applied"]:
+        assert "rule_id" in rule
+        assert "outcome" in rule
+        assert "confidence_delta" in rule
+
+
+# ---------------------------------------------------------------------------
+# 19. Provenance panel UI contract — relationships list shape
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_provenance_panel_relationships_shape(client: AsyncClient) -> None:
+    """Each relationship must have edge_type, target_identifier, and
+    target_type fields that the relationships table renders."""
+    resp = await client.get(
+        f"/v1/tenants/{TENANT_ID}/entities/{ENTITY_A_ID}/provenance"
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert len(data["relationships"]) >= 1
+    for rel in data["relationships"]:
+        assert "edge_type" in rel
+        assert "target_identifier" in rel
+        assert "target_type" in rel
+
+
+# ---------------------------------------------------------------------------
+# 20. Provenance panel UI contract — correlation evidence dimensions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_provenance_panel_evidence_dimensions_valid(client: AsyncClient) -> None:
+    """Every evidence dimension must be in the closed 12-dimension vocabulary
+    that the pivot dimensions grid iterates over."""
+    valid_dimensions = {
+        "cert", "dns", "whois", "asn", "nameserver", "subdomain",
+        "cloud", "observation", "exposure", "naming", "explicit", "recency",
+    }
+
+    resp = await client.get(
+        f"/v1/tenants/{TENANT_ID}/entities/{ENTITY_A_ID}/provenance"
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    correlation = data["correlation"]
+    assert correlation is not None
+    for ev in correlation["evidence"]:
+        assert ev["dimension"] in valid_dimensions, (
+            f"Dimension {ev['dimension']!r} not in closed vocabulary"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 21. Provenance panel UI contract — confidence badge color mapping
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_provenance_confidence_badge_status_values(client: AsyncClient) -> None:
+    """The attribution_status must be one of the values the CSS maps to a
+    color-coded confidence badge (provenance-confidence-{status})."""
+    known_badge_statuses = {
+        "confirmed", "high", "medium", "requires_review",
+        "unattributed", "not_yours",
+    }
+
+    resp = await client.get(
+        f"/v1/tenants/{TENANT_ID}/entities/{ENTITY_A_ID}/provenance"
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["attribution_status"] in known_badge_statuses
+
+
+# ---------------------------------------------------------------------------
+# 22. Provenance fetch returns null for missing entity (UI null guard)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_provenance_404_returns_detail(client: AsyncClient) -> None:
+    """A 404 response includes a detail message that the UI can display.
+    The JS loadProvenance() sets provenanceData=null on non-200."""
+    resp = await client.get(
+        f"/v1/tenants/{TENANT_ID}/entities/{NONEXISTENT_ID}/provenance"
+    )
+    assert resp.status_code == 404
+    data = resp.json()
+    assert "detail" in data
+    assert isinstance(data["detail"], str)
+    assert len(data["detail"]) > 0
