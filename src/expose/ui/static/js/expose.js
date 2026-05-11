@@ -987,6 +987,47 @@ function exposeApp() {
         },
 
         /**
+         * Format a scan-log message with highlighted observation counts.
+         * HTML-escapes the message first (XSS safety), then wraps non-zero
+         * observation counts in a green-highlighted span.
+         * @param {string} msg - Raw log message string
+         * @returns {string} HTML-safe string with optional highlight markup
+         */
+        formatLogMsg(msg) {
+            if (!msg) return "";
+            // HTML-escape to prevent XSS
+            var escaped = msg
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#x27;");
+            // Highlight non-zero observation counts:
+            // Pattern: "completed: N observation(s)" where N > 0
+            return escaped.replace(
+                /completed: (\d+) observation/,
+                function (_match, n) {
+                    if (parseInt(n, 10) > 0) {
+                        return 'completed: <span style="color: var(--success); font-weight: 600;">' + n + '</span> observation';
+                    }
+                    return _match;
+                }
+            );
+        },
+
+        /**
+         * Check whether a log entry message reports observations found (count > 0).
+         * Used for conditional CSS class binding.
+         * @param {string} msg - Raw log message string
+         * @returns {boolean}
+         */
+        logHasObservations(msg) {
+            if (!msg) return false;
+            var m = msg.match(/completed: (\d+) observation/);
+            return m !== null && parseInt(m[1], 10) > 0;
+        },
+
+        /**
          * Format an ISO timestamp to HH:MM:SS for the scan log.
          * @param {string} ts - ISO 8601 timestamp string
          * @returns {string} Formatted time string

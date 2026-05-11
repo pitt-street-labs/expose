@@ -253,9 +253,9 @@
             <div class="scan-log-terminal" x-ref="scanLogTerminal">
                 <template x-for="(entry, idx) in scanLogEntries" :key="idx">
                     <div class="scan-log-entry"
-                         :class="'scan-log-' + entry.level">
+                         :class="['scan-log-' + entry.level, logHasObservations(entry.msg) ? 'scan-log-has-observations' : '']">
                         <span class="scan-log-ts" x-text="formatLogTs(entry.ts)"></span>
-                        <span class="scan-log-msg" x-text="entry.msg"></span>
+                        <span class="scan-log-msg" x-html="formatLogMsg(entry.msg)"></span>
                     </div>
                 </template>
                 <div x-show="scanLogEntries.length === 0"
@@ -633,6 +633,9 @@
 }
 .scan-log-error .scan-log-msg {
     color: var(--error);
+}
+.scan-log-has-observations .scan-log-msg {
+    color: var(--text-secondary);
 }
 @keyframes log-emerge {
     from { opacity: 0; transform: translateY(2px); }
