@@ -13,12 +13,13 @@ Phase 1 has no authentication gate; RBAC enforcement lands in Sprint 5+.
 
 from __future__ import annotations
 
+import difflib
 import logging
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -63,6 +64,24 @@ class BulkCredentialTestResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     results: list[CredentialTestResult]
+
+
+class OrgSuggestionItem(BaseModel):
+    """A single organization name suggestion."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str
+    source: str
+    score: float
+
+
+class OrgSuggestResponse(BaseModel):
+    """Response for organization name suggestions."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    suggestions: list[OrgSuggestionItem]
 
 
 # Terminal run states -- runs in these states cannot be cancelled.
@@ -232,9 +251,70 @@ async def bulk_test_credentials(tenant_id: UUID) -> BulkCredentialTestResponse:
     return BulkCredentialTestResponse(results=results)
 
 
+# ---------------------------------------------------------------------------
+# GET /org-suggest -- fuzzy organization name suggestions
+# ---------------------------------------------------------------------------
+
+
+@router.get("/org-suggest", response_model=OrgSuggestResponse)
+async def suggest_org(
+    q: str = Query(..., min_length=1, description="Organization name query"),
+    session: AsyncSession = Depends(get_session),
+) -> OrgSuggestResponse:
+    """Suggest organization names based on fuzzy matching.
+
+    Queries previously scanned entity properties for ``registrant_org``
+    values and uses ``difflib.get_close_matches()`` to find close matches
+    against the input query ``q``.
+
+    Returns up to 5 suggestions sorted by descending similarity score.
+    If no entities with ``registrant_org`` exist (e.g. first scan), returns
+    an empty suggestion list.
+    """
+    # 1. Collect all distinct registrant_org values from entity properties.
+    #    The registrant_org is stored inside the JSONB ``properties`` column.
+    result = await session.execute(select(Entity.properties))
+    all_props = result.scalars().all()
+
+    known_orgs: set[str] = set()
+    for props in all_props:
+        if isinstance(props, dict):
+            org = props.get("registrant_org")
+            if org and isinstance(org, str) and org.strip():
+                known_orgs.add(org.strip())
+
+    if not known_orgs:
+        return OrgSuggestResponse(suggestions=[])
+
+    # 2. Use difflib.get_close_matches for fuzzy matching.
+    #    cutoff=0.4 allows reasonably loose matches (e.g. typos).
+    org_list = sorted(known_orgs)
+    matches = difflib.get_close_matches(q, org_list, n=5, cutoff=0.4)
+
+    # 3. Compute similarity scores for each match.
+    suggestions: list[OrgSuggestionItem] = []
+    for match in matches:
+        ratio = difflib.SequenceMatcher(None, q.lower(), match.lower()).ratio()
+        suggestions.append(
+            OrgSuggestionItem(
+                name=match,
+                source="local_db",
+                score=round(ratio, 3),
+            )
+        )
+
+    # Sort by descending score (get_close_matches already does this, but
+    # our re-computed ratio may differ slightly from its internal scoring).
+    suggestions.sort(key=lambda s: s.score, reverse=True)
+
+    return OrgSuggestResponse(suggestions=suggestions)
+
+
 __all__ = [
     "BulkCredentialTestResponse",
     "CancelResponse",
+    "OrgSuggestResponse",
+    "OrgSuggestionItem",
     "SystemStats",
     "router",
 ]

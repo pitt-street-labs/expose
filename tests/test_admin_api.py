@@ -189,6 +189,7 @@ async def _seed_entity(
     tenant_id: UUID,
     entity_type: str = "Domain",
     canonical_identifier: str = "example.com",
+    properties: dict | None = None,
 ) -> UUID:
     """Insert an entity row and return its id."""
     eid = uuid4()
@@ -199,7 +200,7 @@ async def _seed_entity(
             tenant_id=tenant_id,
             entity_type=entity_type,
             canonical_identifier=canonical_identifier,
-            properties={},
+            properties=properties if properties is not None else {},
             attribution_status="confirmed",
             attribution_confidence=Decimal("0.950"),
             first_observed_at=now,
@@ -493,6 +494,138 @@ async def test_bulk_credential_test(
     # All should be "not_configured" since we haven't stored any creds
     statuses = {r["status"] for r in results}
     assert statuses == {"not_configured"}
+
+
+# === 9. Org suggest -- fuzzy matching ==========================================
+
+
+async def test_org_suggest_empty_db(
+    client: AsyncClient,
+) -> None:
+    """Org suggest returns empty suggestions when no entities exist."""
+    resp = await client.get("/v1/admin/org-suggest?q=CyberArk")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["suggestions"] == []
+
+
+async def test_org_suggest_missing_query(
+    client: AsyncClient,
+) -> None:
+    """Org suggest returns 422 when the query parameter is missing."""
+    resp = await client.get("/v1/admin/org-suggest")
+    assert resp.status_code == 422
+
+
+async def test_org_suggest_fuzzy_match(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Org suggest returns fuzzy matches from entity registrant_org properties."""
+    tid = await _seed_tenant(session_factory, "org-suggest-tenant")
+
+    # Seed entities with registrant_org properties
+    await _seed_entity(
+        session_factory,
+        tenant_id=tid,
+        canonical_identifier="cyberark.com",
+        properties={"registrant_org": "CyberArk Software Ltd"},
+    )
+    await _seed_entity(
+        session_factory,
+        tenant_id=tid,
+        canonical_identifier="paloalto.com",
+        properties={"registrant_org": "Palo Alto Networks Inc"},
+    )
+    await _seed_entity(
+        session_factory,
+        tenant_id=tid,
+        canonical_identifier="crowdstrike.com",
+        properties={"registrant_org": "CrowdStrike Holdings Inc"},
+    )
+
+    # Query with a typo -- "CyberAkr" should match "CyberArk Software Ltd"
+    resp = await client.get("/v1/admin/org-suggest?q=CyberAkr")
+    assert resp.status_code == 200
+    data = resp.json()
+    suggestions = data["suggestions"]
+    assert len(suggestions) >= 1
+    # The best match should be CyberArk
+    assert suggestions[0]["name"] == "CyberArk Software Ltd"
+    assert suggestions[0]["source"] == "local_db"
+    assert 0.0 < suggestions[0]["score"] <= 1.0
+
+
+async def test_org_suggest_exact_match_included(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Org suggest returns the exact match when query matches a known org."""
+    tid = await _seed_tenant(session_factory, "org-suggest-exact-tenant")
+
+    await _seed_entity(
+        session_factory,
+        tenant_id=tid,
+        canonical_identifier="acme.com",
+        properties={"registrant_org": "Acme Corp"},
+    )
+
+    resp = await client.get("/v1/admin/org-suggest?q=Acme%20Corp")
+    assert resp.status_code == 200
+    data = resp.json()
+    suggestions = data["suggestions"]
+    assert len(suggestions) >= 1
+    assert any(s["name"] == "Acme Corp" for s in suggestions)
+
+
+async def test_org_suggest_no_match(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Org suggest returns empty when query is too different from known orgs."""
+    tid = await _seed_tenant(session_factory, "org-suggest-nomatch-tenant")
+
+    await _seed_entity(
+        session_factory,
+        tenant_id=tid,
+        canonical_identifier="example.org",
+        properties={"registrant_org": "Example Holdings LLC"},
+    )
+
+    # Query that is completely unrelated
+    resp = await client.get("/v1/admin/org-suggest?q=ZZZZZZZZZZZ")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["suggestions"] == []
+
+
+async def test_org_suggest_deduplicates(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Org suggest deduplicates registrant_org values across entities."""
+    tid = await _seed_tenant(session_factory, "org-suggest-dedup-tenant")
+
+    # Two entities with the same registrant_org
+    await _seed_entity(
+        session_factory,
+        tenant_id=tid,
+        canonical_identifier="foo.example.com",
+        properties={"registrant_org": "Example Corp"},
+    )
+    await _seed_entity(
+        session_factory,
+        tenant_id=tid,
+        canonical_identifier="bar.example.com",
+        properties={"registrant_org": "Example Corp"},
+    )
+
+    resp = await client.get("/v1/admin/org-suggest?q=Example")
+    assert resp.status_code == 200
+    data = resp.json()
+    names = [s["name"] for s in data["suggestions"]]
+    # Should appear only once despite two entities having it
+    assert names.count("Example Corp") == 1
 
 
 async def test_bulk_credential_test_with_configured(

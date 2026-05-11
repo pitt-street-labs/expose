@@ -1289,6 +1289,8 @@ function scanForm() {
         scanning: false,
         statusMessage: "",
         estimateText: "",
+        orgSuggestions: [],
+        _orgSuggestTimer: null,
 
         /**
          * Compute and display a scan duration estimate.
@@ -1346,6 +1348,63 @@ function scanForm() {
                 // Silently ignore — estimate is best-effort
                 this.estimateText = "";
             }
+        },
+
+        /**
+         * Fetch organization name suggestions from the fuzzy-match API.
+         * Called on org input changes with a 500ms debounce.
+         * Populates orgSuggestions[] for display as clickable chips.
+         */
+        async fetchOrgSuggestions() {
+            var query = (this.orgName || "").trim();
+            if (query.length < 2) {
+                this.orgSuggestions = [];
+                return;
+            }
+
+            try {
+                var resp = await fetch(
+                    "/v1/admin/org-suggest?q=" + encodeURIComponent(query)
+                );
+                if (!resp.ok) {
+                    this.orgSuggestions = [];
+                    return;
+                }
+                var data = await resp.json();
+                // Filter out exact matches -- no point suggesting what they already typed
+                this.orgSuggestions = (data.suggestions || []).filter(function (s) {
+                    return s.name.toLowerCase() !== query.toLowerCase();
+                });
+            } catch (_e) {
+                this.orgSuggestions = [];
+            }
+        },
+
+        /**
+         * Handle org input changes with debounced suggestion fetch.
+         * Also triggers the existing updateEstimate() call.
+         */
+        onOrgInput() {
+            var self = this;
+            this.updateEstimate();
+            if (this._orgSuggestTimer) {
+                clearTimeout(this._orgSuggestTimer);
+            }
+            this._orgSuggestTimer = setTimeout(function () {
+                self.fetchOrgSuggestions();
+            }, 500);
+        },
+
+        /**
+         * Select an organization suggestion, replacing the input value.
+         * Clears the suggestion list after selection.
+         *
+         * @param {string} name - The suggested organization name
+         */
+        selectOrgSuggestion(name) {
+            this.orgName = name;
+            this.orgSuggestions = [];
+            this.updateEstimate();
         },
 
         /**

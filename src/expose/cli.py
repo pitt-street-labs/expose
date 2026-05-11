@@ -271,11 +271,19 @@ async def _execute_live_run(
                 explicit_entity_identifiers=seed_identifiers,
             )
 
+            # Wire credential resolver from the secrets backend so CLI
+            # runs pick up API keys stored via the credential import API.
+            from expose.api.credentials import _backend as secrets_backend  # noqa: PLC0415
+            from expose.pipeline.credential_resolver import CredentialResolver  # noqa: PLC0415
+
+            credential_resolver = CredentialResolver(secrets_backend)
+
             dispatcher = PipelineDispatcher(
                 registry=DEFAULT_REGISTRY,
                 tenant_scope=scope,
                 tenant_id=tenant_id,
                 egress_profile=DirectEgressProfile(),
+                credential_resolver=credential_resolver,
             )
 
             # PipelineDispatcher satisfies DispatcherProtocol at runtime (both

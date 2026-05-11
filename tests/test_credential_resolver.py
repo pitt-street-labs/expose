@@ -229,7 +229,7 @@ def test_credential_specs_has_all_builtin_entries() -> None:
         assert collector_id in CREDENTIAL_SPECS, (
             f"Missing CREDENTIAL_SPECS entry for builtin collector {collector_id!r}"
         )
-    assert len(CREDENTIAL_SPECS) >= 10
+    assert len(CREDENTIAL_SPECS) >= 15
 
 
 # ---- Test 9: All builtins are credential-free -----------------------------
@@ -340,7 +340,137 @@ async def test_resolver_does_not_cache(
         del CREDENTIAL_SPECS["test-nocache"]
 
 
-# ---- Tests 13-17: End-to-end credential chain for real collectors ----------
+# ---- Test 13: Optional keys resolved when present --------------------------
+
+
+async def test_resolve_optional_keys_when_present(
+    backend: InMemoryBackend,
+    resolver: CredentialResolver,
+) -> None:
+    """Optional keys are returned when the backend has them."""
+    CREDENTIAL_SPECS["test-optional"] = CollectorCredentialSpec(
+        collector_id="test-optional",
+        required_keys=[],
+        optional_keys=["api_key"],
+    )
+    try:
+        await backend.set(
+            tenant_id=TENANT_A,
+            key="collector.test-optional.api_key",
+            value="OPT_VALUE",
+        )
+        result = await resolver.resolve(TENANT_A, "test-optional")
+        assert len(result) == 1
+        assert "api_key" in result
+        assert result["api_key"].secret_value == "OPT_VALUE"  # noqa: S105
+    finally:
+        del CREDENTIAL_SPECS["test-optional"]
+
+
+# ---- Test 14: Optional keys missing do not raise ----------------------------
+
+
+async def test_resolve_optional_keys_missing_no_error(
+    resolver: CredentialResolver,
+) -> None:
+    """Missing optional keys do not raise CredentialResolutionError."""
+    CREDENTIAL_SPECS["test-opt-missing"] = CollectorCredentialSpec(
+        collector_id="test-opt-missing",
+        required_keys=[],
+        optional_keys=["api_key"],
+    )
+    try:
+        result = await resolver.resolve(TENANT_A, "test-opt-missing")
+        assert result == {}
+    finally:
+        del CREDENTIAL_SPECS["test-opt-missing"]
+
+
+# ---- Test 15: Mixed required + optional keys --------------------------------
+
+
+async def test_resolve_mixed_required_and_optional(
+    backend: InMemoryBackend,
+    resolver: CredentialResolver,
+) -> None:
+    """Required keys are enforced; optional keys are best-effort."""
+    CREDENTIAL_SPECS["test-mixed"] = CollectorCredentialSpec(
+        collector_id="test-mixed",
+        required_keys=["api_key"],
+        optional_keys=["webhook_secret"],
+    )
+    try:
+        # Store only the required key, not the optional one.
+        await backend.set(
+            tenant_id=TENANT_A,
+            key="collector.test-mixed.api_key",
+            value="REQUIRED_VALUE",
+        )
+        result = await resolver.resolve(TENANT_A, "test-mixed")
+        assert len(result) == 1
+        assert "api_key" in result
+        assert result["api_key"].secret_value == "REQUIRED_VALUE"  # noqa: S105
+        # Optional key is absent — no error, not in result.
+        assert "webhook_secret" not in result
+    finally:
+        del CREDENTIAL_SPECS["test-mixed"]
+
+
+# ---- Test 16: Missing required key still raises even when optional is present -
+
+
+async def test_resolve_missing_required_with_optional_present(
+    backend: InMemoryBackend,
+    resolver: CredentialResolver,
+) -> None:
+    """Missing required key raises even when optional keys are present."""
+    CREDENTIAL_SPECS["test-req-miss"] = CollectorCredentialSpec(
+        collector_id="test-req-miss",
+        required_keys=["api_key"],
+        optional_keys=["webhook_secret"],
+    )
+    try:
+        # Store only the optional key, not the required one.
+        await backend.set(
+            tenant_id=TENANT_A,
+            key="collector.test-req-miss.webhook_secret",
+            value="OPT_VALUE",
+        )
+        with pytest.raises(CredentialResolutionError, match=r"api_key"):
+            await resolver.resolve(TENANT_A, "test-req-miss")
+    finally:
+        del CREDENTIAL_SPECS["test-req-miss"]
+
+
+# ---- Test 17: Optional keys with key_mapping --------------------------------
+
+
+async def test_resolve_optional_keys_with_key_mapping(
+    backend: InMemoryBackend,
+    resolver: CredentialResolver,
+) -> None:
+    """Optional keys respect key_mapping for backend lookups."""
+    CREDENTIAL_SPECS["test-opt-map"] = CollectorCredentialSpec(
+        collector_id="test-opt-map",
+        required_keys=[],
+        optional_keys=["api_key"],
+        key_mapping={"api_key": "collector.shared.token"},
+    )
+    try:
+        await backend.set(
+            tenant_id=TENANT_A,
+            key="collector.shared.token",
+            value="MAPPED_OPT",
+        )
+        result = await resolver.resolve(TENANT_A, "test-opt-map")
+        assert len(result) == 1
+        assert "api_key" in result
+        assert result["api_key"].secret_value == "MAPPED_OPT"  # noqa: S105
+    finally:
+        del CREDENTIAL_SPECS["test-opt-map"]
+
+
+# ---- Tests 18+: End-to-end credential chain for real collectors ----------
 # These tests verify the full chain from backend storage through CREDENTIAL_SPECS
 # key_mapping resolution to the credential dict format that collectors expect.
 # They use the REAL CREDENTIAL_SPECS entries (not synthetic test entries) to
@@ -439,7 +569,7 @@ class TestRealCollectorCredentialChain:
         backend: InMemoryBackend,
         resolver: CredentialResolver,
     ) -> None:
-        """dns-chaos: stores under dns-chaos backend key (no key_mapping, uses default)."""
+        """dns-chaos: optional key resolved when present (no key_mapping, uses default)."""
         await backend.set(
             tenant_id=TENANT_A,
             key="collector.dns-chaos.api_key",
@@ -449,6 +579,55 @@ class TestRealCollectorCredentialChain:
         assert len(result) == 1
         assert "api_key" in result
         assert result["api_key"].secret_value == "test-chaos-key"  # noqa: S105
+
+    async def test_dns_chaos_runs_without_credentials(
+        self,
+        resolver: CredentialResolver,
+    ) -> None:
+        """dns-chaos: resolves successfully with empty dict when api_key is absent."""
+        result = await resolver.resolve(TENANT_A, "dns-chaos")
+        assert result == {}
+
+    async def test_github_exposed_credential_chain(
+        self,
+        backend: InMemoryBackend,
+        resolver: CredentialResolver,
+    ) -> None:
+        """github-exposed: optional api_key resolved via key_mapping to github-exposed.token."""
+        await backend.set(
+            tenant_id=TENANT_A,
+            key="collector.github-exposed.token",
+            value="ghp-test-token",
+        )
+        result = await resolver.resolve(TENANT_A, "github-exposed")
+        assert len(result) == 1
+        assert "api_key" in result
+        assert result["api_key"].secret_value == "ghp-test-token"  # noqa: S105
+
+    async def test_github_exposed_runs_without_credentials(
+        self,
+        resolver: CredentialResolver,
+    ) -> None:
+        """github-exposed: resolves successfully with empty dict when token is absent."""
+        result = await resolver.resolve(TENANT_A, "github-exposed")
+        assert result == {}
+
+    async def test_dns_passive_history_partial_credentials(
+        self,
+        backend: InMemoryBackend,
+        resolver: CredentialResolver,
+    ) -> None:
+        """dns-passive-history: resolves with only one of two optional keys."""
+        await backend.set(
+            tenant_id=TENANT_A,
+            key="collector.pdns-securitytrails.api_key",
+            value="test-st-key",
+        )
+        # virustotal key NOT set -- should still resolve without error
+        result = await resolver.resolve(TENANT_A, "dns-passive-history")
+        assert len(result) == 1
+        assert "securitytrails_api_key" in result
+        assert "virustotal_api_key" not in result
 
     async def test_tenant_isolation_across_collectors(
         self,
@@ -474,6 +653,7 @@ class TestRealCollectorCredentialChain:
 
         This test cross-references the CREDENTIAL_SPECS key names with the
         actual credential lookup keys used in each collector's __init__ method.
+        Covers both required and optional credentials.
         """
         # Store all credentials
         await backend.set(
@@ -501,6 +681,11 @@ class TestRealCollectorCredentialChain:
             key="collector.dns-chaos.api_key",
             value="v",
         )
+        await backend.set(
+            tenant_id=TENANT_A,
+            key="collector.github-exposed.token",
+            value="v",
+        )
 
         # These are the exact keys each collector uses in its __init__:
         expected_keys = {
@@ -508,7 +693,8 @@ class TestRealCollectorCredentialChain:
             "scan-censys": {"censys_api_id", "censys_api_secret"},
             "ct-censys": {"censys_api_id", "censys_api_secret"},
             "scan-binaryedge": {"binaryedge_api_key"},
-            "dns-chaos": {"api_key"},
+            "dns-chaos": {"api_key"},  # optional, but present in backend
+            "github-exposed": {"api_key"},  # optional, via key_mapping
         }
 
         for collector_id, keys in expected_keys.items():

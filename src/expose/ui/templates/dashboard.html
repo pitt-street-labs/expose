@@ -53,11 +53,25 @@
                            class="filter-input" style="width: 100%;"
                            @input.debounce.300ms="updateEstimate()">
                 </div>
-                <div style="flex: 1; min-width: 200px;">
+                <div style="flex: 1; min-width: 200px; position: relative;">
                     <label for="org-input" style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); display: block; margin-bottom: 4px;">Organization Name <span style="opacity: 0.6;">(optional)</span></label>
                     <input type="text" id="org-input" x-model="orgName" placeholder="Acme Corp"
                            class="filter-input" style="width: 100%;"
-                           @input.debounce.300ms="updateEstimate()">
+                           @input="onOrgInput()"
+                           @blur="setTimeout(() => orgSuggestions = [], 200)"
+                           autocomplete="off">
+                    <!-- "Did you mean?" suggestion chips -->
+                    <div x-show="orgSuggestions.length > 0" x-cloak
+                         class="org-suggestions-dropdown">
+                        <div style="font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); margin-bottom: 4px;">Did you mean?</div>
+                        <template x-for="(suggestion, idx) in orgSuggestions" :key="idx">
+                            <button type="button"
+                                    class="org-suggestion-chip"
+                                    @mousedown.prevent="selectOrgSuggestion(suggestion.name)"
+                                    x-text="suggestion.name">
+                            </button>
+                        </template>
+                    </div>
                 </div>
                 <button type="submit" class="btn btn-primary" :disabled="scanning">
                     <span x-show="!scanning">Scan</span>
@@ -717,6 +731,40 @@
 @keyframes pulse-dot {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.3; }
+}
+
+/* Org Suggestion Dropdown & Chips */
+.org-suggestions-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 20;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+    padding: 6px 8px 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    animation: emerge 0.15s ease-out;
+}
+.org-suggestion-chip {
+    display: inline-block;
+    padding: 3px 10px;
+    margin: 2px 4px 2px 0;
+    font-size: 0.75rem;
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+.org-suggestion-chip:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--bg-primary);
 }
 
 .ai-insight-row {

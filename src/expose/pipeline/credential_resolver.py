@@ -42,9 +42,17 @@ class CollectorCredentialSpec(BaseModel):
     """Declares what credentials a collector needs.
 
     Each entry describes the credential slots a collector will look up at
-    dispatch time. Collectors with ``required_keys == []`` (e.g., Tier-1
-    passive collectors like ``ct-crtsh``) need no credentials and will
-    always receive an empty credentials dict.
+    dispatch time. Collectors with ``required_keys == []`` and
+    ``optional_keys == []`` (e.g., Tier-1 passive collectors like
+    ``ct-crtsh``) need no credentials and will always receive an empty
+    credentials dict.
+
+    ``optional_keys`` lists credentials that are fetched when available
+    but do not cause ``CredentialResolutionError`` when absent. This is
+    for collectors that enhance their output with API keys but can still
+    operate at reduced capability without them (e.g., ``dns-chaos``
+    falls back to public-tier access, ``github-exposed`` runs with
+    tighter rate limits).
 
     ``key_mapping`` overrides the default backend key derivation
     (``collector.{collector_id}.{key}``) for keys that are stored under
@@ -56,6 +64,7 @@ class CollectorCredentialSpec(BaseModel):
 
     collector_id: str = Field(min_length=1)
     required_keys: list[str] = Field(default_factory=list)
+    optional_keys: list[str] = Field(default_factory=list)
     key_mapping: dict[str, str] = Field(default_factory=dict)
 
 
@@ -131,7 +140,8 @@ CREDENTIAL_SPECS: dict[str, CollectorCredentialSpec] = {
     ),
     "dns-passive-history": CollectorCredentialSpec(
         collector_id="dns-passive-history",
-        required_keys=["securitytrails_api_key", "virustotal_api_key"],
+        required_keys=[],
+        optional_keys=["securitytrails_api_key", "virustotal_api_key"],
         key_mapping={
             "securitytrails_api_key": "collector.pdns-securitytrails.api_key",
             "virustotal_api_key": "unmapped.sfp_virustotal.api_key",
@@ -139,7 +149,9 @@ CREDENTIAL_SPECS: dict[str, CollectorCredentialSpec] = {
     ),
     "github-exposed": CollectorCredentialSpec(
         collector_id="github-exposed",
-        required_keys=["token"],
+        required_keys=[],
+        optional_keys=["api_key"],
+        key_mapping={"api_key": "collector.github-exposed.token"},
     ),
     "git-commit-emails": CollectorCredentialSpec(
         collector_id="git-commit-emails",
@@ -148,12 +160,14 @@ CREDENTIAL_SPECS: dict[str, CollectorCredentialSpec] = {
     ),
     "paste-monitor": CollectorCredentialSpec(
         collector_id="paste-monitor",
-        required_keys=["api_key"],
+        required_keys=[],
+        optional_keys=["api_key"],
         key_mapping={"api_key": "collector.github-exposed.token"},
     ),
     "dns-chaos": CollectorCredentialSpec(
         collector_id="dns-chaos",
-        required_keys=["api_key"],
+        required_keys=[],
+        optional_keys=["api_key"],
     ),
 }
 
@@ -193,9 +207,10 @@ class CredentialResolver:
                 collector_id,
             )
             return {}
-        if not spec.required_keys:
+        if not spec.required_keys and not spec.optional_keys:
             logger.debug(
-                "Collector %r has no required keys — skipping credential resolution",
+                "Collector %r has no required or optional keys — "
+                "skipping credential resolution",
                 collector_id,
             )
             return {}
@@ -231,6 +246,31 @@ class CredentialResolver:
                 f"Missing credentials for collector {collector_id!r}, "
                 f"tenant {tenant_id}: {missing}"
             )
+
+        # Resolve optional keys — log at debug level if missing, never fail.
+        for key in spec.optional_keys:
+            backend_key = spec.key_mapping.get(key, f"collector.{collector_id}.{key}")
+            try:
+                value = await self._backend.get(tenant_id=tenant_id, key=backend_key)
+                credentials[key] = CollectorCredential(name=key, secret_value=value)
+                logger.debug(
+                    "Resolved optional credential %r for collector %r "
+                    "(backend_key=%r, tenant=%s)",
+                    key,
+                    collector_id,
+                    backend_key,
+                    tenant_id,
+                )
+            except SecretNotFoundError:
+                logger.debug(
+                    "Optional credential %r not found for collector %r "
+                    "(backend_key=%r, tenant=%s) — collector will run "
+                    "at reduced capability",
+                    key,
+                    collector_id,
+                    backend_key,
+                    tenant_id,
+                )
 
         logger.debug(
             "Resolved %d credential(s) for collector %r: %s",
