@@ -617,6 +617,7 @@ async def test_flush_batch_calls_lead_scoring() -> None:
         run_repo=run_repo,
         entity_repo=entity_repo,
     )
+    executor._seed_values = frozenset()
 
     with patch(
         "expose.pipeline.lead_scoring.LeadScoringEngine"
@@ -688,6 +689,7 @@ async def test_flush_batch_scoring_exception_does_not_crash() -> None:
         run_repo=AsyncMock(),
         entity_repo=entity_repo,
     )
+    executor._seed_values = frozenset()
 
     with patch(
         "expose.pipeline.lead_scoring.LeadScoringEngine"
@@ -742,6 +744,7 @@ async def test_flush_batch_no_scoring_when_entity_map_empty() -> None:
         run_repo=AsyncMock(),
         entity_repo=entity_repo,
     )
+    executor._seed_values = frozenset()
 
     with patch(
         "expose.pipeline.lead_scoring.LeadScoringEngine"

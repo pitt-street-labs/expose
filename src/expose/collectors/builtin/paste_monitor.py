@@ -38,7 +38,7 @@ import re
 import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ClassVar
 
 import httpx
 
@@ -152,6 +152,7 @@ class PasteMonitorCollector(Collector):
     tier: CollectorTier = CollectorTier.TIER_2
     requires_credentials: bool = False
     rate_limit_per_minute: int | None = 10
+    technique_ids: ClassVar[list[str]] = ["T1598"]
 
     def __init__(self, config: CollectorConfig) -> None:
         super().__init__(config)

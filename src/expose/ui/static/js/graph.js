@@ -71,8 +71,16 @@ const ExposeGraph = (() => {
 
     /** Per-edge-type stroke colors; unlisted types use the default. */
     const EDGE_COLORS = {
-        acquired_by: "#c4a35a",
-        default:     "#5b7ca3",
+        resolves_to:     "#4CAF50",  // green
+        cname_for:       "#2196F3",  // blue
+        mx_for:          "#FF9800",  // orange
+        ns_for:          "#9C27B0",  // purple
+        acquired_by:     "#F44336",  // red
+        depends_on:      "#795548",  // brown
+        certificate_for: "#00BCD4",  // cyan
+        hosts:           "#607D8B",  // blue-grey
+        belongs_to:      "#FFEB3B",  // yellow
+        default:         "#5b7ca3",
     };
 
     const EMERGE_DURATION    = 800;

@@ -31,7 +31,7 @@ import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from expose.collectors.base import (
     Collector,
@@ -180,6 +180,7 @@ class CloudRangesCollector(Collector):
     requires_credentials = False
     rate_limit_per_minute = None
     tier = CollectorTier.TIER_1
+    technique_ids: ClassVar[list[str]] = ["T1526"]
 
     def __init__(self, config: CollectorConfig) -> None:
         super().__init__(config)

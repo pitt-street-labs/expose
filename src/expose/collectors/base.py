@@ -26,7 +26,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, ClassVar
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -286,6 +286,7 @@ class Collector(ABC):
     requires_credentials: bool = False
     rate_limit_per_minute: int | None = None
     tier: CollectorTier = CollectorTier.TIER_1
+    technique_ids: ClassVar[list[str]] = []
 
     def __init__(self, config: CollectorConfig) -> None:
         """Hold the per-call configuration.

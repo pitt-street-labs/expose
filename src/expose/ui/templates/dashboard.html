@@ -487,6 +487,127 @@
         </section>
     </main>
 
+    <!-- ===== Provenance Detail Panel ===== -->
+    <div class="card provenance-panel" x-show="selectedTenantId && provenanceData" x-cloak
+         style="margin: 0 var(--space-lg); margin-bottom: var(--space-md);">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h2 class="pane-title" style="margin: 0;">
+                Provenance Chain
+                <span class="help-tip" data-tip="Shows the evidence trail for this entity: which collectors observed it, what rules were applied, and how it connects to other entities. This is the trust-verification chain that supports attribution.">i</span>
+                <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400; margin-left: 0.5rem;"
+                      x-text="provenanceData ? provenanceData.entity_identifier : ''"></span>
+            </h2>
+            <button class="btn btn-ghost" style="font-size: 0.75rem;"
+                    @click="provenanceData = null">Close</button>
+        </div>
+
+        <!-- Attribution summary -->
+        <div style="display: flex; gap: var(--space-md); margin-top: var(--space-sm); align-items: center; flex-wrap: wrap;">
+            <div style="font-size: 0.8rem;">
+                <span style="color: var(--text-muted); text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em;">Type</span>
+                <div class="entity-type-badge" x-text="provenanceData?.entity_type" style="margin-top: 2px;"></div>
+            </div>
+            <div style="font-size: 0.8rem;">
+                <span style="color: var(--text-muted); text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em;">Status</span>
+                <div x-text="provenanceData?.attribution_status"
+                     :class="'attribution-badge attribution-' + (provenanceData?.attribution_status || '')"
+                     style="margin-top: 2px;"></div>
+            </div>
+            <div style="font-size: 0.8rem;">
+                <span style="color: var(--text-muted); text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.05em;">Confidence</span>
+                <div style="font-family: var(--font-mono); font-weight: 600; margin-top: 2px;"
+                     x-text="provenanceData ? (provenanceData.attribution_confidence * 100).toFixed(1) + '%' : '--'"></div>
+            </div>
+        </div>
+
+        <!-- Observation timeline -->
+        <div style="margin-top: var(--space-md);">
+            <h3 style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: var(--space-xs);">
+                Observations
+                <span x-text="provenanceData ? '(' + provenanceData.observations.length + ')' : ''"></span>
+            </h3>
+            <div class="provenance-timeline" x-show="provenanceData && provenanceData.observations.length > 0">
+                <template x-for="(obs, idx) in (provenanceData?.observations || [])" :key="idx">
+                    <div class="provenance-timeline-item">
+                        <div class="provenance-timeline-dot"></div>
+                        <div class="provenance-timeline-content">
+                            <span class="provenance-collector-id" x-text="obs.collector_id"></span>
+                            <span class="provenance-obs-type" x-show="obs.observation_type" x-text="obs.observation_type"></span>
+                            <span class="provenance-obs-time" x-show="obs.observed_at" x-text="obs.observed_at"></span>
+                        </div>
+                    </div>
+                </template>
+            </div>
+            <div x-show="provenanceData && provenanceData.observations.length === 0"
+                 style="font-size: 0.8rem; color: var(--text-dim); font-style: italic;">
+                No collector observations recorded.
+            </div>
+        </div>
+
+        <!-- Rules applied -->
+        <div style="margin-top: var(--space-md);">
+            <h3 style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: var(--space-xs);">
+                Rules Applied
+                <span x-text="provenanceData ? '(' + provenanceData.rules_applied.length + ')' : ''"></span>
+            </h3>
+            <div x-show="provenanceData && provenanceData.rules_applied.length > 0">
+                <template x-for="(rule, idx) in (provenanceData?.rules_applied || [])" :key="idx">
+                    <div style="display: flex; align-items: center; gap: 0.5rem; padding: 4px 0; font-size: 0.8rem;">
+                        <span style="font-family: var(--font-mono); font-weight: 500;" x-text="rule.rule_id"></span>
+                        <span class="provenance-rule-outcome"
+                              :class="'provenance-outcome-' + (rule.outcome || 'unknown')"
+                              x-text="rule.outcome"></span>
+                        <span style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-dim);"
+                              x-show="rule.confidence_delta"
+                              x-text="(rule.confidence_delta > 0 ? '+' : '') + rule.confidence_delta"></span>
+                    </div>
+                </template>
+            </div>
+            <div x-show="provenanceData && provenanceData.rules_applied.length === 0"
+                 style="font-size: 0.8rem; color: var(--text-dim); font-style: italic;">
+                No attribution rules evaluated yet.
+            </div>
+        </div>
+
+        <!-- Relationships -->
+        <div style="margin-top: var(--space-md);">
+            <h3 style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: var(--space-xs);">
+                Relationships
+                <span x-text="provenanceData ? '(' + provenanceData.relationships.length + ')' : ''"></span>
+            </h3>
+            <div x-show="provenanceData && provenanceData.relationships.length > 0">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem;">
+                    <thead>
+                        <tr style="border-bottom: 1px solid var(--border); text-align: left;">
+                            <th style="padding: 4px 8px; color: var(--text-muted); font-size: 0.7rem; text-transform: uppercase;">Edge</th>
+                            <th style="padding: 4px 8px; color: var(--text-muted); font-size: 0.7rem; text-transform: uppercase;">Target</th>
+                            <th style="padding: 4px 8px; color: var(--text-muted); font-size: 0.7rem; text-transform: uppercase;">Type</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="(rel, idx) in (provenanceData?.relationships || [])" :key="idx">
+                            <tr style="border-bottom: 1px solid var(--border-subtle);">
+                                <td style="padding: 4px 8px;">
+                                    <span class="provenance-edge-badge" x-text="rel.edge_type"></span>
+                                </td>
+                                <td style="padding: 4px 8px; font-family: var(--font-mono); font-weight: 500;"
+                                    x-text="rel.target_identifier"></td>
+                                <td style="padding: 4px 8px;">
+                                    <span class="entity-type-badge" x-text="rel.target_type"
+                                          :class="'entity-type-' + rel.target_type"></span>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+            <div x-show="provenanceData && provenanceData.relationships.length === 0"
+                 style="font-size: 0.8rem; color: var(--text-dim); font-style: italic;">
+                No relationships recorded.
+            </div>
+        </div>
+    </div>
+
     <!-- ===== Export panel ===== -->
     <div class="card" style="margin-top: 12px;" x-show="entityCount > 0" x-cloak>
         <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -775,6 +896,81 @@
     background: var(--accent);
     border-color: var(--accent);
     color: var(--bg-primary);
+}
+
+/* Provenance Panel */
+.provenance-timeline {
+    border-left: 2px solid var(--border);
+    margin-left: 8px;
+    padding-left: 0;
+}
+.provenance-timeline-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 6px 0;
+    position: relative;
+    margin-left: -9px;
+}
+.provenance-timeline-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--surface);
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+.provenance-timeline-content {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    font-size: 0.8rem;
+}
+.provenance-collector-id {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.provenance-obs-type {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+}
+.provenance-obs-time {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-dim);
+}
+.provenance-rule-outcome {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+.provenance-outcome-match { background: rgba(52, 211, 153, 0.15); color: var(--green, #34d399); }
+.provenance-outcome-no_match { background: rgba(156, 163, 175, 0.15); color: var(--text-muted); }
+.provenance-outcome-partial { background: rgba(234, 179, 8, 0.15); color: var(--warning); }
+.provenance-outcome-unknown { background: rgba(156, 163, 175, 0.15); color: var(--text-dim); }
+.provenance-edge-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    background: var(--surface-raised);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
 }
 
 .ai-insight-row {

@@ -284,6 +284,42 @@ class PipelineDispatcher:
             )
         return None
 
+    def _check_tier3_attribution_gate(
+        self,
+        job: DispatchJob,
+        collector_cls: type[Collector],
+        start_ns: int,
+    ) -> DispatchResult | None:
+        """Deny Tier-3 dispatch when entity attribution status is insufficient.
+
+        Checks ``attribution_status`` from the seed's ``properties`` dict.
+        Entities with status ``unattributed`` or ``requires_review`` are denied
+        Tier-3 active collectors with reason ``entity_not_attributed_for_tier3``.
+        """
+        if collector_cls.tier != CollectorTier.TIER_3:
+            return None
+
+        attribution_status = job.seed.properties.get("attribution_status")
+        if attribution_status in ("unattributed", "requires_review"):
+            from datetime import UTC, datetime  # noqa: PLC0415
+
+            reason = "entity_not_attributed_for_tier3"
+            self._enforcement_log.record_refusal(ScopeRefusalEvent(
+                tenant_id=job.tenant_id,
+                entity_identifier=job.seed.value,
+                attribution_tier=None,
+                enforcement_mode=self._tenant_scope.enforcement_mode,
+                collector_id=job.collector_id,
+                reason=reason,
+                timestamp=datetime.now(tz=UTC),
+            ))
+            return DispatchResult(
+                status=DispatchStatus.DENIED,
+                error_message=reason,
+                duration_ms=_elapsed_ms(start_ns),
+            )
+        return None
+
     async def _run_expand(
         self,
         collector_cls: type[Collector],
@@ -389,9 +425,10 @@ class PipelineDispatcher:
         # 1. Resolve collector class
         collector_cls = self._registry.get(job.collector_id)
 
-        # 2. Authorization gates (scope matcher then Tier-3)
+        # 2. Authorization gates (scope matcher, attribution status, then Tier-3)
         auth_denial = (
             self._check_scope_matcher(job, start_ns)
+            or self._check_tier3_attribution_gate(job, collector_cls, start_ns)
             or self._check_tier3_gate(job, collector_cls, start_ns)
         )
         if auth_denial is not None:

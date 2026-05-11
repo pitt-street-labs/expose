@@ -22,7 +22,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ClassVar
 
 from expose.collectors.base import (
     Collector,
@@ -75,6 +75,7 @@ class ActiveDnsCollector(Collector):
     tier: CollectorTier = CollectorTier.TIER_3
     requires_credentials: bool = False
     rate_limit_per_minute: int | None = None
+    technique_ids: ClassVar[list[str]] = ["T1596.001"]
 
     def __init__(self, config: CollectorConfig) -> None:
         super().__init__(config)

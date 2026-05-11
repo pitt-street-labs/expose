@@ -19,7 +19,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ClassVar
 
 from expose.collectors.base import (
     Collector,
@@ -87,6 +87,7 @@ class ActivePortSurfaceCollector(Collector):
     tier: CollectorTier = CollectorTier.TIER_3
     requires_credentials: bool = False
     rate_limit_per_minute: int | None = None
+    technique_ids: ClassVar[list[str]] = ["T1046"]
 
     async def expand(self, seed: Seed) -> AsyncIterator[Observation]:
         """Probe ports on an IP seed and yield a single observation.

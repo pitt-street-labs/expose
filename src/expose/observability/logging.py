@@ -7,11 +7,19 @@ loggers via :func:`get_logger`.
 Trace correlation: every log event is enriched with ``otel_trace_id`` and
 ``otel_span_id`` from the current OTel context, so logs and traces can be
 joined in the observability backend.
+
+Audit logging: :func:`configure_audit_logging` creates a dedicated stdlib
+logger that writes append-only NDJSON to a file (one JSON object per line).
+:func:`emit_audit_event` serializes an :class:`AuditEvent` to that logger.
+The audit log path defaults to ``./audit.log`` and is overridable via the
+``EXPOSE_AUDIT_LOG_PATH`` environment variable.
 """
 
 from __future__ import annotations
 
+import json
 import logging as stdlib_logging
+import os
 from collections.abc import MutableMapping
 from typing import Any
 
@@ -93,7 +101,75 @@ def get_logger(name: str) -> structlog.BoundLogger:
     return structlog.get_logger(component=name)  # type: ignore[no-any-return]
 
 
+_AUDIT_LOGGER_NAME = "expose.audit"
+
+
+def configure_audit_logging(
+    path: str | None = None,
+) -> stdlib_logging.Logger:
+    """Create (or reconfigure) the dedicated audit logger.
+
+    The audit logger writes append-only NDJSON — one JSON object per line — to
+    the file at *path*.  Each line is a complete, self-contained audit record
+    that satisfies NIST AU-3 content requirements.
+
+    Args:
+        path: Filesystem path for the audit log.  When ``None``, falls back to
+            the ``EXPOSE_AUDIT_LOG_PATH`` environment variable, then to
+            ``"./audit.log"``.
+
+    Returns:
+        The configured :class:`logging.Logger` instance.  Callers rarely need
+        the return value — :func:`emit_audit_event` obtains the logger by name
+        internally.
+    """
+    if path is None:
+        path = os.environ.get("EXPOSE_AUDIT_LOG_PATH", "./audit.log")
+
+    logger = stdlib_logging.getLogger(_AUDIT_LOGGER_NAME)
+    logger.setLevel(stdlib_logging.INFO)
+    # Prevent duplicate handlers on repeated calls (e.g. test teardown/setup).
+    # Close existing handlers first to avoid ResourceWarning from leaked fds.
+    for handler in list(logger.handlers):
+        handler.close()
+    logger.handlers.clear()
+    logger.propagate = False
+
+    handler = stdlib_logging.FileHandler(path, mode="a", encoding="utf-8")
+    handler.setLevel(stdlib_logging.INFO)
+    # Raw message only — the JSON record is self-describing.
+    handler.setFormatter(stdlib_logging.Formatter("%(message)s"))
+    logger.addHandler(handler)
+
+    return logger
+
+
+def emit_audit_event(event: Any) -> None:
+    """Serialize an ``AuditEvent`` to the audit log as a single JSON line.
+
+    The *event* is expected to be a
+    :class:`~expose.observability.audit_schema.AuditEvent` instance (imported
+    lazily to avoid circular imports).  Any Pydantic model with a
+    ``model_dump(mode="json")`` method is accepted.
+
+    If the audit logger has not been configured (no handlers), the event is
+    silently dropped rather than crashing — audit failures must never take down
+    the pipeline.  The ``mode="json"`` serialization ensures UUIDs and
+    datetimes are rendered as ISO-8601 strings.
+    """
+    logger = stdlib_logging.getLogger(_AUDIT_LOGGER_NAME)
+    if not logger.handlers:
+        return
+    try:
+        record = event.model_dump(mode="json")
+        logger.info(json.dumps(record, separators=(",", ":")))
+    except Exception:  # noqa: BLE001 — audit must never crash the pipeline
+        logger.error("audit_serialization_failure")
+
+
 __all__ = [
+    "configure_audit_logging",
     "configure_logging",
+    "emit_audit_event",
     "get_logger",
 ]

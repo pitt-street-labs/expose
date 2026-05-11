@@ -406,6 +406,10 @@ class RunExecutor:
                 )
             self._quota_tracker.record_run_start(tenant_id)
 
+        # Build a frozen set of seed identifier values so _flush_batch can
+        # tag seed entities as "confirmed" attribution (SPEC §6.3).
+        self._seed_values: frozenset[str] = frozenset(s.value for s in seeds)
+
         total_seeds = len(seeds)
         self._log("info", f"Run started: {total_seeds} seed(s)")
 
@@ -912,13 +916,14 @@ class RunExecutor:
         if use_batch:
             entity_dicts: list[dict[str, Any]] = []
             for obs in observations:
+                is_seed = obs.subject.identifier_value in self._seed_values
                 entity_dicts.append({
                     "tenant_id": TenantId(tenant_id),
                     "entity_type": obs.subject.identifier_type.value,
                     "canonical_identifier": obs.subject.identifier_value,
                     "properties": _observation_properties(obs),
-                    "attribution_status": "unattributed",
-                    "attribution_confidence": Decimal("0.000"),
+                    "attribution_status": "confirmed" if is_seed else "unattributed",
+                    "attribution_confidence": Decimal("1.000") if is_seed else Decimal("0.000"),
                 })
             try:
                 upserted = await self._entity_repo.batch_upsert(entity_dicts)
@@ -944,13 +949,14 @@ class RunExecutor:
             # batch failure recovery).
             for obs in observations:
                 try:
+                    is_seed = obs.subject.identifier_value in self._seed_values
                     from_entity = await self._entity_repo.create_or_update(
                         tenant_id=TenantId(tenant_id),
                         entity_type=obs.subject.identifier_type.value,
                         canonical_identifier=obs.subject.identifier_value,
                         properties=_observation_properties(obs),
-                        attribution_status="unattributed",
-                        attribution_confidence=Decimal("0.000"),
+                        attribution_status="confirmed" if is_seed else "unattributed",
+                        attribution_confidence=Decimal("1.000") if is_seed else Decimal("0.000"),
                     )
                     entity_map[obs.subject.identifier_value] = from_entity
                     self._log(
@@ -1177,6 +1183,36 @@ class RunExecutor:
                         all_related.append(
                             (parent_org, "domain", str(acq_domain), "acquired_by", obs)
                         )
+
+            # --- TLS certificate SAN -> certificate_for ----------------------
+            if payload.get("_collector_id") in (
+                "active-tls-handshake",
+                "ct-crtsh",
+                "ct-censys",
+                "ct-certspotter",
+            ):
+                for san in payload.get("cert_sans", []):
+                    all_related.append(
+                        (from_canonical, "domain", str(san), "certificate_for", obs)
+                    )
+
+            # --- IP resolution -> hosts --------------------------------------
+            if (
+                payload.get("_collector_id") == "active-dns"
+                and payload.get("record_type") in ("A", "AAAA")
+            ):
+                for ip_val in payload.get("values", []):
+                    all_related.append(
+                        (from_canonical, "ip", str(ip_val), "hosts", obs)
+                    )
+
+            # --- Organization hierarchy -> belongs_to ------------------------
+            if payload.get("_collector_id") == "rdap-whois":
+                org_name = payload.get("registrant_organization")
+                if org_name:
+                    all_related.append(
+                        (from_canonical, "organization", str(org_name), "belongs_to", obs)
+                    )
 
         if not all_related:
             return

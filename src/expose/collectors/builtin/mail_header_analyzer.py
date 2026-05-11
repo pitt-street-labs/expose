@@ -38,6 +38,8 @@ import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
+from typing import ClassVar
+
 import httpx
 
 from expose.collectors.base import (
@@ -145,6 +147,7 @@ class MailHeaderAnalyzerCollector(Collector):
     tier: CollectorTier = CollectorTier.TIER_1
     requires_credentials: bool = False
     rate_limit_per_minute: int | None = 30
+    technique_ids: ClassVar[list[str]] = ["T1598"]
 
     async def expand(self, seed: Seed) -> AsyncIterator[Observation]:
         """Probe mailing list archives and yield observations."""

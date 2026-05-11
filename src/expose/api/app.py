@@ -46,6 +46,7 @@ from expose.api.tenant_config import router as tenant_config_router
 from expose.api.tenants import get_session
 from expose.api.tenants import router as tenant_router
 from expose.api.scheduler import router as scheduler_router
+from expose.api.provenance import router as provenance_router
 from expose.api.webhooks import router as webhooks_router
 from expose.db.engine import (
     DatabaseSettings,
@@ -301,7 +302,7 @@ def create_app(
     # -- Wave 2: Scheduler router (issue #99) ----------------------------------
     app.include_router(scheduler_router)
     # -- END Wave 2 scheduler --------------------------------------------------
-    # >> Wave 3 provenance router goes HERE (agent 3D) <<
+    app.include_router(provenance_router)
 
     app.include_router(ui_router)
 

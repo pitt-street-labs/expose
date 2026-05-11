@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import socket
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
@@ -1867,3 +1868,345 @@ async def test_event_types_match_enum() -> None:
     assert RunEventType.RUN_STARTED in event_types
     assert RunEventType.ENTITIES_DISCOVERED in event_types
     assert RunEventType.RUN_COMPLETED in event_types
+
+
+# === Edge type tests (certificate_for, hosts, belongs_to) ===================
+
+
+def _make_tls_observation(
+    identifier_value: str = "example.com",
+    collector_id: str = "active-tls-handshake",
+    cert_sans: list[str] | None = None,
+) -> Observation:
+    """Build an Observation with TLS certificate SAN payload."""
+    return Observation(
+        collector_id=collector_id,
+        collector_version="1.0.0",
+        tenant_id=TENANT_ID,
+        observation_type=ObservationType.DNS_RESOLUTION,
+        subject=ObservationSubject(
+            identifier_type=IdentifierType.DOMAIN,
+            identifier_value=identifier_value,
+        ),
+        observed_at=OBSERVED,
+        structured_payload={
+            "_collector_id": collector_id,
+            "cert_sans": cert_sans or ["www.example.com", "api.example.com"],
+        },
+    )
+
+
+def _make_whois_observation(
+    identifier_value: str = "example.com",
+    registrant_organization: str | None = "Example Corp",
+) -> Observation:
+    """Build an Observation with RDAP/WHOIS registrant organization payload."""
+    payload: dict[str, Any] = {"_collector_id": "rdap-whois"}
+    if registrant_organization is not None:
+        payload["registrant_organization"] = registrant_organization
+    return Observation(
+        collector_id="rdap-whois",
+        collector_version="1.0.0",
+        tenant_id=TENANT_ID,
+        observation_type=ObservationType.DNS_RESOLUTION,
+        subject=ObservationSubject(
+            identifier_type=IdentifierType.DOMAIN,
+            identifier_value=identifier_value,
+        ),
+        observed_at=OBSERVED,
+        structured_payload=payload,
+    )
+
+
+def _make_dns_a_observation_with_collector_id(
+    identifier_value: str = "example.com",
+    ips: list[str] | None = None,
+) -> Observation:
+    """Build an A-record Observation with _collector_id in payload for hosts edge."""
+    return Observation(
+        collector_id="active-dns",
+        collector_version="1.0.0",
+        tenant_id=TENANT_ID,
+        observation_type=ObservationType.DNS_RESOLUTION,
+        subject=ObservationSubject(
+            identifier_type=IdentifierType.DOMAIN,
+            identifier_value=identifier_value,
+        ),
+        observed_at=OBSERVED,
+        structured_payload={
+            "_collector_id": "active-dns",
+            "record_type": "A",
+            "values": ips or ["93.184.216.34"],
+        },
+    )
+
+
+async def test_edge_type_certificate_for() -> None:
+    """TLS observations with cert_sans produce certificate_for edges."""
+    obs = _make_tls_observation(
+        identifier_value="example.com",
+        cert_sans=["www.example.com", "api.example.com", "mail.example.com"],
+    )
+    executor, disp, _r_repo, e_repo, rel_repo = _build_executor_with_rel_repo()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["active-tls-handshake"],
+    )
+
+    # 3 SANs -> 3 certificate_for relationships
+    rel_calls = rel_repo.create_or_update.call_args_list
+    cert_for_calls = [c for c in rel_calls if c.kwargs["edge_type"] == "certificate_for"]
+    assert len(cert_for_calls) == 3
+
+    # All edge types should be certificate_for
+    edge_types = {c.kwargs["edge_type"] for c in cert_for_calls}
+    assert edge_types == {"certificate_for"}
+
+
+async def test_edge_type_certificate_for_multiple_collectors() -> None:
+    """certificate_for edges are produced for all TLS-related collector IDs."""
+    for collector_id in ("active-tls-handshake", "ct-crtsh", "ct-censys", "ct-certspotter"):
+        obs = _make_tls_observation(
+            identifier_value="example.com",
+            collector_id=collector_id,
+            cert_sans=["sub.example.com"],
+        )
+        executor, disp, _r_repo, e_repo, rel_repo = _build_executor_with_rel_repo()
+        disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+        await executor.execute(
+            run_id=RUN_ID,
+            tenant_id=TENANT_ID,
+            seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+            collector_ids=[collector_id],
+        )
+
+        cert_calls = [
+            c for c in rel_repo.create_or_update.call_args_list
+            if c.kwargs["edge_type"] == "certificate_for"
+        ]
+        assert len(cert_calls) == 1, (
+            f"Expected 1 certificate_for edge for collector {collector_id}, "
+            f"got {len(cert_calls)}"
+        )
+
+
+async def test_edge_type_certificate_for_no_sans() -> None:
+    """TLS observations without cert_sans produce no certificate_for edges."""
+    obs = Observation(
+        collector_id="active-tls-handshake",
+        collector_version="1.0.0",
+        tenant_id=TENANT_ID,
+        observation_type=ObservationType.DNS_RESOLUTION,
+        subject=ObservationSubject(
+            identifier_type=IdentifierType.DOMAIN,
+            identifier_value="example.com",
+        ),
+        observed_at=OBSERVED,
+        structured_payload={"_collector_id": "active-tls-handshake"},
+    )
+    executor, disp, _r_repo, e_repo, rel_repo = _build_executor_with_rel_repo()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["active-tls-handshake"],
+    )
+
+    cert_calls = [
+        c for c in rel_repo.create_or_update.call_args_list
+        if c.kwargs["edge_type"] == "certificate_for"
+    ]
+    assert len(cert_calls) == 0
+
+
+async def test_edge_type_hosts() -> None:
+    """DNS A/AAAA observations from active-dns produce hosts edges."""
+    obs = _make_dns_a_observation_with_collector_id(
+        identifier_value="example.com",
+        ips=["93.184.216.34", "93.184.216.35"],
+    )
+    executor, disp, _r_repo, e_repo, rel_repo = _build_executor_with_rel_repo()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["active-dns"],
+    )
+
+    # 2 IPs -> 2 hosts edges (in addition to 2 resolves_to edges from the
+    # existing A-record extraction)
+    rel_calls = rel_repo.create_or_update.call_args_list
+    hosts_calls = [c for c in rel_calls if c.kwargs["edge_type"] == "hosts"]
+    assert len(hosts_calls) == 2
+
+
+async def test_edge_type_hosts_aaaa() -> None:
+    """DNS AAAA observations from active-dns also produce hosts edges."""
+    obs = Observation(
+        collector_id="active-dns",
+        collector_version="1.0.0",
+        tenant_id=TENANT_ID,
+        observation_type=ObservationType.DNS_RESOLUTION,
+        subject=ObservationSubject(
+            identifier_type=IdentifierType.DOMAIN,
+            identifier_value="example.com",
+        ),
+        observed_at=OBSERVED,
+        structured_payload={
+            "_collector_id": "active-dns",
+            "record_type": "AAAA",
+            "values": ["2606:2800:220:1:248:1893:25c8:1946"],
+        },
+    )
+    executor, disp, _r_repo, e_repo, rel_repo = _build_executor_with_rel_repo()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["active-dns"],
+    )
+
+    rel_calls = rel_repo.create_or_update.call_args_list
+    hosts_calls = [c for c in rel_calls if c.kwargs["edge_type"] == "hosts"]
+    assert len(hosts_calls) == 1
+
+
+async def test_edge_type_hosts_not_for_non_dns_collector() -> None:
+    """hosts edges are NOT produced when _collector_id is not active-dns."""
+    obs = Observation(
+        collector_id="dns-subdomain-enum",
+        collector_version="1.0.0",
+        tenant_id=TENANT_ID,
+        observation_type=ObservationType.DNS_RESOLUTION,
+        subject=ObservationSubject(
+            identifier_type=IdentifierType.DOMAIN,
+            identifier_value="example.com",
+        ),
+        observed_at=OBSERVED,
+        structured_payload={
+            "_collector_id": "dns-subdomain-enum",
+            "record_type": "A",
+            "values": ["93.184.216.34"],
+        },
+    )
+    executor, disp, _r_repo, e_repo, rel_repo = _build_executor_with_rel_repo()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["dns-subdomain-enum"],
+    )
+
+    rel_calls = rel_repo.create_or_update.call_args_list
+    hosts_calls = [c for c in rel_calls if c.kwargs["edge_type"] == "hosts"]
+    assert len(hosts_calls) == 0
+
+
+async def test_edge_type_belongs_to() -> None:
+    """WHOIS observations with registrant_organization produce belongs_to edges."""
+    obs = _make_whois_observation(
+        identifier_value="example.com",
+        registrant_organization="Example Corp",
+    )
+    executor, disp, _r_repo, e_repo, rel_repo = _build_executor_with_rel_repo()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["rdap-whois"],
+    )
+
+    rel_calls = rel_repo.create_or_update.call_args_list
+    belongs_calls = [c for c in rel_calls if c.kwargs["edge_type"] == "belongs_to"]
+    assert len(belongs_calls) == 1
+
+
+async def test_edge_type_belongs_to_no_org() -> None:
+    """WHOIS observations without registrant_organization produce no belongs_to edges."""
+    obs = _make_whois_observation(
+        identifier_value="example.com",
+        registrant_organization=None,
+    )
+    executor, disp, _r_repo, e_repo, rel_repo = _build_executor_with_rel_repo()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["rdap-whois"],
+    )
+
+    rel_calls = rel_repo.create_or_update.call_args_list
+    belongs_calls = [c for c in rel_calls if c.kwargs["edge_type"] == "belongs_to"]
+    assert len(belongs_calls) == 0
+
+
+# === Seed entity attribution tests ==========================================
+
+
+async def test_seed_attribution_confirmed() -> None:
+    """Seed entities get attribution_status='confirmed' and confidence=1.000."""
+    seed_value = "10.0.0.1"
+    obs = _make_observation(identifier_value=seed_value)
+    executor, disp, _r_repo, e_repo = _build_executor()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value=seed_value)],
+        collector_ids=["scanner"],
+    )
+
+    # Find the initial entity upsert call (not lead-scoring updates)
+    upsert_calls = e_repo.create_or_update.call_args_list
+    # The first call for this identifier should be the entity creation
+    entity_upsert = next(
+        c for c in upsert_calls
+        if c.kwargs.get("canonical_identifier") == seed_value
+        and c.kwargs.get("entity_type") is not None
+    )
+    assert entity_upsert.kwargs["attribution_status"] == "confirmed"
+    assert entity_upsert.kwargs["attribution_confidence"] == Decimal("1.000")
+
+
+async def test_seed_attribution_nonseed_unattributed() -> None:
+    """Non-seed entities get attribution_status='unattributed' and confidence=0.000."""
+    seed_value = "10.0.0.1"
+    discovered_value = "discovered.example.com"
+    obs = _make_observation(identifier_value=discovered_value)
+    executor, disp, _r_repo, e_repo = _build_executor()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value=seed_value)],
+        collector_ids=["scanner"],
+    )
+
+    # Find the entity upsert call for the discovered (non-seed) entity
+    upsert_calls = e_repo.create_or_update.call_args_list
+    entity_upsert = next(
+        c for c in upsert_calls
+        if c.kwargs.get("canonical_identifier") == discovered_value
+        and c.kwargs.get("entity_type") is not None
+    )
+    assert entity_upsert.kwargs["attribution_status"] == "unattributed"
+    assert entity_upsert.kwargs["attribution_confidence"] == Decimal("0.000")

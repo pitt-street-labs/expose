@@ -27,7 +27,7 @@ import re
 import shutil
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ClassVar
 
 import httpx
 
@@ -307,6 +307,7 @@ class RdapWhoisCollector(Collector):
     collector_version: str = "0.1.0"
     requires_credentials: bool = False
     tier: CollectorTier = CollectorTier.TIER_1
+    technique_ids: ClassVar[list[str]] = ["T1596.002"]
 
     def __init__(self, config: CollectorConfig) -> None:
         super().__init__(config)

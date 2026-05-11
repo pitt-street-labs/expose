@@ -99,6 +99,9 @@ function exposeApp() {
         showProvidersPanel: false,
         providers: [],
 
+        // Provenance chain data for the selected entity
+        provenanceData: null,
+
         // Summary stats for at-a-glance risk posture
         stats: {
             totalEntities: 0,
@@ -172,6 +175,9 @@ function exposeApp() {
             this.credentialMessage = "";
             this.showSfImportModal = false;
             this.showBundleImportModal = false;
+
+            // Reset provenance panel
+            this.provenanceData = null;
 
             if (!this.selectedTenantId) {
                 this.entityCount = 0;
@@ -1032,6 +1038,35 @@ function exposeApp() {
             }
         },
 
+        /* ==================================================================
+           Provenance Chain
+           ================================================================== */
+
+        /**
+         * Fetch the provenance chain for a given entity from the API.
+         * Populates this.provenanceData for the Provenance Chain panel.
+         *
+         * @param {string} entityId - UUID of the entity
+         */
+        async loadProvenance(entityId) {
+            if (!this.selectedTenantId || !entityId) return;
+            try {
+                var resp = await fetch(
+                    "/v1/tenants/" + this.selectedTenantId +
+                    "/entities/" + entityId + "/provenance"
+                );
+                if (!resp.ok) {
+                    console.warn("[EXPOSE] Provenance fetch failed:", resp.status);
+                    this.provenanceData = null;
+                    return;
+                }
+                this.provenanceData = await resp.json();
+            } catch (e) {
+                console.warn("[EXPOSE] Provenance fetch error:", e);
+                this.provenanceData = null;
+            }
+        },
+
         /**
          * Map a lead score (0-100) to a CSS color variable.
          * Used by the findings table score bar to indicate severity.
@@ -1864,6 +1899,12 @@ document.addEventListener("DOMContentLoaded", function () {
                     existingDetail.parentNode.removeChild(existingDetail);
                 }
             }, 200);
+            // Clear provenance panel when collapsing
+            var appElCollapse = document.querySelector("[x-data]");
+            if (appElCollapse && appElCollapse._x_dataStack) {
+                var appDataCollapse = appElCollapse._x_dataStack[0];
+                if (appDataCollapse) appDataCollapse.provenanceData = null;
+            }
             return;
         }
 
@@ -1913,6 +1954,15 @@ document.addEventListener("DOMContentLoaded", function () {
             row.parentNode.insertBefore(detailRow, row.nextSibling);
         } else {
             row.parentNode.appendChild(detailRow);
+        }
+
+        // Trigger provenance chain load via the Alpine app scope
+        var appEl = document.querySelector("[x-data]");
+        if (appEl && appEl._x_dataStack) {
+            var appData = appEl._x_dataStack[0];
+            if (appData && typeof appData.loadProvenance === "function") {
+                appData.loadProvenance(entityId);
+            }
         }
     }
 

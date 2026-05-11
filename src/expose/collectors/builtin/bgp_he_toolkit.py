@@ -21,6 +21,8 @@ import re
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
+from typing import ClassVar
+
 import httpx
 
 from expose.collectors.base import (
@@ -106,6 +108,7 @@ class HeToolkitCollector(Collector):
     collector_version: str = "0.1.0"
     tier: CollectorTier = CollectorTier.TIER_1
     requires_credentials: bool = False
+    technique_ids: ClassVar[list[str]] = ["T1596.001"]
 
     def __init__(self, config: CollectorConfig) -> None:
         super().__init__(config)

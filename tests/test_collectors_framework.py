@@ -471,3 +471,93 @@ class TestEnforcementModeInCollectorFramework:
             explicit_entity_identifiers=frozenset(),
         )
         assert scope.enforcement_mode == EnforcementMode.MEDIUM
+
+
+# === MITRE ATT&CK technique_ids (Gitea #102) =================================
+
+# Import all builtin collectors to populate the default registry.
+import expose.collectors.builtin  # noqa: E402, F401
+
+from expose.collectors.registry import DEFAULT_REGISTRY  # noqa: E402
+
+
+# Valid MITRE ATT&CK technique ID pattern: T followed by 4 digits,
+# optionally followed by a dot and 3 digits for sub-techniques.
+import re  # noqa: E402
+
+_TECHNIQUE_ID_RE = re.compile(r"^T\d{4}(\.\d{3})?$")
+
+
+class TestTechniqueIds:
+    """Every registered collector must declare non-empty MITRE ATT&CK
+    technique IDs with valid format."""
+
+    def test_abc_default_is_empty_list(self) -> None:
+        """The ``Collector`` ABC default is an empty list — concrete
+        subclasses must override."""
+        assert Collector.technique_ids == []
+
+    def test_all_registered_collectors_have_technique_ids(self) -> None:
+        """Every registered collector must have a non-empty ``technique_ids``
+        list. This ensures no collector ships without a framework mapping."""
+        all_ids = DEFAULT_REGISTRY.all_ids()
+        # Sanity: we expect at least 29 collectors (the 38 builtin files).
+        assert len(all_ids) >= 29, (
+            f"Expected at least 29 registered collectors, got {len(all_ids)}"
+        )
+
+        missing: list[str] = []
+        for collector_id in all_ids:
+            cls = DEFAULT_REGISTRY.get(collector_id)
+            if not cls.technique_ids:
+                missing.append(collector_id)
+
+        assert not missing, (
+            f"Collectors with empty technique_ids: {missing}"
+        )
+
+    def test_all_technique_ids_match_pattern(self) -> None:
+        """All technique IDs must match ``T[0-9]{4}(\\.[0-9]{3})?``."""
+        invalid: list[tuple[str, str]] = []
+        for collector_id in DEFAULT_REGISTRY.all_ids():
+            cls = DEFAULT_REGISTRY.get(collector_id)
+            for tid in cls.technique_ids:
+                if not _TECHNIQUE_ID_RE.match(tid):
+                    invalid.append((collector_id, tid))
+
+        assert not invalid, (
+            f"Invalid technique IDs: {invalid}"
+        )
+
+    def test_technique_ids_are_classvar_not_instance(self) -> None:
+        """``technique_ids`` should be a class attribute, not set per-instance."""
+        cfg = CollectorConfig(tenant_id=TENANT_ID, run_id=RUN_ID)
+        collector = _DummyCollector(cfg)
+        # DummyCollector inherits the ABC default (empty list).
+        assert collector.technique_ids == []
+        # Verify it's the same object as the class attribute (ClassVar).
+        assert collector.technique_ids is _DummyCollector.technique_ids
+
+    def test_known_collector_technique_ids(self) -> None:
+        """Spot-check technique IDs on a representative set of collectors."""
+        expected = {
+            "ct-crtsh": ["T1596.003"],
+            "active-dns-resolve": ["T1596.001"],
+            "rdap-whois": ["T1596.002"],
+            "scan-shodan": ["T1596"],
+            "active-port-surface": ["T1046"],
+            "cloud-ranges": ["T1526"],
+            "github-exposed": ["T1593.003"],
+            "spf-dkim-dmarc": ["T1589.002"],
+            "ma-discovery": ["T1591.004"],
+            "waf-detection": ["T1592.004"],
+            "wayback-machine": ["T1593"],
+            "paste-monitor": ["T1598"],
+            "sip-discovery": ["T1046"],
+        }
+        for collector_id, expected_ids in expected.items():
+            cls = DEFAULT_REGISTRY.get(collector_id)
+            assert cls.technique_ids == expected_ids, (
+                f"{collector_id}: expected {expected_ids}, "
+                f"got {cls.technique_ids}"
+            )

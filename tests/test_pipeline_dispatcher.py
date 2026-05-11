@@ -1359,3 +1359,104 @@ class TestEnforcementDispatcherIntegration:
         assert "Tier-3 dispatch denied" in refusal.reason
         assert refusal.entity_identifier == "example.com"
         assert refusal.collector_id == "mock-tier3"
+
+
+# === Tier-3 attribution gate tests ==========================================
+
+
+class TestTier3AttributionGate:
+    """Tests for the Tier-3 attribution status gate in PipelineDispatcher."""
+
+    @pytest.mark.asyncio
+    async def test_tier3_gate_denied_unattributed(
+        self,
+        registry: CollectorRegistry,
+        scope_with_example: TenantAuthorizationScope,
+    ) -> None:
+        """Tier-3 dispatch denied when entity attribution_status is 'unattributed'."""
+        seed = Seed(
+            seed_type=SeedType.DOMAIN,
+            value="example.com",
+            properties={"attribution_status": "unattributed"},
+        )
+        dispatcher = PipelineDispatcher(registry, scope_with_example, TENANT_ID)
+        result = await dispatcher.dispatch(_make_job("mock-tier3", seed))
+
+        assert result.status == DispatchStatus.DENIED
+        assert result.error_message == "entity_not_attributed_for_tier3"
+        assert result.observations == []
+
+    @pytest.mark.asyncio
+    async def test_tier3_gate_denied_requires_review(
+        self,
+        registry: CollectorRegistry,
+        scope_with_example: TenantAuthorizationScope,
+    ) -> None:
+        """Tier-3 dispatch denied when entity attribution_status is 'requires_review'."""
+        seed = Seed(
+            seed_type=SeedType.DOMAIN,
+            value="example.com",
+            properties={"attribution_status": "requires_review"},
+        )
+        dispatcher = PipelineDispatcher(registry, scope_with_example, TENANT_ID)
+        result = await dispatcher.dispatch(_make_job("mock-tier3", seed))
+
+        assert result.status == DispatchStatus.DENIED
+        assert result.error_message == "entity_not_attributed_for_tier3"
+
+    @pytest.mark.asyncio
+    async def test_tier3_gate_allowed_confirmed(
+        self,
+        registry: CollectorRegistry,
+        scope_with_example: TenantAuthorizationScope,
+    ) -> None:
+        """Tier-3 dispatch allowed when entity attribution_status is 'confirmed'."""
+        seed = Seed(
+            seed_type=SeedType.DOMAIN,
+            value="example.com",
+            properties={"attribution_status": "confirmed"},
+        )
+        dispatcher = PipelineDispatcher(registry, scope_with_example, TENANT_ID)
+        result = await dispatcher.dispatch(_make_job("mock-tier3", seed))
+
+        assert result.status == DispatchStatus.SUCCESS
+        assert len(result.observations) == 1
+        assert result.observations[0].collector_id == "mock-tier3"
+
+    @pytest.mark.asyncio
+    async def test_tier3_gate_tier1_not_affected(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+    ) -> None:
+        """Tier-1 collectors are not affected by the attribution gate."""
+        seed = Seed(
+            seed_type=SeedType.DOMAIN,
+            value="example.com",
+            properties={"attribution_status": "unattributed"},
+        )
+        dispatcher = PipelineDispatcher(registry, scope_empty, TENANT_ID)
+        result = await dispatcher.dispatch(_make_job("mock-tier1", seed))
+
+        assert result.status == DispatchStatus.SUCCESS
+        assert len(result.observations) == 1
+
+    @pytest.mark.asyncio
+    async def test_tier3_gate_no_attribution_property_falls_through(
+        self,
+        registry: CollectorRegistry,
+        scope_with_example: TenantAuthorizationScope,
+    ) -> None:
+        """When attribution_status is absent from seed properties, the gate passes through."""
+        seed = Seed(
+            seed_type=SeedType.DOMAIN,
+            value="example.com",
+            properties={},
+        )
+        dispatcher = PipelineDispatcher(registry, scope_with_example, TENANT_ID)
+        result = await dispatcher.dispatch(_make_job("mock-tier3", seed))
+
+        # No attribution_status in properties -> falls through to existing
+        # Tier-3 gate which allows because example.com is in scope
+        assert result.status == DispatchStatus.SUCCESS
+        assert len(result.observations) == 1
