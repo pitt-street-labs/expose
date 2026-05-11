@@ -25,6 +25,7 @@ dependencies = [
     # HTTP service surface
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.32,<1",
+    "jinja2>=3.1,<4",
     # HTTP client for collectors (asyncio + httpx per ADR-001)
     "httpx>=0.27,<1",
     # Postgres data layer (ADR-002)

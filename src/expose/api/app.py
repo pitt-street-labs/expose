@@ -16,6 +16,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from expose import __version__
+from expose.api.events import router as events_router
+from expose.api.graph import router as graph_router
+from expose.api.runs import router as runs_router
 from expose.api.tenants import get_session
 from expose.api.tenants import router as tenant_router
 from expose.db.engine import (
@@ -23,6 +26,8 @@ from expose.db.engine import (
     create_async_engine_from_settings,
     create_session_factory,
 )
+from expose.ui.router import mount_static
+from expose.ui.router import router as ui_router
 
 
 def _make_session_dependency(
@@ -112,6 +117,13 @@ def create_app(
 
     # -- Routers ---------------------------------------------------------------
     app.include_router(tenant_router)
+    app.include_router(runs_router)
+    app.include_router(graph_router)
+    app.include_router(events_router)
+    app.include_router(ui_router)
+
+    # -- Static files (CSS, JS for dashboard) ----------------------------------
+    mount_static(app)
 
     # -- Health ----------------------------------------------------------------
     @app.get("/healthz", tags=["health"])
