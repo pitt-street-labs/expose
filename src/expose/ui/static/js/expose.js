@@ -1026,11 +1026,17 @@ function exposeApp() {
             document.addEventListener("htmx:afterSwap", function (event) {
                 if (event.detail.target && event.detail.target.id === "entity-list") {
                     var rows = event.detail.target.querySelectorAll(".entity-row");
-                    var appEl = document.querySelector("[x-data]");
-                    if (appEl && appEl.__x) {
-                        appEl.__x.$data.entityCount = rows.length;
-                        appEl.__x.$data.applyEntityFilter();
-                    }
+                    self.entityCount = rows.length;
+                    self.applyEntityFilter();
+                }
+            });
+
+            document.addEventListener("scan-started", function (event) {
+                var runId = event.detail && event.detail.run_id;
+                if (runId) {
+                    self.activeRunId = runId;
+                    self.startScanLogPolling();
+                    self.connectSSE();
                 }
             });
 
@@ -1116,14 +1122,13 @@ function scanForm() {
                 this.statusMessage = "Run " + data.run_id + " started — " +
                     seedSummary.join(", ") + " (" + data.state + ")";
 
-                // Set activeRunId on the parent app component and connect SSE
-                var appEl = document.querySelector("[x-data]");
-                if (appEl && appEl.__x) {
-                    appEl.__x.$data.activeRunId = data.run_id;
-                    // Start scan log polling immediately (SSE may take a moment)
-                    appEl.__x.$data.startScanLogPolling();
-                    // Connect SSE for real-time event streaming
-                    appEl.__x.$data.connectSSE();
+                // Notify parent exposeApp via custom event
+                var scanEl = document.querySelector(".scan-form-card");
+                if (scanEl) {
+                    scanEl.dispatchEvent(new CustomEvent("scan-started", {
+                        bubbles: true,
+                        detail: { run_id: data.run_id },
+                    }));
                 }
             } catch (e) {
                 this.statusMessage = "Error: " + e.message;
