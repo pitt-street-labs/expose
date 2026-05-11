@@ -44,7 +44,7 @@ COPY README.md LICENSE SECURITY.md ETHICS.md ./
 # Resolve and install runtime deps into a venv we'll copy to runtime.
 RUN uv venv /opt/venv \
     && . /opt/venv/bin/activate \
-    && uv pip install --no-cache .
+    && uv pip install --no-cache ".[collectors-dns]"
 
 # Copy source after deps are cached.
 COPY src ./src
