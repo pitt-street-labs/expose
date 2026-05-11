@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from expose.api.tenants import get_session
 from expose.db.models import Entity, Relationship
+from expose.types.pipeline import ProvenanceRuleApplication
 
 # ---------------------------------------------------------------------------
 # Session dependency — reuses the same placeholder as tenants.py.
@@ -72,7 +73,7 @@ class ProvenanceResponse(BaseModel):
     attribution_status: str
     attribution_confidence: float
     observations: list[ProvenanceObservation]
-    rules_applied: list[dict]  # rule_id, outcome, confidence_delta
+    rules_applied: list[ProvenanceRuleApplication]
     relationships: list[ProvenanceRelationship]
 
 
@@ -212,16 +213,16 @@ async def get_provenance(
         )
 
     # -- Extract rules applied from properties --------------------------------
-    rules_applied: list[dict] = []
+    rules_applied: list[ProvenanceRuleApplication] = []
     raw_rules = props.get("_rules_applied", [])
     if isinstance(raw_rules, list):
         for rule in raw_rules:
             if isinstance(rule, dict):
-                rules_applied.append({
-                    "rule_id": rule.get("rule_id", "unknown"),
-                    "outcome": rule.get("outcome", "unknown"),
-                    "confidence_delta": rule.get("confidence_delta", 0.0),
-                })
+                rules_applied.append(ProvenanceRuleApplication(
+                    rule_id=rule.get("rule_id", "unknown"),
+                    outcome=rule.get("outcome", "unknown"),
+                    confidence_delta=rule.get("confidence_delta", 0.0),
+                ))
 
     return ProvenanceResponse(
         entity_id=str(entity.id),

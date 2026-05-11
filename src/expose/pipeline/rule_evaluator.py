@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from expose.types.pipeline import EntityData, ScopeContext
 from expose.types.rulepack import (
     Action,
     AndCondition,
@@ -90,17 +91,33 @@ def _confidence_to_tier(confidence: float, thresholds: TierThresholds) -> str:
 # ``RuleEvaluator``; predicates that don't need it simply ignore it.
 
 
+def _get_scope_field(scope: ScopeContext | dict[str, Any], key: str, default: Any = None) -> Any:
+    """Retrieve a field from a ScopeContext model or a raw dict.
+
+    ScopeContext uses ``extra="allow"`` so arbitrary scope keys (cloud_ranges,
+    apex_domains, etc.) are accessible as extra fields or via dict fallback.
+    """
+    if isinstance(scope, dict):
+        return scope.get(key, default if default is not None else [])
+    # For ScopeContext: check named fields first, then extra fields
+    if hasattr(scope, key):
+        return getattr(scope, key)
+    # Extra fields stored in model_extra
+    extras = scope.model_extra or {}
+    return extras.get(key, default if default is not None else [])
+
+
 def _eval_target_has_certificate_with_san_in_scope(
-    entity: dict[str, Any],
+    entity: EntityData,
     params: dict[str, Any] | None,
-    scope: dict[str, Any],
+    scope: ScopeContext,
 ) -> bool:
     """Check if entity has a TLS SAN matching any scope domain."""
-    props = entity.get("properties", {})
+    props = entity.properties
     san_values: list[str] = props.get("tls_san_values", [])
     if isinstance(san_values, str):
         san_values = [san_values]
-    scope_domains: list[str] = scope.get("scope_domains", [])
+    scope_domains: list[str] = _get_scope_field(scope, "scope_domains", [])
     for san in san_values:
         san_lower = san.lower().lstrip("*.")
         for domain in scope_domains:
@@ -110,25 +127,25 @@ def _eval_target_has_certificate_with_san_in_scope(
 
 
 def _eval_target_ip_in_authorized_cloud_account_range(
-    entity: dict[str, Any],
+    entity: EntityData,
     params: dict[str, Any] | None,
-    scope: dict[str, Any],
+    scope: ScopeContext,
 ) -> bool:
     """Check if entity IP falls within configured cloud CIDR ranges."""
-    props = entity.get("properties", {})
+    props = entity.properties
     # Collect all candidate IPs to check
     candidate_ips: list[str] = []
     # Explicit ip property takes priority
     if props.get("ip"):
         candidate_ips.append(str(props["ip"]))
     # For IP-type entities, the identifier itself is the IP
-    if entity.get("entity_type") == "ip":
-        candidate_ips.append(entity.get("canonical_identifier", ""))
+    if entity.entity_type == "ip":
+        candidate_ips.append(entity.canonical_identifier)
     # Resolved IPs from DNS lookups
     resolved = props.get("resolved_ips", [])
     if isinstance(resolved, list):
         candidate_ips.extend(str(ip) for ip in resolved)
-    cloud_ranges: list[str] = scope.get("cloud_ranges", [])
+    cloud_ranges: list[str] = _get_scope_field(scope, "cloud_ranges", [])
     if not candidate_ips or not cloud_ranges:
         return False
     for ip_str in candidate_ips:
@@ -147,19 +164,19 @@ def _eval_target_ip_in_authorized_cloud_account_range(
 
 
 def _eval_target_registrant_matches_authorized_pattern(
-    entity: dict[str, Any],
+    entity: EntityData,
     params: dict[str, Any] | None,
-    scope: dict[str, Any],
+    scope: ScopeContext,
 ) -> bool:
     """Regex match on WHOIS registrant fields."""
-    props = entity.get("properties", {})
+    props = entity.properties
     registrant_fields = [
         props.get("registrant_org", ""),
         props.get("registrant_name", ""),
         props.get("registrant_email", ""),
         props.get("whois_registrant", ""),
     ]
-    patterns: list[str] = scope.get("registrant_patterns", [])
+    patterns: list[str] = _get_scope_field(scope, "registrant_patterns", [])
     for field_val in registrant_fields:
         if not field_val:
             continue
@@ -173,32 +190,32 @@ def _eval_target_registrant_matches_authorized_pattern(
 
 
 def _eval_target_shares_cert_chain_with_attributed_target(
-    entity: dict[str, Any],
+    entity: EntityData,
     params: dict[str, Any] | None,
-    scope: dict[str, Any],
+    scope: ScopeContext,
 ) -> bool:
     """Check cert chain overlap with confirmed entities."""
-    props = entity.get("properties", {})
+    props = entity.properties
     cert_chain = props.get("cert_chain_fingerprints", [])
     if isinstance(cert_chain, str):
         cert_chain = [cert_chain]
-    attributed_chains: list[str] = scope.get("attributed_cert_fingerprints", [])
+    attributed_chains: list[str] = _get_scope_field(scope, "attributed_cert_fingerprints", [])
     if not cert_chain or not attributed_chains:
         return False
     return bool(set(cert_chain) & set(attributed_chains))
 
 
 def _eval_target_nameserver_matches_authorized_pattern(
-    entity: dict[str, Any],
+    entity: EntityData,
     params: dict[str, Any] | None,
-    scope: dict[str, Any],
+    scope: ScopeContext,
 ) -> bool:
     """Regex match on NS records."""
-    props = entity.get("properties", {})
+    props = entity.properties
     nameservers = props.get("nameservers", [])
     if isinstance(nameservers, str):
         nameservers = [nameservers]
-    patterns: list[str] = scope.get("nameserver_patterns", [])
+    patterns: list[str] = _get_scope_field(scope, "nameserver_patterns", [])
     for ns in nameservers:
         for pattern in patterns:
             try:
@@ -210,16 +227,16 @@ def _eval_target_nameserver_matches_authorized_pattern(
 
 
 def _eval_target_asn_in_authorized_list(
-    entity: dict[str, Any],
+    entity: EntityData,
     params: dict[str, Any] | None,
-    scope: dict[str, Any],
+    scope: ScopeContext,
 ) -> bool:
     """Check if entity ASN is in authorized list."""
-    props = entity.get("properties", {})
+    props = entity.properties
     entity_asn = props.get("asn")
     if entity_asn is None:
         return False
-    authorized_asns: list[int | str] = scope.get("authorized_asns", [])
+    authorized_asns: list[int | str] = _get_scope_field(scope, "authorized_asns", [])
     # Normalize to strings for comparison (ASNs can be int or "AS12345")
     entity_asn_str = str(entity_asn).upper().lstrip("AS")
     for auth_asn in authorized_asns:
@@ -229,13 +246,13 @@ def _eval_target_asn_in_authorized_list(
 
 
 def _eval_target_subdomain_of_authorized_apex(
-    entity: dict[str, Any],
+    entity: EntityData,
     params: dict[str, Any] | None,
-    scope: dict[str, Any],
+    scope: ScopeContext,
 ) -> bool:
     """Check if entity is a subdomain of a confirmed apex domain."""
-    identifier = entity.get("canonical_identifier", "")
-    apex_domains: list[str] = scope.get("apex_domains", [])
+    identifier = entity.canonical_identifier
+    apex_domains: list[str] = _get_scope_field(scope, "apex_domains", [])
     identifier_lower = identifier.lower()
     for apex in apex_domains:
         apex_lower = apex.lower()
@@ -247,28 +264,28 @@ def _eval_target_subdomain_of_authorized_apex(
 
 
 def _eval_target_in_explicit_authorization_scope(
-    entity: dict[str, Any],
+    entity: EntityData,
     params: dict[str, Any] | None,
-    scope: dict[str, Any],
+    scope: ScopeContext,
 ) -> bool:
     """Check if entity is in tenant's explicit_entity_identifiers."""
-    identifier = entity.get("canonical_identifier", "")
-    explicit_ids: list[str] = scope.get("explicit_entity_identifiers", [])
+    identifier = entity.canonical_identifier
+    explicit_ids: list[str] = _get_scope_field(scope, "explicit_entity_identifiers", [])
     rejection_only = (params or {}).get("rejection_only", False)
     if rejection_only:
-        rejection_ids: list[str] = scope.get("rejection_identifiers", [])
+        rejection_ids: list[str] = _get_scope_field(scope, "rejection_identifiers", [])
         return identifier.lower() in [r.lower() for r in rejection_ids]
     return identifier.lower() in [e.lower() for e in explicit_ids]
 
 
 def _eval_target_observed_by_collectors_count_gte(
-    entity: dict[str, Any],
+    entity: EntityData,
     params: dict[str, Any] | None,
-    scope: dict[str, Any],
+    scope: ScopeContext,
 ) -> bool:
     """Count distinct _collector_id values and compare to threshold."""
     threshold = (params or {}).get("count", 1)
-    props = entity.get("properties", {})
+    props = entity.properties
     # Support multiple collector IDs stored as a list or single value
     collector_ids = props.get("_collector_ids", [])
     if not collector_ids:
@@ -282,13 +299,13 @@ def _eval_target_observed_by_collectors_count_gte(
 
 
 def _eval_target_first_observed_within_days(
-    entity: dict[str, Any],
+    entity: EntityData,
     params: dict[str, Any] | None,
-    scope: dict[str, Any],
+    scope: ScopeContext,
 ) -> bool:
     """Check if entity was first observed within N days of now."""
     days = (params or {}).get("days", 30)
-    props = entity.get("properties", {})
+    props = entity.properties
     observed_at_str = props.get("_observed_at")
     if not observed_at_str:
         return False
@@ -306,13 +323,13 @@ def _eval_target_first_observed_within_days(
 
 
 def _eval_target_has_exposure_indicator(
-    entity: dict[str, Any],
+    entity: EntityData,
     params: dict[str, Any] | None,
-    scope: dict[str, Any],
+    scope: ScopeContext,
 ) -> bool:
     """Check for exposure properties (open ports, weak ciphers, etc.)."""
     indicator = (params or {}).get("indicator")
-    props = entity.get("properties", {})
+    props = entity.properties
     exposure_indicators = props.get("exposure_indicators", [])
     if isinstance(exposure_indicators, str):
         exposure_indicators = [exposure_indicators]
@@ -323,15 +340,15 @@ def _eval_target_has_exposure_indicator(
 
 
 def _eval_target_responds_with_authorized_naming_convention(
-    entity: dict[str, Any],
+    entity: EntityData,
     params: dict[str, Any] | None,
-    scope: dict[str, Any],
+    scope: ScopeContext,
 ) -> bool:
     """Regex match on HTTP response body/title."""
-    props = entity.get("properties", {})
+    props = entity.properties
     response_title = props.get("http_title", "")
     response_body = props.get("http_body", "")
-    patterns: list[str] = scope.get("naming_convention_patterns", [])
+    patterns: list[str] = _get_scope_field(scope, "naming_convention_patterns", [])
     targets = [str(response_title), str(response_body)]
     for target in targets:
         if not target:
@@ -369,8 +386,8 @@ _PREDICATE_EVALUATORS: dict[Predicate, Any] = {
 
 def _evaluate_condition(
     condition: Condition,
-    entity: dict[str, Any],
-    scope: dict[str, Any],
+    entity: EntityData,
+    scope: ScopeContext,
 ) -> bool:
     """Recursively evaluate a condition tree against entity data."""
     if isinstance(condition, PredicateCondition):
@@ -450,15 +467,16 @@ class RuleEvaluator:
     ----------
     rule_pack : RulePack
         The rule pack to evaluate. Must contain valid predicates.
-    scope_context : dict
+    scope_context : ScopeContext | dict | None
         Tenant authorization context providing data needed by scope-aware
         predicates (cloud ranges, apex domains, explicit identifiers, etc.).
+        Accepts a ``ScopeContext`` model or a raw dict (coerced automatically).
     """
 
     def __init__(
         self,
         rule_pack: RulePack,
-        scope_context: dict[str, Any] | None = None,
+        scope_context: ScopeContext | dict[str, Any] | None = None,
     ) -> None:
         validate_rule_pack(rule_pack)
         self._rules = sorted(
@@ -466,17 +484,24 @@ class RuleEvaluator:
             key=lambda r: r.priority,
         )
         self._thresholds = rule_pack.tier_thresholds or TierThresholds()
-        self._scope = scope_context or {}
+        # Coerce dict to ScopeContext for type safety; None becomes empty.
+        if scope_context is None:
+            self._scope = ScopeContext()
+        elif isinstance(scope_context, dict):
+            self._scope = ScopeContext.model_validate(scope_context)
+        else:
+            self._scope = scope_context
 
-    def evaluate(self, entity: dict[str, Any]) -> RuleEvaluationResult:
+    def evaluate(self, entity: EntityData | dict[str, Any]) -> RuleEvaluationResult:
         """Evaluate all enabled rules against a single entity.
 
         Parameters
         ----------
-        entity : dict
-            Entity data dict with keys: ``entity_type``,
-            ``canonical_identifier``, ``properties`` (dict),
-            ``attribution_status``, ``attribution_confidence``.
+        entity : EntityData | dict
+            Entity data as an ``EntityData`` model or a raw dict with keys:
+            ``entity_type``, ``canonical_identifier``, ``properties`` (dict),
+            ``attribution_status``, ``attribution_confidence``.  Raw dicts
+            are coerced to ``EntityData`` automatically.
 
         Returns
         -------
@@ -484,8 +509,12 @@ class RuleEvaluator:
             Aggregate result with matched rules, final confidence,
             attribution tier, review flags, and applied deltas.
         """
+        # Coerce dict to EntityData for type safety.
+        if isinstance(entity, dict):
+            entity = EntityData.model_validate(entity)
+
         result = RuleEvaluationResult()
-        base_confidence = float(entity.get("attribution_confidence", 0.0))
+        base_confidence = float(entity.attribution_confidence)
         cumulative_delta = 0.0
         rejected = False
 
@@ -499,7 +528,7 @@ class RuleEvaluator:
                 logger.exception(
                     "Error evaluating rule %s against %s",
                     rule.rule_id,
-                    entity.get("canonical_identifier", "?"),
+                    entity.canonical_identifier,
                 )
                 continue
 
@@ -550,7 +579,9 @@ class RuleEvaluator:
 
 __all__ = [
     "AppliedDelta",
+    "EntityData",
     "RuleEvaluationResult",
     "RuleEvaluator",
+    "ScopeContext",
     "validate_rule_pack",
 ]

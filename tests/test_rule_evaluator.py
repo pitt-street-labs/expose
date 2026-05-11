@@ -13,8 +13,10 @@ import pytest
 
 from expose.pipeline.rule_evaluator import (
     AppliedDelta,
+    EntityData,
     RuleEvaluationResult,
     RuleEvaluator,
+    ScopeContext,
     validate_rule_pack,
 )
 from expose.types.rulepack import (

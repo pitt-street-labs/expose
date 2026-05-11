@@ -14,10 +14,44 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from pydantic import BaseModel
+
 from expose.modules.identity_surface.registrant_pivot import (
     AuthorizationError,
     PivotResult,
 )
+
+
+class MaResult(BaseModel):
+    """Typed model for M&A (mergers and acquisitions) discovery input.
+
+    Replaces ``dict[str, Any]`` inputs to
+    ``OrgGraphBuilder.add_ma_results()`` for type safety. Legacy dict
+    inputs are still accepted via ``model_validate()`` for backward
+    compatibility.
+    """
+
+    acquirer: str
+    target: str
+    relationship: str = "acquired_by"
+    confidence: float = 0.7
+    properties: dict[str, Any] = {}
+
+
+class DnsRelationship(BaseModel):
+    """Typed model for DNS relationship input data.
+
+    Replaces ``dict[str, Any]`` inputs to
+    ``OrgGraphBuilder.add_dns_relationships()`` for type safety. Legacy
+    dict inputs are still accepted via ``model_validate()`` for backward
+    compatibility.
+    """
+
+    parent_domain: str
+    child_domain: str
+    relationship: str = "dns_delegation"
+    confidence: float = 0.6
+    ip_ranges: list[str] = []
 
 
 class NodeType(StrEnum):
@@ -102,6 +136,54 @@ class OrgGraph:
         return [e.target for e in self.get_edges_from(node_id)]
 
 
+def _coerce_ma_results(
+    data: list[MaResult | dict[str, Any]],
+) -> list[MaResult]:
+    """Coerce a mixed list of ``MaResult`` models and dicts.
+
+    Dict entries are validated via ``MaResult.model_validate()``.
+    Dicts missing required ``acquirer`` or ``target`` keys are silently
+    skipped (matching the previous behavior).
+    """
+    result: list[MaResult] = []
+    for entry in data:
+        if isinstance(entry, MaResult):
+            result.append(entry)
+        elif isinstance(entry, dict):
+            if not entry.get("acquirer") or not entry.get("target"):
+                continue
+            result.append(MaResult.model_validate(entry))
+        else:
+            raise TypeError(
+                f"Expected MaResult or dict, got {type(entry).__name__}"
+            )
+    return result
+
+
+def _coerce_dns_relationships(
+    data: list[DnsRelationship | dict[str, Any]],
+) -> list[DnsRelationship]:
+    """Coerce a mixed list of ``DnsRelationship`` models and dicts.
+
+    Dict entries are validated via ``DnsRelationship.model_validate()``.
+    Dicts missing required ``parent_domain`` or ``child_domain`` keys
+    are silently skipped (matching the previous behavior).
+    """
+    result: list[DnsRelationship] = []
+    for entry in data:
+        if isinstance(entry, DnsRelationship):
+            result.append(entry)
+        elif isinstance(entry, dict):
+            if not entry.get("parent_domain") or not entry.get("child_domain"):
+                continue
+            result.append(DnsRelationship.model_validate(entry))
+        else:
+            raise TypeError(
+                f"Expected DnsRelationship or dict, got {type(entry).__name__}"
+            )
+    return result
+
+
 class OrgGraphBuilder:
     """Build an organization graph from multiple data sources.
 
@@ -178,14 +260,18 @@ class OrgGraphBuilder:
                     )
                 )
 
-    def add_ma_results(self, ma_data: list[dict[str, Any]]) -> None:
+    def add_ma_results(
+        self, ma_data: list[MaResult | dict[str, Any]]
+    ) -> None:
         """Ingest M&A (mergers and acquisitions) discovery results.
 
-        Each entry should have:
-        ``acquirer`` (str), ``target`` (str), ``relationship`` (str,
-        one of ``"acquired_by"``, ``"merged_with"``, ``"parent_subsidiary"``),
-        and optionally ``confidence`` (float, default 0.7) and
-        ``properties`` (dict).
+        Each entry should be an ``MaResult`` model (preferred) or a dict
+        with keys: ``acquirer`` (str), ``target`` (str),
+        ``relationship`` (str, one of ``"acquired_by"``,
+        ``"merged_with"``, ``"parent_subsidiary"``), and optionally
+        ``confidence`` (float, default 0.7) and ``properties`` (dict).
+        Dict inputs are coerced via ``MaResult.model_validate()`` for
+        backward compatibility.
 
         Raises
         ------
@@ -194,26 +280,21 @@ class OrgGraphBuilder:
         """
         self._require_auth()
 
+        validated = _coerce_ma_results(ma_data)
+
         _RELATIONSHIP_MAP = {
             "acquired_by": EdgeType.ACQUIRED_BY,
             "merged_with": EdgeType.MERGED_WITH,
             "parent_subsidiary": EdgeType.PARENT_SUBSIDIARY,
         }
 
-        for entry in ma_data:
-            acquirer = entry.get("acquirer")
-            target = entry.get("target")
-            relationship = entry.get("relationship", "parent_subsidiary")
-
-            if not acquirer or not target:
-                continue
-
-            acquirer_id = f"org:{acquirer.lower().strip()}"
-            target_id = f"org:{target.lower().strip()}"
+        for entry in validated:
+            acquirer_id = f"org:{entry.acquirer.lower().strip()}"
+            target_id = f"org:{entry.target.lower().strip()}"
 
             for node_id, name in [
-                (acquirer_id, acquirer),
-                (target_id, target),
+                (acquirer_id, entry.acquirer),
+                (target_id, entry.target),
             ]:
                 if node_id not in self._nodes:
                     self._nodes[node_id] = GraphNode(
@@ -223,30 +304,30 @@ class OrgGraphBuilder:
                     )
 
             edge_type = _RELATIONSHIP_MAP.get(
-                relationship, EdgeType.PARENT_SUBSIDIARY
+                entry.relationship, EdgeType.PARENT_SUBSIDIARY
             )
-            confidence = float(entry.get("confidence", 0.7))
-            props = dict(entry.get("properties", {}))
 
             self._edges.append(
                 GraphEdge(
                     source=acquirer_id,
                     target=target_id,
                     edge_type=edge_type,
-                    confidence=confidence,
-                    properties=props,
+                    confidence=entry.confidence,
+                    properties=dict(entry.properties),
                 )
             )
 
     def add_dns_relationships(
-        self, dns_data: list[dict[str, Any]]
+        self, dns_data: list[DnsRelationship | dict[str, Any]]
     ) -> None:
         """Ingest DNS relationship data (e.g., NS delegation chains).
 
-        Each entry should have:
-        ``parent_domain`` (str), ``child_domain`` (str), and optionally
-        ``relationship`` (str, default ``"dns_delegation"``),
-        ``confidence`` (float, default 0.6), and ``ip_ranges`` (list of str).
+        Each entry should be a ``DnsRelationship`` model (preferred) or
+        a dict with keys: ``parent_domain`` (str), ``child_domain``
+        (str), and optionally ``relationship`` (str, default
+        ``"dns_delegation"``), ``confidence`` (float, default 0.6), and
+        ``ip_ranges`` (list of str). Dict inputs are coerced via
+        ``DnsRelationship.model_validate()`` for backward compatibility.
 
         IP ranges are added as ``IP_RANGE`` nodes with ``ORG_TO_IP_RANGE``
         edges if a parent org node exists.
@@ -258,19 +339,15 @@ class OrgGraphBuilder:
         """
         self._require_auth()
 
-        for entry in dns_data:
-            parent = entry.get("parent_domain")
-            child = entry.get("child_domain")
+        validated = _coerce_dns_relationships(dns_data)
 
-            if not parent or not child:
-                continue
-
-            parent_id = f"domain:{parent.lower().strip()}"
-            child_id = f"domain:{child.lower().strip()}"
+        for entry in validated:
+            parent_id = f"domain:{entry.parent_domain.lower().strip()}"
+            child_id = f"domain:{entry.child_domain.lower().strip()}"
 
             for domain_id, domain_name in [
-                (parent_id, parent),
-                (child_id, child),
+                (parent_id, entry.parent_domain),
+                (child_id, entry.child_domain),
             ]:
                 if domain_id not in self._nodes:
                     self._nodes[domain_id] = GraphNode(
@@ -279,20 +356,17 @@ class OrgGraphBuilder:
                         properties={"domain": domain_name},
                     )
 
-            confidence = float(entry.get("confidence", 0.6))
-
             self._edges.append(
                 GraphEdge(
                     source=parent_id,
                     target=child_id,
                     edge_type=EdgeType.DNS_DELEGATION,
-                    confidence=confidence,
+                    confidence=entry.confidence,
                 )
             )
 
             # Add IP range nodes if provided.
-            ip_ranges = entry.get("ip_ranges") or []
-            for ip_range in ip_ranges:
+            for ip_range in entry.ip_ranges:
                 ip_id = f"ip_range:{ip_range}"
                 if ip_id not in self._nodes:
                     self._nodes[ip_id] = GraphNode(
@@ -306,7 +380,7 @@ class OrgGraphBuilder:
                         source=parent_id,
                         target=ip_id,
                         edge_type=EdgeType.ORG_TO_IP_RANGE,
-                        confidence=confidence,
+                        confidence=entry.confidence,
                     )
                 )
 
@@ -331,9 +405,11 @@ class OrgGraphBuilder:
 
 
 __all__ = [
+    "DnsRelationship",
     "EdgeType",
     "GraphEdge",
     "GraphNode",
+    "MaResult",
     "NodeType",
     "OrgGraph",
     "OrgGraphBuilder",

@@ -22,6 +22,8 @@ from uuid import UUID
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from expose.types.pipeline import FindingSignal
+
 router = APIRouter(prefix="/v1/tenants/{tenant_id}/findings", tags=["findings"])
 
 # ---------------------------------------------------------------------------
@@ -40,7 +42,7 @@ class FindingEntry(BaseModel):
     score: int = Field(ge=0, le=100)
     priority_tier: str  # "critical", "high", "medium", "low"
     justification: str
-    signals: list[dict[str, Any]]  # simplified signal list
+    signals: list[FindingSignal]
 
 
 class FindingsResponse(BaseModel):
@@ -70,10 +72,10 @@ _PLACEHOLDER_FINDINGS: list[dict[str, Any]] = [
             "directory listing enabled, and default credentials detected."
         ),
         "signals": [
-            {"signal": "no_tls", "weight": 30},
-            {"signal": "directory_listing", "weight": 25},
-            {"signal": "default_credentials", "weight": 20},
-            {"signal": "non_production_exposed", "weight": 17},
+            FindingSignal(signal="no_tls", weight=30),
+            FindingSignal(signal="directory_listing", weight=25),
+            FindingSignal(signal="default_credentials", weight=20),
+            FindingSignal(signal="non_production_exposed", weight=17),
         ],
     },
     {
@@ -86,10 +88,10 @@ _PLACEHOLDER_FINDINGS: list[dict[str, Any]] = [
             "and weak cipher suites. Reverse PTR matches org pattern."
         ),
         "signals": [
-            {"signal": "open_management_ports", "weight": 35},
-            {"signal": "weak_ciphers", "weight": 25},
-            {"signal": "unattributed_asset", "weight": 15},
-            {"signal": "ptr_match", "weight": 10},
+            FindingSignal(signal="open_management_ports", weight=35),
+            FindingSignal(signal="weak_ciphers", weight=25),
+            FindingSignal(signal="unattributed_asset", weight=15),
+            FindingSignal(signal="ptr_match", weight=10),
         ],
     },
     {
@@ -102,9 +104,9 @@ _PLACEHOLDER_FINDINGS: list[dict[str, Any]] = [
             "including API and admin portals."
         ),
         "signals": [
-            {"signal": "cert_expiry_imminent", "weight": 40},
-            {"signal": "wildcard_scope", "weight": 20},
-            {"signal": "covers_critical_services", "weight": 14},
+            FindingSignal(signal="cert_expiry_imminent", weight=40),
+            FindingSignal(signal="wildcard_scope", weight=20),
+            FindingSignal(signal="covers_critical_services", weight=14),
         ],
     },
     {
@@ -117,9 +119,9 @@ _PLACEHOLDER_FINDINGS: list[dict[str, Any]] = [
             "no MFA detected. Linked to 3 internal management endpoints."
         ),
         "signals": [
-            {"signal": "admin_portal_exposed", "weight": 30},
-            {"signal": "no_mfa", "weight": 25},
-            {"signal": "basic_auth_only", "weight": 16},
+            FindingSignal(signal="admin_portal_exposed", weight=30),
+            FindingSignal(signal="no_mfa", weight=25),
+            FindingSignal(signal="basic_auth_only", weight=16),
         ],
     },
     {
@@ -132,9 +134,9 @@ _PLACEHOLDER_FINDINGS: list[dict[str, Any]] = [
             "CORS misconfigured with wildcard origin."
         ),
         "signals": [
-            {"signal": "verbose_errors", "weight": 25},
-            {"signal": "cors_wildcard", "weight": 20},
-            {"signal": "stack_trace_leak", "weight": 18},
+            FindingSignal(signal="verbose_errors", weight=25),
+            FindingSignal(signal="cors_wildcard", weight=20),
+            FindingSignal(signal="stack_trace_leak", weight=18),
         ],
     },
     {
@@ -147,9 +149,9 @@ _PLACEHOLDER_FINDINGS: list[dict[str, Any]] = [
             "WHOIS-confirmed ownership."
         ),
         "signals": [
-            {"signal": "legacy_tls", "weight": 25},
-            {"signal": "mixed_tls_versions", "weight": 15},
-            {"signal": "confirmed_ownership", "weight": -8},
+            FindingSignal(signal="legacy_tls", weight=25),
+            FindingSignal(signal="mixed_tls_versions", weight=15),
+            FindingSignal(signal="confirmed_ownership", weight=-8),
         ],
     },
     {
@@ -162,9 +164,9 @@ _PLACEHOLDER_FINDINGS: list[dict[str, Any]] = [
             "SPF record present but overly permissive."
         ),
         "signals": [
-            {"signal": "dmarc_none", "weight": 20},
-            {"signal": "spf_permissive", "weight": 15},
-            {"signal": "valid_mx", "weight": -5},
+            FindingSignal(signal="dmarc_none", weight=20),
+            FindingSignal(signal="spf_permissive", weight=15),
+            FindingSignal(signal="valid_mx", weight=-5),
         ],
     },
     {
@@ -177,9 +179,9 @@ _PLACEHOLDER_FINDINGS: list[dict[str, Any]] = [
             "banner reveals product version."
         ),
         "signals": [
-            {"signal": "banner_disclosure", "weight": 15},
-            {"signal": "strong_tls", "weight": -10},
-            {"signal": "confirmed_ownership", "weight": -5},
+            FindingSignal(signal="banner_disclosure", weight=15),
+            FindingSignal(signal="strong_tls", weight=-10),
+            FindingSignal(signal="confirmed_ownership", weight=-5),
         ],
     },
     {
@@ -192,9 +194,9 @@ _PLACEHOLDER_FINDINGS: list[dict[str, Any]] = [
             "exposure signals; score reflects attribution completeness."
         ),
         "signals": [
-            {"signal": "seed_anchor", "weight": 5},
-            {"signal": "whois_confirmed", "weight": 5},
-            {"signal": "attribution_complete", "weight": 5},
+            FindingSignal(signal="seed_anchor", weight=5),
+            FindingSignal(signal="whois_confirmed", weight=5),
+            FindingSignal(signal="attribution_complete", weight=5),
         ],
     },
     {
@@ -207,9 +209,9 @@ _PLACEHOLDER_FINDINGS: list[dict[str, Any]] = [
             "headers. Low residual score from public DNS exposure."
         ),
         "signals": [
-            {"signal": "dnssec_valid", "weight": -10},
-            {"signal": "security_headers_present", "weight": -8},
-            {"signal": "public_dns_exposure", "weight": 10},
+            FindingSignal(signal="dnssec_valid", weight=-10),
+            FindingSignal(signal="security_headers_present", weight=-8),
+            FindingSignal(signal="public_dns_exposure", weight=10),
         ],
     },
 ]
@@ -305,9 +307,9 @@ async def _build_takeover_findings(
                 f"can claim this service and hijack the subdomain."
             ),
             signals=[
-                {"signal": "dangling_cname", "weight": 50},
-                {"signal": f"vulnerable_provider_{provider}", "weight": 30},
-                {"signal": "nxdomain_confirmed", "weight": 18},
+                FindingSignal(signal="dangling_cname", weight=50),
+                FindingSignal(signal=f"vulnerable_provider_{provider}", weight=30),
+                FindingSignal(signal="nxdomain_confirmed", weight=18),
             ],
         ))
         rank += 1
@@ -365,7 +367,7 @@ async def _build_scored_findings(
 
         # Build signal list from stored properties — extract any signal-like
         # keys that were preserved alongside the score.
-        signals: list[dict[str, Any]] = []
+        signals: list[FindingSignal] = []
         for key, val in props.items():
             if key.startswith("_") or key in (
                 "collector_id",
@@ -376,7 +378,7 @@ async def _build_scored_findings(
                 "lead_score",
                 "priority_tier",
             ):
-                signals.append({"signal": key, "weight": val})
+                signals.append(FindingSignal(signal=key, weight=val))
 
         findings.append(FindingEntry(
             rank=rank,

@@ -104,6 +104,7 @@ class DispatchStatus(StrEnum):
     DENIED = "denied"
     HEALTH_CHECK_FAILED = "health_check_failed"
     COLLECTOR_ERROR = "collector_error"
+    SKIPPED = "skipped"
 
 
 class DispatchResult(BaseModel):
@@ -222,7 +223,14 @@ class PipelineDispatcher:
         job: DispatchJob,
         start_ns: int,
     ) -> dict[str, CollectorCredential] | DispatchResult:
-        """Resolve credentials or return a COLLECTOR_ERROR result on failure."""
+        """Resolve credentials or return a SKIPPED result on failure.
+
+        Missing credentials are a configuration gap, not a collector bug.
+        Returning ``SKIPPED`` instead of ``COLLECTOR_ERROR`` ensures that
+        collectors without API keys do not inflate the failure count and
+        cause the run to report ``failed`` when it should be ``partial``
+        or ``completed``.
+        """
         if self._credential_resolver is None:
             logger.debug(
                 "No credential resolver configured — collector %s will "
@@ -250,7 +258,7 @@ class PipelineDispatcher:
                 exc,
             )
             return DispatchResult(
-                status=DispatchStatus.COLLECTOR_ERROR,
+                status=DispatchStatus.SKIPPED,
                 error_message=str(exc),
                 duration_ms=_elapsed_ms(start_ns),
             )

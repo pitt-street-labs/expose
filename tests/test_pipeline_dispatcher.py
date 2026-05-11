@@ -654,13 +654,17 @@ class TestPipelineDispatcher:
         resolver.resolve.assert_awaited_once_with(TENANT_ID, "mock-capture")
 
     @pytest.mark.asyncio
-    async def test_credential_resolver_error_returns_collector_error(
+    async def test_credential_resolver_error_returns_skipped(
         self,
         registry: CollectorRegistry,
         scope_empty: TenantAuthorizationScope,
         seed: Seed,
     ) -> None:
-        """17. CredentialResolutionError returns COLLECTOR_ERROR."""
+        """17. CredentialResolutionError returns SKIPPED (not COLLECTOR_ERROR).
+
+        Missing credentials are a configuration gap, not a collector bug.
+        Returning SKIPPED ensures these do not inflate the failure count.
+        """
         resolver = AsyncMock(spec=CredentialResolver)
         resolver.resolve = AsyncMock(
             side_effect=CredentialResolutionError("missing api_key"),
@@ -671,7 +675,7 @@ class TestPipelineDispatcher:
         )
         result = await dispatcher.dispatch(_make_job("mock-tier1", seed))
 
-        assert result.status == DispatchStatus.COLLECTOR_ERROR
+        assert result.status == DispatchStatus.SKIPPED
         assert result.observations == []
         assert result.error_message == "missing api_key"
 
@@ -1210,13 +1214,17 @@ class TestCredentialChainEndToEnd:
             CREDENTIAL_SPECS.pop("mock-capture", None)
 
     @pytest.mark.asyncio
-    async def test_missing_credential_returns_collector_error(
+    async def test_missing_credential_returns_skipped(
         self,
         registry: CollectorRegistry,
         scope_empty: TenantAuthorizationScope,
         seed: Seed,
     ) -> None:
-        """Missing credential in backend returns COLLECTOR_ERROR, not HEALTH_CHECK_FAILED."""
+        """Missing credential in backend returns SKIPPED, not COLLECTOR_ERROR.
+
+        Missing credentials are a configuration gap — the collector is not
+        broken, it just cannot run without an API key.
+        """
         from expose.pipeline.credential_resolver import (  # noqa: PLC0415
             CREDENTIAL_SPECS,
             CollectorCredentialSpec,
@@ -1238,8 +1246,8 @@ class TestCredentialChainEndToEnd:
             )
             result = await dispatcher.dispatch(_make_job("mock-tier1", seed))
 
-            # Should fail at credential resolution, not at health check
-            assert result.status == DispatchStatus.COLLECTOR_ERROR
+            # Should skip at credential resolution, not fail
+            assert result.status == DispatchStatus.SKIPPED
             assert "Missing credentials" in (result.error_message or "")
             assert "mock-tier1" in (result.error_message or "")
         finally:

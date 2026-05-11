@@ -123,6 +123,24 @@ def _denied_result() -> DispatchResult:
     )
 
 
+def _skipped_result(msg: str = "missing credentials") -> DispatchResult:
+    """Build a skipped DispatchResult (missing config / credentials)."""
+    return DispatchResult(
+        status="skipped",
+        error_message=msg,
+        duration_ms=1.0,
+    )
+
+
+def _health_check_failed_result(msg: str = "source unreachable") -> DispatchResult:
+    """Build a health-check-failed DispatchResult (external API down)."""
+    return DispatchResult(
+        status="health_check_failed",
+        error_message=msg,
+        duration_ms=2.0,
+    )
+
+
 def _make_run_row(state: str = "pending") -> MagicMock:
     """Build a mock Run ORM row."""
     row = MagicMock()
@@ -2450,3 +2468,187 @@ async def test_enrichment_mixed_timeout_and_exception() -> None:
     assert result.enrichment_count == 1
     assert result.total_observations == 3
     assert result.final_state == "completed"
+
+
+# === Skipped dispatch tests (credential/health-check gaps) =================
+
+
+async def test_skipped_dispatches_do_not_cause_failure() -> None:
+    """Skipped collectors (missing credentials) should not mark run as failed.
+
+    Regression test: 28 successes + 24 skips was reporting 'failed' because
+    skips were counted as failures.  Should be 'completed' since no real
+    collector errors occurred.
+    """
+    obs = _make_observation()
+    executor, disp, _r_repo, _e_repo = _build_executor()
+    # First call succeeds, second is skipped (missing credentials)
+    disp.dispatch = AsyncMock(
+        side_effect=[_success_result(obs), _skipped_result()]
+    )
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["passive-dns", "shodan"],
+    )
+
+    assert result.final_state == "completed"
+    assert result.successful_dispatches == 1
+    assert result.skipped_dispatches == 1
+    assert result.failed_dispatches == 0
+
+
+async def test_health_check_failed_counted_as_skip() -> None:
+    """Health-check failure (external API unreachable) is a skip, not a failure.
+
+    An unreachable data source is a configuration/availability gap, not a
+    collector bug.  The run state should reflect this distinction.
+    """
+    obs = _make_observation()
+    executor, disp, _r_repo, _e_repo = _build_executor()
+    disp.dispatch = AsyncMock(
+        side_effect=[_success_result(obs), _health_check_failed_result()]
+    )
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["passive-dns", "censys"],
+    )
+
+    assert result.final_state == "completed"
+    assert result.successful_dispatches == 1
+    assert result.skipped_dispatches == 1
+    assert result.failed_dispatches == 0
+
+
+async def test_successes_with_skips_and_real_failures_is_partial() -> None:
+    """Mix of successes, skips, and real failures -> state = partial.
+
+    Skips alone do not trigger 'partial'; real collector errors are required.
+    """
+    obs = _make_observation()
+    executor, disp, _r_repo, _e_repo = _build_executor()
+    disp.dispatch = AsyncMock(
+        side_effect=[
+            _success_result(obs),
+            _skipped_result(),
+            _failed_result("collector threw ValueError"),
+        ]
+    )
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["passive-dns", "shodan", "buggy-collector"],
+    )
+
+    assert result.final_state == "partial"
+    assert result.successful_dispatches == 1
+    assert result.skipped_dispatches == 1
+    assert result.failed_dispatches == 1
+
+
+async def test_all_skipped_is_failed() -> None:
+    """When every dispatch is skipped (zero successes), state = failed.
+
+    Even though skips are not bugs, a run with zero useful output is still
+    a failed run from the user's perspective.
+    """
+    executor, disp, _r_repo, _e_repo = _build_executor()
+    disp.dispatch = AsyncMock(return_value=_skipped_result())
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["shodan"],
+    )
+
+    assert result.final_state == "failed"
+    assert result.successful_dispatches == 0
+    assert result.skipped_dispatches == 1
+    assert result.failed_dispatches == 0
+
+
+async def test_all_health_check_failed_is_failed() -> None:
+    """All dispatches fail health check -> state = failed."""
+    executor, disp, _r_repo, _e_repo = _build_executor()
+    disp.dispatch = AsyncMock(return_value=_health_check_failed_result())
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["censys"],
+    )
+
+    assert result.final_state == "failed"
+    assert result.successful_dispatches == 0
+    assert result.skipped_dispatches == 1
+    assert result.failed_dispatches == 0
+
+
+async def test_total_dispatches_includes_skipped() -> None:
+    """total_dispatches counts all dispatch attempts including skips."""
+    obs = _make_observation()
+    executor, disp, _r_repo, _e_repo = _build_executor()
+    disp.dispatch = AsyncMock(
+        side_effect=[
+            _success_result(obs),
+            _skipped_result(),
+            _denied_result(),
+        ]
+    )
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["passive-dns", "shodan", "active-tls"],
+    )
+
+    assert result.total_dispatches == 3
+    assert result.successful_dispatches == 1
+    assert result.skipped_dispatches == 1
+    assert result.denied_dispatches == 1
+    assert result.failed_dispatches == 0
+    assert result.final_state == "completed"
+
+
+async def test_many_successes_many_skips_is_completed() -> None:
+    """Scenario from the bug report: 28 successes, 24 skips -> completed.
+
+    This is the exact scenario that triggered the bug: a scan of example.com
+    with 28 successful collectors and 24 skipped collectors (missing API keys
+    or unreachable APIs).  Previously reported 'failed'; should be 'completed'.
+    """
+    obs = _make_observation()
+    executor, disp, _r_repo, _e_repo = _build_executor()
+
+    # Build side effects: 28 successes followed by 24 skips
+    side_effects = (
+        [_success_result(obs)] * 28
+        + [_skipped_result("Missing API key")] * 12
+        + [_health_check_failed_result("API unreachable")] * 12
+    )
+    disp.dispatch = AsyncMock(side_effect=side_effects)
+
+    # Use IP seed (no expansion) with enough collectors to consume all 52 results
+    collector_ids = [f"collector-{i}" for i in range(52)]
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=collector_ids,
+    )
+
+    assert result.final_state == "completed"
+    assert result.successful_dispatches == 28
+    assert result.skipped_dispatches == 24
+    assert result.failed_dispatches == 0
+    assert result.total_dispatches == 52

@@ -16,6 +16,8 @@ from difflib import SequenceMatcher
 from enum import StrEnum
 from typing import Any
 
+from pydantic import BaseModel
+
 # Common corporate suffixes stripped before fuzzy comparison so that
 # "Acme Corp" matches "ACME Corporation" even when SequenceMatcher
 # would rate the raw strings below threshold. The list is intentionally
@@ -29,6 +31,22 @@ _CORP_SUFFIX_RE = re.compile(
     r")\s*$",
     re.IGNORECASE,
 )
+
+
+class WhoisEntity(BaseModel):
+    """Typed model for WHOIS/RDAP entity input data.
+
+    Replaces ``dict[str, Any]`` inputs to ``RegistrantPivot.pivot()``
+    for type safety. Legacy dict inputs are still accepted via
+    ``model_validate()`` for backward compatibility.
+    """
+
+    domain: str
+    registrant_org: str | None = None
+    registrant_email: str | None = None
+    registrant_city: str | None = None
+    registrant_country: str | None = None
+    name_servers: list[str] = []
 
 
 class PivotDimension(StrEnum):
@@ -89,6 +107,30 @@ class AuthorizationError(RegistrantPivotError):
     """Raised when per-tenant authorization has not been granted."""
 
 
+def _coerce_whois_entities(
+    entities: list[WhoisEntity | dict[str, Any]],
+) -> list[WhoisEntity]:
+    """Coerce a mixed list of ``WhoisEntity`` models and dicts.
+
+    Dict entries are validated via ``WhoisEntity.model_validate()``.
+    Dicts missing the required ``domain`` key are silently skipped
+    (matching the previous behavior of ``_build_members``).
+    """
+    result: list[WhoisEntity] = []
+    for entry in entities:
+        if isinstance(entry, WhoisEntity):
+            result.append(entry)
+        elif isinstance(entry, dict):
+            if "domain" not in entry or not entry["domain"]:
+                continue
+            result.append(WhoisEntity.model_validate(entry))
+        else:
+            raise TypeError(
+                f"Expected WhoisEntity or dict, got {type(entry).__name__}"
+            )
+    return result
+
+
 class RegistrantPivot:
     """Correlate WHOIS/RDAP registrant data across domains.
 
@@ -120,16 +162,19 @@ class RegistrantPivot:
                 "See IDENTITY_SURFACE_ETHICS.md for consent and scope requirements."
             )
 
-    def pivot(self, entities: list[dict[str, Any]]) -> PivotResult:
+    def pivot(self, entities: list[WhoisEntity | dict[str, Any]]) -> PivotResult:
         """Run the full registrant pivot across all dimensions.
 
         Parameters
         ----------
         entities:
-            List of dicts with WHOIS properties. Expected keys (all optional):
-            ``domain``, ``registrant_org``, ``registrant_email``,
-            ``registrant_city``, ``registrant_country``, ``name_servers``
-            (list of strings).
+            List of ``WhoisEntity`` models (preferred) or dicts with WHOIS
+            properties (backward-compatible). Dict inputs are coerced to
+            ``WhoisEntity`` via ``model_validate()``. Expected keys
+            (all optional except ``domain``): ``domain``,
+            ``registrant_org``, ``registrant_email``,
+            ``registrant_city``, ``registrant_country``,
+            ``name_servers`` (list of strings).
 
         Returns
         -------
@@ -143,7 +188,8 @@ class RegistrantPivot:
         """
         self._require_auth()
 
-        members = self._build_members(entities)
+        validated = _coerce_whois_entities(entities)
+        members = self._build_members(validated)
         clusters: list[PivotCluster] = []
 
         clusters.extend(self._pivot_by_org_name(members))
@@ -158,23 +204,21 @@ class RegistrantPivot:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _build_members(entities: list[dict[str, Any]]) -> list[ClusterMember]:
-        """Convert raw entity dicts to ``ClusterMember`` instances."""
+    def _build_members(entities: list[WhoisEntity]) -> list[ClusterMember]:
+        """Convert ``WhoisEntity`` instances to ``ClusterMember`` instances."""
         members: list[ClusterMember] = []
         for entity in entities:
-            domain = entity.get("domain")
-            if not domain:
+            if not entity.domain:
                 continue
-            ns_raw = entity.get("name_servers") or []
             members.append(
                 ClusterMember(
-                    domain=str(domain).lower().strip(),
-                    registrant_org=entity.get("registrant_org"),
-                    registrant_email=entity.get("registrant_email"),
-                    registrant_city=entity.get("registrant_city"),
-                    registrant_country=entity.get("registrant_country"),
+                    domain=entity.domain.lower().strip(),
+                    registrant_org=entity.registrant_org,
+                    registrant_email=entity.registrant_email,
+                    registrant_city=entity.registrant_city,
+                    registrant_country=entity.registrant_country,
                     name_servers=tuple(
-                        str(ns).lower().strip() for ns in ns_raw
+                        str(ns).lower().strip() for ns in entity.name_servers
                     ),
                 )
             )
@@ -374,4 +418,5 @@ __all__ = [
     "PivotResult",
     "RegistrantPivot",
     "RegistrantPivotError",
+    "WhoisEntity",
 ]

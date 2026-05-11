@@ -27,7 +27,9 @@ import pytest
 
 from expose.modules.identity_surface import check_license
 from expose.modules.identity_surface.org_graph import (
+    DnsRelationship,
     EdgeType,
+    MaResult,
     NodeType,
     OrgGraph,
     OrgGraphBuilder,
@@ -37,6 +39,7 @@ from expose.modules.identity_surface.registrant_pivot import (
     PivotDimension,
     PivotResult,
     RegistrantPivot,
+    WhoisEntity,
 )
 
 
@@ -52,86 +55,86 @@ ETHICS_DOC_PATH = (
 )
 
 
-def _sample_entities() -> list[dict]:
-    """Return a representative set of WHOIS entity dicts for testing."""
+def _sample_entities() -> list[WhoisEntity]:
+    """Return a representative set of WHOIS entity models for testing."""
     return [
-        {
-            "domain": "acme.com",
-            "registrant_org": "Acme Corp",
-            "registrant_email": "domains@acme.com",
-            "registrant_city": "San Francisco",
-            "registrant_country": "US",
-            "name_servers": ["ns1.acmedns.net", "ns2.acmedns.net"],
-        },
-        {
-            "domain": "acme.net",
-            "registrant_org": "ACME Corporation",
-            "registrant_email": "admin@acme.com",
-            "registrant_city": "San Francisco",
-            "registrant_country": "US",
-            "name_servers": ["ns1.acmedns.net", "ns2.acmedns.net"],
-        },
-        {
-            "domain": "acme-labs.io",
-            "registrant_org": "Acme Corp",
-            "registrant_email": "hostmaster@acme.com",
-            "registrant_city": "San Francisco",
-            "registrant_country": "US",
-            "name_servers": ["ns1.acmedns.net", "ns2.acmedns.net"],
-        },
-        {
-            "domain": "globex.com",
-            "registrant_org": "Globex Corporation",
-            "registrant_email": "dns@globex.com",
-            "registrant_city": "New York",
-            "registrant_country": "US",
-            "name_servers": ["ns1.globexdns.com", "ns2.globexdns.com"],
-        },
-        {
-            "domain": "globex.io",
-            "registrant_org": "Globex Corp",
-            "registrant_email": "admin@globex.com",
-            "registrant_city": "New York",
-            "registrant_country": "US",
-            "name_servers": ["ns1.globexdns.com", "ns2.globexdns.com"],
-        },
+        WhoisEntity(
+            domain="acme.com",
+            registrant_org="Acme Corp",
+            registrant_email="domains@acme.com",
+            registrant_city="San Francisco",
+            registrant_country="US",
+            name_servers=["ns1.acmedns.net", "ns2.acmedns.net"],
+        ),
+        WhoisEntity(
+            domain="acme.net",
+            registrant_org="ACME Corporation",
+            registrant_email="admin@acme.com",
+            registrant_city="San Francisco",
+            registrant_country="US",
+            name_servers=["ns1.acmedns.net", "ns2.acmedns.net"],
+        ),
+        WhoisEntity(
+            domain="acme-labs.io",
+            registrant_org="Acme Corp",
+            registrant_email="hostmaster@acme.com",
+            registrant_city="San Francisco",
+            registrant_country="US",
+            name_servers=["ns1.acmedns.net", "ns2.acmedns.net"],
+        ),
+        WhoisEntity(
+            domain="globex.com",
+            registrant_org="Globex Corporation",
+            registrant_email="dns@globex.com",
+            registrant_city="New York",
+            registrant_country="US",
+            name_servers=["ns1.globexdns.com", "ns2.globexdns.com"],
+        ),
+        WhoisEntity(
+            domain="globex.io",
+            registrant_org="Globex Corp",
+            registrant_email="admin@globex.com",
+            registrant_city="New York",
+            registrant_country="US",
+            name_servers=["ns1.globexdns.com", "ns2.globexdns.com"],
+        ),
     ]
 
 
-def _sample_ma_data() -> list[dict]:
+def _sample_ma_data() -> list[MaResult]:
     """Return M&A discovery entries for testing."""
     return [
-        {
-            "acquirer": "Acme Corp",
-            "target": "Widget Co",
-            "relationship": "acquired_by",
-            "confidence": 0.9,
-            "properties": {"date": "2024-01-15"},
-        },
-        {
-            "acquirer": "Acme Corp",
-            "target": "Gadget Inc",
-            "relationship": "parent_subsidiary",
-            "confidence": 0.85,
-        },
+        MaResult(
+            acquirer="Acme Corp",
+            target="Widget Co",
+            relationship="acquired_by",
+            confidence=0.9,
+            properties={"date": "2024-01-15"},
+        ),
+        MaResult(
+            acquirer="Acme Corp",
+            target="Gadget Inc",
+            relationship="parent_subsidiary",
+            confidence=0.85,
+        ),
     ]
 
 
-def _sample_dns_data() -> list[dict]:
+def _sample_dns_data() -> list[DnsRelationship]:
     """Return DNS relationship entries for testing."""
     return [
-        {
-            "parent_domain": "acme.com",
-            "child_domain": "api.acme.com",
-            "relationship": "dns_delegation",
-            "confidence": 0.9,
-            "ip_ranges": ["198.51.100.0/24"],
-        },
-        {
-            "parent_domain": "acme.com",
-            "child_domain": "cdn.acme.com",
-            "confidence": 0.8,
-        },
+        DnsRelationship(
+            parent_domain="acme.com",
+            child_domain="api.acme.com",
+            relationship="dns_delegation",
+            confidence=0.9,
+            ip_ranges=["198.51.100.0/24"],
+        ),
+        DnsRelationship(
+            parent_domain="acme.com",
+            child_domain="cdn.acme.com",
+            confidence=0.8,
+        ),
     ]
 
 
@@ -224,9 +227,9 @@ class TestRegistrantPivot:
     def test_fuzzy_matching_name_variations(self) -> None:
         """Fuzzy matching groups 'Acme Corp' and 'ACME Corporation'."""
         entities = [
-            {"domain": "a.com", "registrant_org": "Acme Corp"},
-            {"domain": "b.com", "registrant_org": "ACME Corporation"},
-            {"domain": "c.com", "registrant_org": "Acme Corp."},
+            WhoisEntity(domain="a.com", registrant_org="Acme Corp"),
+            WhoisEntity(domain="b.com", registrant_org="ACME Corporation"),
+            WhoisEntity(domain="c.com", registrant_org="Acme Corp."),
         ]
         pivot = RegistrantPivot(
             per_tenant_authorization=True,
@@ -248,8 +251,8 @@ class TestRegistrantPivot:
     def test_fuzzy_matching_rejects_dissimilar(self) -> None:
         """Dissimilar org names are not grouped together."""
         entities = [
-            {"domain": "a.com", "registrant_org": "Acme Corp"},
-            {"domain": "b.com", "registrant_org": "Totally Different LLC"},
+            WhoisEntity(domain="a.com", registrant_org="Acme Corp"),
+            WhoisEntity(domain="b.com", registrant_org="Totally Different LLC"),
         ]
         pivot = RegistrantPivot(per_tenant_authorization=True)
         result = pivot.pivot(entities)
@@ -289,8 +292,8 @@ class TestRegistrantPivot:
     def test_excludes_free_email_providers(self) -> None:
         """Free email providers (gmail, yahoo, etc.) are excluded from email pivot."""
         entities = [
-            {"domain": "a.com", "registrant_email": "user1@gmail.com"},
-            {"domain": "b.com", "registrant_email": "user2@gmail.com"},
+            WhoisEntity(domain="a.com", registrant_email="user1@gmail.com"),
+            WhoisEntity(domain="b.com", registrant_email="user2@gmail.com"),
         ]
         pivot = RegistrantPivot(per_tenant_authorization=True)
         result = pivot.pivot(entities)
@@ -338,14 +341,14 @@ class TestRegistrantPivot:
     def test_single_member_groups_excluded(self) -> None:
         """Clusters with only one member are not included in results."""
         entities = [
-            {
-                "domain": "solo.com",
-                "registrant_org": "UniqueOrg XYZ",
-                "registrant_email": "admin@unique-org-xyz.com",
-                "registrant_city": "Timbuktu",
-                "registrant_country": "ML",
-                "name_servers": ["ns.unique.example"],
-            },
+            WhoisEntity(
+                domain="solo.com",
+                registrant_org="UniqueOrg XYZ",
+                registrant_email="admin@unique-org-xyz.com",
+                registrant_city="Timbuktu",
+                registrant_country="ML",
+                name_servers=["ns.unique.example"],
+            ),
         ]
         pivot = RegistrantPivot(per_tenant_authorization=True)
         result = pivot.pivot(entities)
@@ -360,10 +363,10 @@ class TestRegistrantPivot:
         assert len(result.clusters) == 0
 
     def test_entities_without_domain_skipped(self) -> None:
-        """Entities missing the 'domain' key are silently skipped."""
-        entities = [
+        """Dict entities missing the 'domain' key are silently skipped (backward compat)."""
+        entities: list[WhoisEntity | dict] = [
             {"registrant_org": "No Domain Corp"},
-            {"domain": "valid.com", "registrant_org": "Valid Corp"},
+            WhoisEntity(domain="valid.com", registrant_org="Valid Corp"),
         ]
         pivot = RegistrantPivot(per_tenant_authorization=True)
         result = pivot.pivot(entities)
@@ -500,12 +503,12 @@ class TestOrgGraphBuilder:
         assert len(graph.edges) == 0
 
     def test_ma_entries_without_required_fields_skipped(self) -> None:
-        """M&A entries missing acquirer or target are silently skipped."""
+        """M&A dict entries missing acquirer or target are silently skipped (backward compat)."""
         builder = OrgGraphBuilder(per_tenant_authorization=True)
         builder.add_ma_results([
-            {"acquirer": "Acme Corp"},  # missing target
-            {"target": "Widget Co"},   # missing acquirer
-            {},                        # missing both
+            {"acquirer": "Acme Corp"},  # missing target — skipped by coercion
+            {"target": "Widget Co"},   # missing acquirer — skipped by coercion
+            {},                        # missing both — skipped by coercion
         ])
         graph = builder.build()
         assert len(graph.nodes) == 0

@@ -44,6 +44,7 @@ from expose.api.findings import (
     _build_placeholder_findings,
     router,
 )
+from expose.types.pipeline import FindingSignal
 
 # ---------------------------------------------------------------------------
 # Test app — minimal, no DB, just the findings router
@@ -185,7 +186,7 @@ class TestFindingEntryValidation:
             score=75,
             priority_tier="high",
             justification="Test justification",
-            signals=[{"signal": "test", "weight": 10}],
+            signals=[FindingSignal(signal="test", weight=10)],
         )
         assert entry.rank == 1
         assert entry.score == 75

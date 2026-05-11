@@ -173,6 +173,7 @@ class RunResult(BaseModel):
     successful_dispatches: int
     failed_dispatches: int
     denied_dispatches: int
+    skipped_dispatches: int = 0
     total_observations: int
     enrichment_count: int = 0
     duration_ms: float
@@ -402,6 +403,7 @@ class RunExecutor:
                     successful_dispatches=0,
                     failed_dispatches=0,
                     denied_dispatches=0,
+                    skipped_dispatches=0,
                     total_observations=0,
                     duration_ms=duration_ms,
                 )
@@ -434,6 +436,7 @@ class RunExecutor:
         successful = 0
         failed = 0
         denied = 0
+        skipped = 0
         total_observations = 0
         enrichment_count = 0
         upsert_failures = 0
@@ -475,6 +478,7 @@ class RunExecutor:
             successful += pass_stats["successful"]
             failed += pass_stats["failed"]
             denied += pass_stats["denied"]
+            skipped += pass_stats["skipped"]
             total_observations += pass_stats["observations"]
             enrichment_count += pass_stats["enrichment"]
             upsert_failures += pass_stats["upsert_failures"]
@@ -667,7 +671,17 @@ class RunExecutor:
         # storage. See SPEC §2.2 Stage 6 and the manifest schema.
 
         # === Determine final state ============================================
-        total_dispatches = successful + failed + denied
+        # Skipped dispatches (missing credentials, health-check failures) are
+        # configuration gaps, not collector bugs.  They must NOT inflate the
+        # failure count.  Only true collector errors (COLLECTOR_ERROR status or
+        # unhandled dispatcher exceptions) count as failures for state
+        # determination.
+        #
+        # State rules:
+        #   - Zero dispatches OR all successes (no real failures) -> completed
+        #   - Some successes + some real failures               -> partial
+        #   - Zero successes (all failed / denied / skipped)    -> failed
+        total_dispatches = successful + failed + denied + skipped
         if total_dispatches == 0 or (successful > 0 and failed == 0):
             final_state = "completed"
         elif successful > 0 and failed > 0:
@@ -724,6 +738,7 @@ class RunExecutor:
             successful_dispatches=successful,
             failed_dispatches=failed,
             denied_dispatches=denied,
+            skipped_dispatches=skipped,
             total_observations=total_observations,
             enrichment_count=enrichment_count,
             duration_ms=duration_ms,
@@ -783,6 +798,7 @@ class RunExecutor:
                 "successful": 0,
                 "failed": 0,
                 "denied": 0,
+                "skipped": 0,
                 "observations": 0,
                 "enrichment": 0,
                 "upsert_failures": 0,
@@ -843,15 +859,20 @@ class RunExecutor:
         successful = 0
         failed = 0
         denied = 0
+        skipped = 0
         total_observations = 0
         enrichment_count = 0
         upsert_failures = 0
         batch: list[Observation] = []
         all_observations: list[Observation] = []
 
+        # Statuses that represent "could not run due to missing config or
+        # unavailable data source" — distinct from a collector bug.
+        _SKIP_STATUSES = frozenset({"skipped", "health_check_failed"})
+
         for seed_value, collector_id, result in outcomes:
             if result is None:
-                # Dispatcher raised an unhandled exception
+                # Dispatcher raised an unhandled exception — a real failure
                 failed += 1
                 continue
 
@@ -881,6 +902,12 @@ class RunExecutor:
                     "warn",
                     f"{collector_id} denied: {result.error_message or 'scope gate'}",
                 )
+            elif result.status in _SKIP_STATUSES:
+                skipped += 1
+                self._log(
+                    "warn",
+                    f"{collector_id} skipped: {result.error_message or 'unavailable'}",
+                )
             else:
                 failed += 1
                 self._log(
@@ -901,6 +928,7 @@ class RunExecutor:
             "successful": successful,
             "failed": failed,
             "denied": denied,
+            "skipped": skipped,
             "observations": total_observations,
             "enrichment": enrichment_count,
             "upsert_failures": upsert_failures,
@@ -1418,6 +1446,10 @@ class RunExecutor:
                 await self._relationship_repo.batch_create(rel_dicts)
             except Exception:
                 logger.exception("Batch relationship creation failed")
+                try:
+                    await self._relationship_repo._session.rollback()
+                except Exception:
+                    pass
         else:
             for rel in rel_dicts:
                 try:

@@ -59,6 +59,12 @@ from expose.types.rulepack import (
     RulePackDependency,
     TierThresholds,
 )
+from expose.types.pipeline import (
+    EntityData,
+    FindingSignal,
+    ProvenanceRuleApplication,
+    ScopeContext,
+)
 from expose.types.shared import EntityId, RunId, TenantId
 
 __all__ = [
@@ -76,8 +82,10 @@ __all__ = [
     "DeltaAdded",
     "DeltaChanged",
     "DeltaRemoved",
+    "EntityData",
     "EntityId",
     "Exposure",
+    "FindingSignal",
     "Identifier",
     "LLMEnrichment",
     "LeadScore",
@@ -97,11 +105,13 @@ __all__ = [
     "PredicateCondition",
     "PrimaryIdentifier",
     "Provenance",
+    "ProvenanceRuleApplication",
     "QuotaWarning",
     "RuleCategory",
     "RulePack",
     "RulePackDependency",
     "RunId",
+    "ScopeContext",
     "Target",
     "TechStack",
     "TenantId",

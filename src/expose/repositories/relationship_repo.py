@@ -131,7 +131,7 @@ class RelationshipRepository:
             set_clause["evidence_ref"] = insert_stmt.excluded.evidence_ref
 
         upsert_stmt = insert_stmt.on_conflict_do_update(
-            constraint="uq_relationships_logical_key",
+            index_elements=["tenant_id", "from_entity_id", "to_entity_id", "edge_type", "collector_id"],
             set_=set_clause,
         ).returning(Relationship)
 
@@ -161,6 +161,23 @@ class RelationshipRepository:
         if not relationships:
             return []
 
+        seen: dict[tuple, dict] = {}
+        for rel in relationships:
+            key = (
+                str(rel["tenant_id"]),
+                str(rel["from_entity_id"]),
+                str(rel["to_entity_id"]),
+                rel["edge_type"],
+                rel["collector_id"],
+            )
+            if key in seen:
+                merged_props = {**seen[key].get("properties", {}), **rel.get("properties", {})}
+                seen[key]["properties"] = merged_props
+                if rel["confidence"] > seen[key]["confidence"]:
+                    seen[key]["confidence"] = rel["confidence"]
+            else:
+                seen[key] = dict(rel)
+
         values = [
             {
                 "id": uuid4(),
@@ -174,12 +191,12 @@ class RelationshipRepository:
                 "evidence_ref": rel.get("evidence_ref"),
                 "properties": rel.get("properties", {}),
             }
-            for rel in relationships
+            for rel in seen.values()
         ]
 
         insert_stmt = pg_insert(Relationship).values(values)
         upsert_stmt = insert_stmt.on_conflict_do_update(
-            constraint="uq_relationships_logical_key",
+            index_elements=["tenant_id", "from_entity_id", "to_entity_id", "edge_type", "collector_id"],
             set_={
                 "confidence": insert_stmt.excluded.confidence,
                 "observed_at": insert_stmt.excluded.observed_at,
