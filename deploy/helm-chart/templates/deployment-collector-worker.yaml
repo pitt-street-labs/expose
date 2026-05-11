@@ -1,0 +1,60 @@
+{{- if .Values.collectorWorker.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "expose.fullname" . }}-collector-worker
+  labels:
+    {{- include "expose.labels" . | nindent 4 }}
+    app.kubernetes.io/component: collector-worker
+spec:
+  replicas: {{ .Values.collectorWorker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "expose.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: collector-worker
+  template:
+    metadata:
+      labels:
+        {{- include "expose.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: collector-worker
+    spec:
+      serviceAccountName: {{ include "expose.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: collector-worker
+          image: {{ include "expose.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          command: ["expose", "worker", "--kind", "collector"]
+          env:
+            - name: EXPOSE_NATS_URL
+              value: "nats://{{ include "expose.fullname" . }}-nats:{{ .Values.nats.clientPort }}"
+            - name: EXPOSE_DB_HOST
+              value: {{ .Values.postgres.host | quote }}
+            - name: EXPOSE_DB_PORT
+              value: {{ .Values.postgres.port | quote }}
+            - name: EXPOSE_DB_DATABASE
+              value: {{ .Values.postgres.database | quote }}
+            - name: EXPOSE_DB_SSLMODE
+              value: {{ .Values.postgres.sslmode | quote }}
+            {{- if .Values.postgres.existingSecret }}
+            - name: EXPOSE_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.existingSecret }}
+                  key: user
+            - name: EXPOSE_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.existingSecret }}
+                  key: password
+            {{- end }}
+            - name: EXPOSE_DEFAULT_TENANT_ID
+              value: {{ .Values.tenant.defaultId | quote }}
+            - name: EXPOSE_LOG_LEVEL
+              value: "info"
+          resources:
+            {{- toYaml .Values.collectorWorker.resources | nindent 12 }}
+{{- end }}

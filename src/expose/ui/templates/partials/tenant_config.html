@@ -1,0 +1,181 @@
+{#
+    Tenant Configuration Panel — Jinja2 partial
+    Included inside the main dashboard.html within an Alpine.js scope.
+    All form state is managed by exposeApp().tenantConfig.
+#}
+
+<div style="margin-top: var(--space-md);">
+
+    <!-- Loading state -->
+    <div x-show="!tenantConfig" style="color: var(--text-muted); font-size: 0.8rem; padding: var(--space-sm) 0;">
+        Loading configuration...
+    </div>
+
+    <!-- Config form -->
+    <div x-show="tenantConfig" x-cloak>
+
+        <!-- ===== Scope Rules ===== -->
+        <fieldset style="border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-sm); margin-bottom: var(--space-md);">
+            <legend style="color: var(--text-muted); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 0 var(--space-xs);">
+                Scope Rules
+            </legend>
+            <div x-show="tenantConfig && tenantConfig.scope_rules.length === 0"
+                 style="color: var(--text-dim); font-size: 0.8rem; padding: var(--space-xs) 0;">
+                No scope rules defined. Add one to constrain discovery.
+            </div>
+            <template x-for="(rule, idx) in (tenantConfig ? tenantConfig.scope_rules : [])" :key="idx">
+                <div style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: var(--space-xs);">
+                    <select x-model="rule.rule_type" class="selector-input"
+                            style="flex: 0 0 160px; font-size: 0.75rem;">
+                        <option value="apex_domain">apex_domain</option>
+                        <option value="exact_domain">exact_domain</option>
+                        <option value="ip_address">ip_address</option>
+                        <option value="cidr">cidr</option>
+                        <option value="asn">asn</option>
+                        <option value="cloud_account">cloud_account</option>
+                        <option value="registrant_org">registrant_org</option>
+                    </select>
+                    <input type="text" x-model="rule.value" placeholder="e.g. example.com"
+                           class="filter-input" style="flex: 1; width: auto;">
+                    <label style="display: flex; align-items: center; gap: 0.25rem; font-size: 0.7rem; color: var(--text-muted); white-space: nowrap; cursor: pointer;">
+                        <input type="checkbox" x-model="rule.is_exclusion"
+                               style="accent-color: var(--accent);">
+                        Exclude
+                    </label>
+                    <button type="button" class="btn btn-ghost"
+                            @click="removeScopeRule(idx)"
+                            style="padding: 2px 6px; font-size: 0.75rem; color: var(--error);"
+                            title="Remove rule">
+                        &#10005;
+                    </button>
+                </div>
+            </template>
+            <button type="button" class="btn btn-ghost" @click="addScopeRule()"
+                    style="margin-top: var(--space-xs); font-size: 0.75rem;">
+                + Add Rule
+            </button>
+        </fieldset>
+
+        <!-- ===== Collectors ===== -->
+        <fieldset style="border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-sm); margin-bottom: var(--space-md);">
+            <legend style="color: var(--text-muted); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 0 var(--space-xs);">
+                Enabled Collectors
+            </legend>
+            <div style="display: flex; flex-wrap: wrap; gap: var(--space-sm);">
+                {#
+                    Collector IDs are hard-coded here to match the 14 builtins.
+                    When the collector registry API is added (Phase 3), this
+                    list should be populated dynamically.
+                #}
+                {% set collector_ids = [
+                    "active-dns-resolve",
+                    "active-http-fingerprint",
+                    "active-port-surface",
+                    "active-tls-handshake",
+                    "bgp-he-toolkit",
+                    "bgp-ripestat",
+                    "bgp-team-cymru",
+                    "ct-certstream",
+                    "ct-crtsh",
+                    "favicon-hash",
+                    "github-exposed",
+                    "rdap-whois",
+                    "spf-dkim-dmarc"
+                ] %}
+                {% for cid in collector_ids %}
+                <label style="display: flex; align-items: center; gap: 0.25rem; font-size: 0.75rem; color: var(--text-secondary); cursor: pointer; min-width: 180px;">
+                    <input type="checkbox"
+                           :checked="tenantConfig && tenantConfig.enabled_collectors.indexOf('{{ cid }}') >= 0"
+                           @change="toggleCollector('{{ cid }}')"
+                           style="accent-color: var(--accent);">
+                    {{ cid }}
+                </label>
+                {% endfor %}
+            </div>
+        </fieldset>
+
+        <!-- ===== Schedule + Egress row ===== -->
+        <div style="display: flex; gap: var(--space-md); margin-bottom: var(--space-md); flex-wrap: wrap;">
+
+            <!-- Cron schedule -->
+            <fieldset style="border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-sm); flex: 1; min-width: 200px;">
+                <legend style="color: var(--text-muted); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 0 var(--space-xs);">
+                    Schedule (Cron)
+                </legend>
+                <input type="text"
+                       x-model="tenantConfig.schedule_cron"
+                       placeholder="0 2 * * * (daily at 02:00)"
+                       class="filter-input"
+                       style="width: 100%;">
+                <div style="color: var(--text-dim); font-size: 0.7rem; margin-top: var(--space-xs);">
+                    Leave blank for manual-only scans.
+                </div>
+            </fieldset>
+
+            <!-- Egress profile -->
+            <fieldset style="border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-sm); flex: 1; min-width: 200px;">
+                <legend style="color: var(--text-muted); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 0 var(--space-xs);">
+                    Egress Profile
+                </legend>
+                <select x-model="tenantConfig.egress_profile" class="selector-input"
+                        style="width: 100%; font-size: 0.75rem;">
+                    <option value="direct">direct</option>
+                    <option value="socks5">socks5</option>
+                    <option value="wireguard">wireguard</option>
+                    <option value="http_connect">http_connect</option>
+                </select>
+                <div style="color: var(--text-dim); font-size: 0.7rem; margin-top: var(--space-xs);">
+                    How collector traffic exits the network.
+                </div>
+            </fieldset>
+        </div>
+
+        <!-- ===== LLM Settings ===== -->
+        <fieldset style="border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-sm); margin-bottom: var(--space-md);">
+            <legend style="color: var(--text-muted); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 0 var(--space-xs);">
+                LLM Enrichment (Stage 4b)
+            </legend>
+            <div style="display: flex; gap: var(--space-md); align-items: start; flex-wrap: wrap;">
+                <!-- Enable toggle -->
+                <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; color: var(--text-secondary); cursor: pointer; min-width: 120px;">
+                    <input type="checkbox" x-model="tenantConfig.llm_enabled"
+                           style="accent-color: var(--accent);">
+                    Enable LLM
+                </label>
+                <!-- Provider -->
+                <div style="flex: 1; min-width: 160px;" x-show="tenantConfig.llm_enabled">
+                    <label style="font-size: 0.7rem; color: var(--text-muted); display: block; margin-bottom: 2px;">Provider</label>
+                    <select x-model="tenantConfig.llm_provider" class="selector-input"
+                            style="width: 100%; font-size: 0.75rem;">
+                        <option value="">None</option>
+                        <option value="openai">OpenAI</option>
+                        <option value="anthropic">Anthropic</option>
+                        <option value="ollama">Ollama (local)</option>
+                        <option value="azure_openai">Azure OpenAI</option>
+                    </select>
+                </div>
+                <!-- Cost ceiling -->
+                <div style="flex: 0 0 140px;" x-show="tenantConfig.llm_enabled">
+                    <label style="font-size: 0.7rem; color: var(--text-muted); display: block; margin-bottom: 2px;">Cost Ceiling ($/run)</label>
+                    <input type="number" x-model.number="tenantConfig.llm_cost_ceiling_per_run"
+                           min="0" step="0.01" placeholder="0.00"
+                           class="filter-input" style="width: 100%;">
+                </div>
+            </div>
+        </fieldset>
+
+        <!-- ===== Save / Status ===== -->
+        <div style="display: flex; align-items: center; gap: var(--space-md);">
+            <button type="button" class="btn btn-primary"
+                    @click="saveTenantConfig()"
+                    :disabled="configSaving">
+                <span x-show="!configSaving">Save Configuration</span>
+                <span x-show="configSaving">Saving...</span>
+            </button>
+            <span x-show="configMessage" x-text="configMessage"
+                  style="font-size: 0.8rem; color: var(--text-muted);"></span>
+        </div>
+
+    </div>
+
+</div>

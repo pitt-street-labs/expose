@@ -33,6 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from expose.collectors.base import Observation, Seed
 from expose.compliance.misuse_detection import MisuseAlert, MisuseDetector
+from expose.pipeline.enrichment import EnrichmentPipeline
 from expose.pipeline.seed_expansion import expand_seeds
 from expose.quotas.tracker import QuotaExceededError, QuotaTracker
 from expose.repositories.entity_repo import EntityRepository
@@ -127,6 +128,7 @@ class RunResult(BaseModel):
     failed_dispatches: int
     denied_dispatches: int
     total_observations: int
+    enrichment_count: int = 0
     duration_ms: float
     misuse_alerts: list[MisuseAlert] = Field(default_factory=list)
 
@@ -149,12 +151,14 @@ class RunExecutor:
         entity_repo: EntityRepository,
         quota_tracker: QuotaTracker | None = None,
         misuse_detector: MisuseDetector | None = None,
+        enrichment_pipeline: EnrichmentPipeline | None = None,
     ) -> None:
         self._dispatcher = dispatcher
         self._run_repo = run_repo
         self._entity_repo = entity_repo
         self._quota_tracker = quota_tracker
         self._misuse_detector = misuse_detector
+        self._enrichment = enrichment_pipeline
 
     async def execute(  # noqa: PLR0912, PLR0915
         self,
@@ -291,12 +295,27 @@ class RunExecutor:
         if self._quota_tracker is not None and entities_added > 0:
             self._quota_tracker.record_entities_added(tenant_id, entities_added)
 
-        # TODO(stage-4b): LLM enrichment — out of scope for Sprint 3-4
-        # When implemented, this stage will pass graph entities through the
-        # LLM provider abstraction (ADR-005) for relationship inference,
-        # attribution confidence scoring, and natural-language context
-        # generation. See SPEC §2.2 Stage 5 and the AI-leverage roadmap
-        # (Session D).
+        # === Stage 4b: LLM enrichment ========================================
+        enrichment_count = 0
+        if self._enrichment is not None:
+            for obs in all_observations:
+                try:
+                    enrichment_result = await self._enrichment.enrich_entity(
+                        entity_type=obs.subject.identifier_type.value,
+                        canonical_identifier=obs.subject.identifier_value,
+                        properties=_observation_properties(obs),
+                        attribution_confidence=float(Decimal("0.000")),
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                    )
+                    if enrichment_result:
+                        enrichment_count += 1
+                except Exception:
+                    logger.exception(
+                        "Enrichment failed for %s/%s",
+                        obs.subject.identifier_type.value,
+                        obs.subject.identifier_value,
+                    )
 
         # TODO(stage-5): Artifact generation — out of scope for Sprint 3-4
         # When implemented, this stage will serialize the observation graph
@@ -350,6 +369,7 @@ class RunExecutor:
             failed_dispatches=failed,
             denied_dispatches=denied,
             total_observations=len(all_observations),
+            enrichment_count=enrichment_count,
             duration_ms=duration_ms,
             misuse_alerts=misuse_alerts,
         )

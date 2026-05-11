@@ -19,6 +19,7 @@ from expose import __version__
 from expose.api.events import router as events_router
 from expose.api.graph import router as graph_router
 from expose.api.runs import router as runs_router
+from expose.api.tenant_config import router as tenant_config_router
 from expose.api.tenants import get_session
 from expose.api.tenants import router as tenant_router
 from expose.db.engine import (
@@ -120,6 +121,7 @@ def create_app(
     app.include_router(runs_router)
     app.include_router(graph_router)
     app.include_router(events_router)
+    app.include_router(tenant_config_router)
     app.include_router(ui_router)
 
     # -- Static files (CSS, JS for dashboard) ----------------------------------

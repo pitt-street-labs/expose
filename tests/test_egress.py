@@ -7,14 +7,13 @@ Coverage:
 3. DirectEgressProfile.health_check returns healthy with zero latency.
 4. Factory creates DirectEgressProfile for "direct".
 5. Factory raises ValueError for unknown profile type.
-6. SOCKS5 stub raises NotImplementedError on all methods.
-7. WireGuard stub raises NotImplementedError on all methods.
-8. HTTP CONNECT stub raises NotImplementedError on all methods.
-9. EgressHealthCheck model validates correctly (frozen, extra=forbid).
-10. EgressProfileType enum has all 4 values.
+6. All profiles have correct profile_type.
+7. EgressHealthCheck model validates correctly (frozen, extra=forbid).
+8. EgressProfileType enum has all 4 values.
 
 These tests exercise the ABC contract and factory without requiring any
-network connectivity or external services.
+network connectivity or external services. Profile-specific behaviour
+tests live in ``test_egress_profiles.py``.
 """
 
 from __future__ import annotations
@@ -86,70 +85,25 @@ def test_factory_raises_for_unknown_type() -> None:
         create_egress_profile("tor_onion")
 
 
-# === Stub profiles — NotImplementedError ======================================
+# === Profile type correctness ==================================================
 
 
-def test_socks5_stub_raises_on_httpx() -> None:
-    """SOCKS5 stub raises NotImplementedError on configure_httpx_client."""
+def test_socks5_profile_type() -> None:
+    """Socks5EgressProfile has profile_type == SOCKS5."""
     profile = Socks5EgressProfile()
-    with pytest.raises(NotImplementedError, match="SOCKS5"):
-        profile.configure_httpx_client()
+    assert profile.profile_type == EgressProfileType.SOCKS5
 
 
-def test_socks5_stub_raises_on_dns() -> None:
-    """SOCKS5 stub raises NotImplementedError on configure_dns_resolver."""
-    profile = Socks5EgressProfile()
-    with pytest.raises(NotImplementedError, match="SOCKS5"):
-        profile.configure_dns_resolver()
-
-
-async def test_socks5_stub_raises_on_health_check() -> None:
-    """SOCKS5 stub raises NotImplementedError on health_check."""
-    profile = Socks5EgressProfile()
-    with pytest.raises(NotImplementedError, match="SOCKS5"):
-        await profile.health_check()
-
-
-def test_wireguard_stub_raises_on_httpx() -> None:
-    """WireGuard stub raises NotImplementedError on configure_httpx_client."""
+def test_wireguard_profile_type() -> None:
+    """WireguardEgressProfile has profile_type == WIREGUARD."""
     profile = WireguardEgressProfile()
-    with pytest.raises(NotImplementedError, match="WireGuard"):
-        profile.configure_httpx_client()
+    assert profile.profile_type == EgressProfileType.WIREGUARD
 
 
-def test_wireguard_stub_raises_on_dns() -> None:
-    """WireGuard stub raises NotImplementedError on configure_dns_resolver."""
-    profile = WireguardEgressProfile()
-    with pytest.raises(NotImplementedError, match="WireGuard"):
-        profile.configure_dns_resolver()
-
-
-async def test_wireguard_stub_raises_on_health_check() -> None:
-    """WireGuard stub raises NotImplementedError on health_check."""
-    profile = WireguardEgressProfile()
-    with pytest.raises(NotImplementedError, match="WireGuard"):
-        await profile.health_check()
-
-
-def test_http_connect_stub_raises_on_httpx() -> None:
-    """HTTP CONNECT stub raises NotImplementedError on configure_httpx_client."""
+def test_http_connect_profile_type() -> None:
+    """HttpConnectEgressProfile has profile_type == HTTP_CONNECT."""
     profile = HttpConnectEgressProfile()
-    with pytest.raises(NotImplementedError, match="HTTP CONNECT"):
-        profile.configure_httpx_client()
-
-
-def test_http_connect_stub_raises_on_dns() -> None:
-    """HTTP CONNECT stub raises NotImplementedError on configure_dns_resolver."""
-    profile = HttpConnectEgressProfile()
-    with pytest.raises(NotImplementedError, match="HTTP CONNECT"):
-        profile.configure_dns_resolver()
-
-
-async def test_http_connect_stub_raises_on_health_check() -> None:
-    """HTTP CONNECT stub raises NotImplementedError on health_check."""
-    profile = HttpConnectEgressProfile()
-    with pytest.raises(NotImplementedError, match="HTTP CONNECT"):
-        await profile.health_check()
+    assert profile.profile_type == EgressProfileType.HTTP_CONNECT
 
 
 # === EgressHealthCheck model ==================================================

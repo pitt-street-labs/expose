@@ -32,7 +32,7 @@
                  x-show="activeRunId"
                  x-cloak>
                 <span class="run-indicator-dot"></span>
-                <span class="run-indicator-label">Run active</span>
+                <span class="run-indicator-label" x-text="sseConnected ? 'SSE Live' : 'Run active'">Run active</span>
             </div>
             <noscript>
                 <span class="noscript-badge">JS disabled — static view</span>
@@ -58,6 +58,20 @@
             <div x-show="statusMessage" x-text="statusMessage"
                  style="margin-top: var(--space-sm); font-size: 0.8rem; color: var(--text-muted);"></div>
         </form>
+    </div>
+
+    <!-- ===== Tenant Config panel ===== -->
+    <div class="card" x-show="selectedTenantId" x-cloak
+         style="margin: 0 var(--space-lg); margin-top: 0;">
+        <div style="display: flex; align-items: center; justify-content: space-between; cursor: pointer;"
+             @click="showConfigPanel = !showConfigPanel; if (showConfigPanel && !tenantConfig) loadTenantConfig();">
+            <h2 class="pane-title" style="margin: 0;">Tenant Config</h2>
+            <span style="color: var(--text-muted); font-size: 0.8rem;"
+                  x-text="showConfigPanel ? '&#9650; Collapse' : '&#9660; Expand'"></span>
+        </div>
+        <div x-show="showConfigPanel" x-cloak x-transition>
+            {% include "partials/tenant_config.html" %}
+        </div>
     </div>
 
     <!-- ===== Split pane ===== -->
@@ -191,6 +205,15 @@
     </div>
 
     <!-- ===== Bottom status bar ===== -->
+    <!--
+        Status bar behaviour:
+        - When a run is active server-side (page rendered with active_run_id),
+          HTMX polls every 2s UNLESS SSE is connected (SSE pushes refresh on
+          collector_completed / run_completed events, so polling is redundant).
+        - When a run starts client-side (via scan form), Alpine sets activeRunId
+          and connectSSE() pushes status updates — no HTMX polling needed.
+        - Fallback: if SSE fails after 3 retries, HTMX 2s polling resumes.
+    -->
     <footer class="status-bar"
             {% if active_run_id is defined and active_run_id %}
             hx-get="/partials/run-status/{{ active_run_id }}"
@@ -203,9 +226,15 @@
                 <span class="status-stage-text">Loading run status...</span>
             {% else %}
                 <div class="status-idle">
-                    <span class="status-stage-text">No active run</span>
-                    <span class="status-separator">|</span>
-                    <span class="status-version">EXPOSE v0.1.0-dev</span>
+                    <span class="status-stage-text" x-show="!activeRunId">No active run</span>
+                    <span class="status-stage-text" x-show="activeRunId && sseConnected" x-cloak>
+                        Streaming live events...
+                    </span>
+                    <span class="status-stage-text" x-show="activeRunId && !sseConnected" x-cloak>
+                        Run in progress (polling)
+                    </span>
+                    <span class="status-separator" x-show="!activeRunId">|</span>
+                    <span class="status-version" x-show="!activeRunId">EXPOSE v0.1.0-dev</span>
                 </div>
             {% endif %}
         </div>

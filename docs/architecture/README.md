@@ -1,72 +1,126 @@
-# EXPOSE — Architecture diagrams
+# EXPOSE -- Architecture Diagrams
 
-**Status:** Advisory — visual companions to the locked spec, not a substitute for it.
-**Date:** 2026-05-09
+**Status:** Advisory -- visual companions to the locked spec, not a substitute for it.
+**Date:** 2026-05-10
 **Public name:** EXPOSE (EXtended Perimeter Ontology Security Evaluation)
-**Internal codename:** FF6K (development artifacts only per HISTORY.md)
 
 This directory holds Mermaid-rendered architecture diagrams for EXPOSE. Each diagram visualizes one slice of the system as defined in the locked spec (`docs/SPEC.md`) and the architecture decision records (`docs/adr/`). The diagrams are reference material for technical reviewers, federal customers, and onboarding engineers; the spec remains the source of truth when the two appear to disagree.
 
 GitHub renders Mermaid natively. Each `.md` file in this directory contains one or more `mermaid` code blocks plus surrounding prose explaining what the diagram shows, what is intentionally left out, and which spec sections / ADRs / issues anchor it.
 
-## Index
+---
 
-| File | Diagram | One-line description |
-|---|---|---|
-| [`00-pipeline-stages.md`](./00-pipeline-stages.md) | Flowchart | The five-stage Environment 1 pipeline with trust-boundary annotations and deterministic-vs-LLM markers |
-| [`10-two-environment-model.md`](./10-two-environment-model.md) | Sequence + flowchart | Manual air-gapped handoff from Environment 1 (EXPOSE) to Environment 2 (downstream LLM analysis), with signed-artifact verification |
-| [`20-deployment-topology.md`](./20-deployment-topology.md) | Component graph | Container topology — control plane, three worker types, Postgres, object store, secrets backend, optional Ollama — with data plane / control plane separation |
-| [`30-observation-graph.md`](./30-observation-graph.md) | ER diagram | The typed observation graph — entity types, edge types, tenant scoping, evidence references |
-| [`40-multi-tenancy.md`](./40-multi-tenancy.md) | Sequence + flowchart | Tenant context flow from API request through middleware, control plane, work queue, workers; cross-tenant isolation test boundary |
-| [`50-scanner-egress.md`](./50-scanner-egress.md) | Component graph | EgressProfile abstraction — direct, SOCKS5, WireGuard, HTTP CONNECT — and where scan provenance records the egress mode |
-| [`60-attribution-and-llm-enrichment.md`](./60-attribution-and-llm-enrichment.md) | Flowchart | Two-pass attribution: rule-based (4a) → tier mapping → optional SafeLLMClient-wrapped enrichment (4b) → enriched candidates → artifact |
-| [`70-product-surfaces.md`](./70-product-surfaces.md) | Component graph | The four product surfaces from ADR-009 — EXPOSE Core (Apache 2.0), Threat Context, Identity Surface, Research — and the license boundaries between them |
-| [`80-federal-deployment-pattern.md`](./80-federal-deployment-pattern.md) | Component graph | Federal-customer self-host pattern — agency ATO boundary, EXPOSE Core sub-boundary, CDM/SIEM ingestion, dedicated cloud egress, EXPOSE update channel as the only inbound exception |
+## Diagram Index
 
-## Reading order
+### [00 -- Pipeline Stages](./00-pipeline-stages.md)
+
+**Type:** Flowchart
+**Spec anchor:** SPEC section 4 (Pipeline Architecture)
+
+The five-stage Environment 1 pipeline with trust-boundary annotations and deterministic-vs-LLM markers. Shows the flow from seed ingestion through collection, sanitization, graph construction, and attribution to the signed canonical artifact. Start here for a top-level understanding of what EXPOSE does.
+
+### [10 -- Two-Environment Model](./10-two-environment-model.md)
+
+**Type:** Sequence diagram + flowchart
+**Spec anchor:** SPEC section 4.1 (Two-Environment Model), ADR-005
+
+The manual air-gapped handoff from Environment 1 (EXPOSE engine -- deterministic, auditable) to Environment 2 (downstream LLM analysis -- non-deterministic, out of scope). Shows signed-artifact verification at the boundary. Explains why the artifact is the deliverable and what happens after.
+
+### [20 -- Deployment Topology](./20-deployment-topology.md)
+
+**Type:** Component graph
+**Spec anchor:** SPEC section 4.2, ADR-002, ADR-003
+
+Container topology showing the control plane, three worker types (collector, scanner, LLM), PostgreSQL, object store, secrets backend, and optional Ollama. Annotates data-plane and control-plane separation. Essential for understanding what runs where in a deployed EXPOSE instance.
+
+### [30 -- Observation Graph](./30-observation-graph.md)
+
+**Type:** ER diagram
+**Spec anchor:** SPEC sections 5.2-5.3, ADR-001
+
+The typed observation graph -- 10 entity types, 10 edge types, tenant scoping, and evidence references. All entity tables include `tenant_id` per ADR-007. Shows the data model that backs the pipeline's storage layer and the canonical artifact's target section.
+
+### [40 -- Multi-Tenancy](./40-multi-tenancy.md)
+
+**Type:** Sequence diagram + flowchart
+**Spec anchor:** ADR-007 (Multi-Tenancy)
+
+Tenant context flow from API request through middleware, control plane, work queue, and workers. Shows cross-tenant isolation boundaries and where tenant ID propagation is enforced. Critical for reviewers evaluating data isolation guarantees.
+
+### [50 -- Scanner Egress](./50-scanner-egress.md)
+
+**Type:** Component graph
+**Spec anchor:** SPEC section 6.3, ADR-008
+
+The `EgressProfile` abstraction with four implementations: direct, SOCKS5, WireGuard, and HTTP CONNECT. Shows where scan provenance records the egress mode, how active collectors (Tier 3) route their traffic, and the relationship between egress isolation and attribution.
+
+### [60 -- Attribution and LLM Enrichment](./60-attribution-and-llm-enrichment.md)
+
+**Type:** Flowchart
+**Spec anchor:** SPEC section 8 (Attribution), ADR-005, ADR-006
+
+Two-pass attribution: rule-based scoring (Stage 4a) maps entities to attribution tiers, then optional `SafeLLMClient`-wrapped LLM enrichment (Stage 4b) produces enriched candidates. Shows how the deterministic and non-deterministic paths interact and where the trust boundary lies.
+
+### [70 -- Product Surfaces](./70-product-surfaces.md)
+
+**Type:** Component graph
+**Spec anchor:** ADR-009 (Open-Core Licensing)
+
+The four product surfaces: EXPOSE Core (Apache 2.0), EXPOSE Threat Context (proprietary), EXPOSE Identity Surface (proprietary), and EXPOSE Research (proprietary dataset). Shows the license boundaries between open-source and commercial components and what ships with the free tier vs. paid modules.
+
+### [80 -- Federal Deployment Pattern](./80-federal-deployment-pattern.md)
+
+**Type:** Component graph
+**Spec anchor:** Federal Customer Deployment Guide (docs/strategy/)
+
+The federal-customer self-host pattern showing: agency ATO boundary, EXPOSE Core sub-boundary, CDM/SIEM ingestion points, dedicated cloud egress, and the EXPOSE update channel as the only inbound exception. Designed for SSP appendix preparation and FedRAMP-equivalent positioning.
+
+---
+
+## Reading Order
 
 For a first-time reader, the recommended sequence is:
 
-1. **`00-pipeline-stages.md`** — what the system does, end to end
-2. **`10-two-environment-model.md`** — why the artifact is the deliverable and what happens after
-3. **`20-deployment-topology.md`** — what runs where
-4. **`30-observation-graph.md`** — what the data looks like
-5. **`60-attribution-and-llm-enrichment.md`** — how attribution decisions are produced
-6. **`40-multi-tenancy.md`** — how the same engine serves multiple tenants safely
-7. **`50-scanner-egress.md`** — how active probing is isolated from the operator's own IP space
-8. **`70-product-surfaces.md`** — how Core relates to the commercial modules and the research dataset
-9. **`80-federal-deployment-pattern.md`** — how a federal agency self-hosts within an existing ATO
+| Order | Diagram | What you learn |
+|---|---|---|
+| 1 | `00-pipeline-stages` | What the system does, end to end |
+| 2 | `10-two-environment-model` | Why the artifact is the deliverable and what happens after |
+| 3 | `20-deployment-topology` | What runs where |
+| 4 | `30-observation-graph` | What the data looks like |
+| 5 | `60-attribution-and-llm-enrichment` | How attribution decisions are produced |
+| 6 | `40-multi-tenancy` | How the same engine serves multiple tenants safely |
+| 7 | `50-scanner-egress` | How active probing is isolated from the operator's own IP space |
+| 8 | `70-product-surfaces` | How Core relates to the commercial modules and the research dataset |
+| 9 | `80-federal-deployment-pattern` | How a federal agency self-hosts within an existing ATO |
 
 A reviewer focused on the open-source engine alone can stop after diagram 6. A reviewer evaluating commercial structure or federal procurement should read through diagram 9.
 
-## Related diagrams in other documents
+---
 
-Where existing locked artifacts already contain a diagram of the same system slice, this directory cross-references rather than duplicating:
+## Related Documents
 
-- `docs/strategy/federal-customer-deployment-guide.md` §3.4 — Mermaid view of the agency-ATO-embedded EXPOSE deployment, paired with an ASCII-art equivalent in §3.3. Diagram 80 in this directory generalizes the deployment pattern; it does not replace the federal-customer-deployment-guide's view, which is canonical for SSP authoring.
+| Document | Relationship |
+|---|---|
+| `docs/SPEC.md` | Source of truth. When a diagram and the spec disagree, the spec wins. |
+| `docs/adr/ADR-001..010` | Architectural decisions that constrain the diagrams. |
+| `docs/collectors.md` | Detailed collector catalog -- complements diagram 00 (pipeline stages) and 50 (scanner egress). |
+| `docs/quickstart.md` | Getting started guide -- references these diagrams for deeper exploration. |
+| `docs/strategy/federal-customer-deployment-guide.md` | The canonical view for SSP work. Diagram 80 generalizes the pattern; the federal-customer document is authoritative. |
 
-## Status header convention
+---
 
-This README uses the same status-header convention as `docs/strategy/persona-analysis.md`:
+## Conventions
 
-- **Status:** Advisory or Locked
-- **Date:** when the artifact was produced or last revised
-- **Context lines** identifying public name, internal codename, and audience
-
-Individual diagram files in this directory follow a lighter header (just the title and a "What this shows" intro) because they are visual companions, not foundation documents.
-
-## Editing conventions
-
-- Mermaid features used: `flowchart TD` / `flowchart LR`, `sequenceDiagram`, `erDiagram`, `graph TB`. These render reliably in GitHub, GitLab, and most Markdown renderers (mkdocs-material, Obsidian, VS Code preview).
-- Component names match the spec exactly: `expose-control-plane`, `expose-collector-worker`, `expose-scanner-worker`, `expose-llm-worker`, `postgres`, `minio`, `ollama`, `vaultwarden`. Lowercase, hyphenated.
-- Entity-type names match SPEC §5.2 exactly: `Domain`, `Subdomain`, `IP`, `CIDR`, `Certificate`, `Service`, `CloudResource`, `Organization`, `Registrant`, `ASN`. CamelCase singular.
-- Edge-type names match SPEC §5.3 exactly: `resolves_to`, `presented_cert`, `subject_alt_name_includes`, `nested_under`, `same_registrant_as`, `hosted_in_asn`, `cohabits_ip_with`, `in_cloud_range`, `registrant_of`, `cloud_resource_belongs_to`. Snake_case.
+- **Mermaid features used:** `flowchart TD` / `flowchart LR`, `sequenceDiagram`, `erDiagram`, `graph TB`. These render reliably in GitHub, GitLab, and most Markdown renderers (mkdocs-material, Obsidian, VS Code preview).
+- **Component names** match the spec exactly: `expose-control-plane`, `expose-collector-worker`, `expose-scanner-worker`, `expose-llm-worker`, `postgres`, `minio`, `ollama`, `vaultwarden`. Lowercase, hyphenated.
+- **Entity-type names** match SPEC section 5.2 exactly: `Domain`, `Subdomain`, `IP`, `CIDR`, `Certificate`, `Service`, `CloudResource`, `Organization`, `Registrant`, `ASN`. CamelCase singular.
+- **Edge-type names** match SPEC section 5.3 exactly: `resolves_to`, `presented_cert`, `subject_alt_name_includes`, `nested_under`, `same_registrant_as`, `hosted_in_asn`, `cohabits_ip_with`, `in_cloud_range`, `registrant_of`, `cloud_resource_belongs_to`. Snake_case.
 - All entity tables in `erDiagram` blocks include `tenant_id` per ADR-007.
-- The internal codename FF6K never appears in diagram labels; only EXPOSE.
+- The internal codename never appears in diagram labels; only EXPOSE.
 
-## What this directory does not do
+## What This Directory Does Not Do
 
 - Does not invent architecture beyond the spec. Where the spec is silent, diagrams are silent.
-- Does not include implementation-level call graphs, sequence-level message wire formats, or specific Postgres index choices — these are implementation concerns and may evolve.
+- Does not include implementation-level call graphs, sequence-level message wire formats, or specific Postgres index choices.
 - Does not duplicate the federal-customer-deployment-guide's authorization-boundary diagram. Diagram 80 generalizes the pattern; the federal-customer document remains the canonical view for SSP work.
 - Does not replace the locked spec's textual definitions. When the diagrams and the spec disagree, the spec wins and the diagram is in error.

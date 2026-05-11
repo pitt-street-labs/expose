@@ -12,9 +12,9 @@ Sub-modules:
 - ``base`` — :class:`EgressProfile` ABC, :class:`EgressProfileType` enum,
   :class:`EgressHealthCheck` model.
 - ``direct`` — :class:`DirectEgressProfile` (pass-through, default).
-- ``socks5`` — :class:`Socks5EgressProfile` (stub).
-- ``wireguard`` — :class:`WireguardEgressProfile` (stub).
-- ``http_connect`` — :class:`HttpConnectEgressProfile` (stub).
+- ``socks5`` — :class:`Socks5EgressProfile`.
+- ``wireguard`` — :class:`WireguardEgressProfile`.
+- ``http_connect`` — :class:`HttpConnectEgressProfile`.
 
 Use :func:`create_egress_profile` to instantiate a profile from configuration::
 

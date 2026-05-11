@@ -38,6 +38,18 @@ function exposeApp() {
         // Graph initialization flag
         _graphInitialized: false,
 
+        // SSE connection — EventSource instance for live run events
+        _eventSource: null,
+
+        // SSE connection status for UI display
+        sseConnected: false,
+
+        // Tenant config panel
+        showConfigPanel: false,
+        tenantConfig: null,
+        configSaving: false,
+        configMessage: "",
+
         /**
          * Handle tenant selection change.
          * Updates HTMX polling targets, resets graph state, and starts
@@ -49,6 +61,14 @@ function exposeApp() {
                 clearInterval(this._graphPollHandle);
                 this._graphPollHandle = null;
             }
+
+            // Disconnect SSE from previous tenant/run
+            this.disconnectSSE();
+
+            // Reset config panel
+            this.showConfigPanel = false;
+            this.tenantConfig = null;
+            this.configMessage = "";
 
             if (!this.selectedTenantId) {
                 this.entityCount = 0;
@@ -106,6 +126,307 @@ function exposeApp() {
                     fetchGraphData(self.selectedTenantId);
                 }
             }, 5000);
+        },
+
+        /* ==================================================================
+           SSE Live Updates — EventSource management
+           ================================================================== */
+
+        /**
+         * Connect to the SSE endpoint for the active run.
+         * Receives typed events (entities_discovered, collector_completed,
+         * run_completed) and refreshes the relevant UI sections in real-time
+         * instead of relying solely on polling.
+         *
+         * Auto-disconnects on run_completed or on error after 3 retries.
+         */
+        connectSSE() {
+            var self = this;
+
+            if (!this.selectedTenantId || !this.activeRunId) {
+                return;
+            }
+
+            // Tear down any existing connection first
+            this.disconnectSSE();
+
+            var url = "/v1/tenants/" + this.selectedTenantId +
+                      "/runs/" + this.activeRunId + "/events";
+
+            var es = new EventSource(url);
+            this._eventSource = es;
+            this._sseRetryCount = 0;
+
+            es.onopen = function () {
+                self.sseConnected = true;
+                self._sseRetryCount = 0;
+                console.info("[EXPOSE] SSE connected:", url);
+            };
+
+            // --- Typed event handlers ---
+
+            // entities_discovered: refresh entity table + graph immediately
+            es.addEventListener("entities_discovered", function (evt) {
+                self._onEntitiesDiscovered(evt);
+            });
+
+            // collector_completed: refresh run status bar
+            es.addEventListener("collector_completed", function (evt) {
+                self._onCollectorCompleted(evt);
+            });
+
+            // collector_started: informational log
+            es.addEventListener("collector_started", function (evt) {
+                console.info("[EXPOSE] SSE: collector_started", evt.data);
+            });
+
+            // collector_failed: log warning, refresh status
+            es.addEventListener("collector_failed", function (evt) {
+                console.warn("[EXPOSE] SSE: collector_failed", evt.data);
+                self._refreshRunStatus();
+            });
+
+            // attribution_updated: refresh entity table + graph
+            es.addEventListener("attribution_updated", function (evt) {
+                self._refreshEntityTable();
+                fetchGraphData(self.selectedTenantId);
+            });
+
+            // run_completed: final refresh, disconnect
+            es.addEventListener("run_completed", function (evt) {
+                self._onRunCompleted(evt);
+            });
+
+            // Generic error handler — reconnect up to 3 times
+            es.onerror = function () {
+                self.sseConnected = false;
+                self._sseRetryCount = (self._sseRetryCount || 0) + 1;
+                if (self._sseRetryCount >= 3) {
+                    console.warn("[EXPOSE] SSE: max retries reached, falling back to polling");
+                    self.disconnectSSE();
+                } else {
+                    console.warn("[EXPOSE] SSE: connection error, retry " + self._sseRetryCount + "/3");
+                }
+            };
+        },
+
+        /**
+         * Disconnect the SSE EventSource cleanly.
+         * Idempotent — safe to call even if no connection exists.
+         */
+        disconnectSSE() {
+            if (this._eventSource) {
+                this._eventSource.close();
+                this._eventSource = null;
+            }
+            this.sseConnected = false;
+            this._sseRetryCount = 0;
+        },
+
+        /**
+         * Handle entities_discovered SSE event.
+         * Triggers an immediate refresh of the entity table and graph.
+         */
+        _onEntitiesDiscovered: function (evt) {
+            try {
+                var payload = JSON.parse(evt.data);
+                var count = (payload.data && payload.data.entities)
+                    ? payload.data.entities.length
+                    : 0;
+                console.info("[EXPOSE] SSE: entities_discovered (" + count + " new)");
+            } catch (_e) {
+                // Non-critical — refresh regardless
+            }
+            this._refreshEntityTable();
+            fetchGraphData(this.selectedTenantId);
+        },
+
+        /**
+         * Handle collector_completed SSE event.
+         * Refreshes the run status bar to show updated stage progress.
+         */
+        _onCollectorCompleted: function (evt) {
+            try {
+                var payload = JSON.parse(evt.data);
+                var cid = (payload.data && payload.data.collector_id) || "unknown";
+                console.info("[EXPOSE] SSE: collector_completed — " + cid);
+            } catch (_e) {
+                // Non-critical
+            }
+            this._refreshRunStatus();
+            this._refreshEntityTable();
+            fetchGraphData(this.selectedTenantId);
+        },
+
+        /**
+         * Handle run_completed SSE event.
+         * Performs a final refresh of all data, disconnects SSE, and clears
+         * the active run ID.
+         */
+        _onRunCompleted: function (evt) {
+            console.info("[EXPOSE] SSE: run_completed — final refresh");
+
+            // Final data refresh
+            this._refreshEntityTable();
+            this._refreshRunStatus();
+            fetchGraphData(this.selectedTenantId);
+
+            // Refresh AI insights if the component exists
+            var aiPanel = document.querySelector("[x-data='aiInsights()']");
+            if (aiPanel && aiPanel.__x) {
+                aiPanel.__x.$data.fetchInsights(this.selectedTenantId);
+            }
+
+            // Clean disconnect
+            this.disconnectSSE();
+
+            // Clear active run (with a short delay so the final status renders)
+            var self = this;
+            setTimeout(function () {
+                self.activeRunId = null;
+            }, 2000);
+        },
+
+        /**
+         * Trigger an HTMX refresh of the entity table partial.
+         */
+        _refreshEntityTable: function () {
+            var entityList = document.getElementById("entity-list");
+            if (entityList && typeof htmx !== "undefined" && this.selectedTenantId) {
+                htmx.ajax("GET", "/partials/entities?tenant_id=" + this.selectedTenantId, {
+                    target: "#entity-list",
+                    swap: "innerHTML",
+                });
+            }
+        },
+
+        /**
+         * Trigger an HTMX refresh of the run status bar partial.
+         */
+        _refreshRunStatus: function () {
+            if (!this.activeRunId) return;
+            var statusBar = document.querySelector(".status-bar");
+            if (statusBar && typeof htmx !== "undefined") {
+                htmx.ajax("GET", "/partials/run-status/" + this.activeRunId, {
+                    target: ".status-bar",
+                    swap: "innerHTML",
+                });
+            }
+        },
+
+        /* ==================================================================
+           Tenant Configuration Management
+           ================================================================== */
+
+        /**
+         * Fetch the tenant configuration from the API.
+         * Populates this.tenantConfig for the config panel form.
+         */
+        async loadTenantConfig() {
+            if (!this.selectedTenantId) return;
+            this.configMessage = "";
+            try {
+                var resp = await fetch(
+                    "/v1/tenants/" + this.selectedTenantId + "/config/"
+                );
+                if (!resp.ok) {
+                    this.configMessage = "Failed to load config (HTTP " + resp.status + ")";
+                    return;
+                }
+                var data = await resp.json();
+                // Convert the frozen API response to a mutable form-state object
+                this.tenantConfig = {
+                    scope_rules: (data.scope_rules || []).map(function (r) {
+                        return { rule_type: r.rule_type, value: r.value, is_exclusion: r.is_exclusion || false };
+                    }),
+                    enabled_collectors: data.enabled_collectors || [],
+                    schedule_cron: data.schedule_cron || "",
+                    egress_profile: data.egress_profile || "direct",
+                    llm_enabled: data.llm_enabled || false,
+                    llm_provider: data.llm_provider || "",
+                    llm_cost_ceiling_per_run: data.llm_cost_ceiling_per_run || 0,
+                };
+            } catch (e) {
+                this.configMessage = "Error loading config: " + e.message;
+                console.error("[EXPOSE] Config load error:", e);
+            }
+        },
+
+        /**
+         * PATCH the tenant configuration to the API.
+         * Only sends fields that differ from defaults (PATCH semantics).
+         */
+        async saveTenantConfig() {
+            if (!this.selectedTenantId || !this.tenantConfig) return;
+            this.configSaving = true;
+            this.configMessage = "";
+
+            try {
+                var body = {
+                    scope_rules: this.tenantConfig.scope_rules,
+                    enabled_collectors: this.tenantConfig.enabled_collectors,
+                    schedule_cron: this.tenantConfig.schedule_cron || null,
+                    egress_profile: this.tenantConfig.egress_profile,
+                    llm_enabled: this.tenantConfig.llm_enabled,
+                    llm_provider: this.tenantConfig.llm_provider || null,
+                    llm_cost_ceiling_per_run: this.tenantConfig.llm_cost_ceiling_per_run,
+                };
+
+                var resp = await fetch(
+                    "/v1/tenants/" + this.selectedTenantId + "/config/",
+                    {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(body),
+                    }
+                );
+
+                if (!resp.ok) {
+                    var errText = await resp.text();
+                    this.configMessage = "Save failed (" + resp.status + "): " + errText;
+                } else {
+                    this.configMessage = "Configuration saved.";
+                    // Refresh to pick up server-side changes (e.g. updated_at)
+                    await this.loadTenantConfig();
+                }
+            } catch (e) {
+                this.configMessage = "Error saving config: " + e.message;
+                console.error("[EXPOSE] Config save error:", e);
+            }
+            this.configSaving = false;
+        },
+
+        /**
+         * Add a new empty scope rule to the config form.
+         */
+        addScopeRule() {
+            if (!this.tenantConfig) return;
+            this.tenantConfig.scope_rules.push({
+                rule_type: "apex_domain",
+                value: "",
+                is_exclusion: false,
+            });
+        },
+
+        /**
+         * Remove a scope rule by index.
+         */
+        removeScopeRule(index) {
+            if (!this.tenantConfig) return;
+            this.tenantConfig.scope_rules.splice(index, 1);
+        },
+
+        /**
+         * Toggle a collector ID in the enabled_collectors list.
+         */
+        toggleCollector(collectorId) {
+            if (!this.tenantConfig) return;
+            var idx = this.tenantConfig.enabled_collectors.indexOf(collectorId);
+            if (idx >= 0) {
+                this.tenantConfig.enabled_collectors.splice(idx, 1);
+            } else {
+                this.tenantConfig.enabled_collectors.push(collectorId);
+            }
         },
 
         /**
@@ -193,10 +514,12 @@ function scanForm() {
                 var data = await resp.json();
                 this.statusMessage = "Run " + data.run_id + " started (" + data.state + ")";
 
-                // Set activeRunId on the parent app component
+                // Set activeRunId on the parent app component and connect SSE
                 var appEl = document.querySelector("[x-data]");
                 if (appEl && appEl.__x) {
                     appEl.__x.$data.activeRunId = data.run_id;
+                    // Connect SSE for real-time event streaming
+                    appEl.__x.$data.connectSSE();
                 }
             } catch (e) {
                 this.statusMessage = "Error: " + e.message;

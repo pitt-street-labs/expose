@@ -1,0 +1,23 @@
+{{- if .Values.nats.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "expose.fullname" . }}-nats
+  labels:
+    {{- include "expose.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nats
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.nats.clientPort }}
+      targetPort: client
+      protocol: TCP
+      name: client
+    - port: {{ .Values.nats.clusterPort }}
+      targetPort: cluster
+      protocol: TCP
+      name: cluster
+  selector:
+    {{- include "expose.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: nats
+{{- end }}

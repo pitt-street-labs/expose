@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "expose.fullname" . }}-config
+  labels:
+    {{- include "expose.labels" . | nindent 4 }}
+data:
+  EXPOSE_DEFAULT_CRON: {{ .Values.runSchedule.defaultCron | quote }}
+  EXPOSE_LOG_FORMAT: "json"
+  EXPOSE_OTEL_ENABLED: {{ .Values.observability.otlp.enabled | quote }}
+  EXPOSE_OTEL_ENDPOINT: {{ .Values.observability.otlp.endpoint | quote }}
