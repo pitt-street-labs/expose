@@ -50,6 +50,10 @@ function exposeApp() {
         configSaving: false,
         configMessage: "",
 
+        // CSV export state
+        exportFilter: { entityType: "", tier: "", collector: "", environment: "" },
+        exporting: false,
+
         /**
          * Handle tenant selection change.
          * Updates HTMX polling targets, resets graph state, and starts
@@ -427,6 +431,59 @@ function exposeApp() {
             } else {
                 this.tenantConfig.enabled_collectors.push(collectorId);
             }
+        },
+
+        /* ==================================================================
+           CSV Export
+           ================================================================== */
+
+        /**
+         * Download filtered entities as a CSV file.
+         * Builds query params from exportFilter state, fetches from the
+         * export API, and triggers a browser download via a temporary
+         * object URL.
+         */
+        downloadCsv() {
+            this.exporting = true;
+            var self = this;
+            var params = new URLSearchParams();
+            if (this.exportFilter.entityType) {
+                params.set("entity_type", this.exportFilter.entityType);
+            }
+            if (this.exportFilter.tier) {
+                params.set("attribution_tier", this.exportFilter.tier);
+            }
+            if (this.exportFilter.collector) {
+                params.set("collector_id", this.exportFilter.collector);
+            }
+            if (this.exportFilter.environment) {
+                params.set("environment", this.exportFilter.environment);
+            }
+
+            var url = "/v1/tenants/" + this.selectedTenantId + "/export/csv?" + params.toString();
+
+            fetch(url)
+                .then(function (r) {
+                    if (!r.ok) {
+                        console.error("[EXPOSE] CSV export failed:", r.status);
+                        return null;
+                    }
+                    return r.blob();
+                })
+                .then(function (blob) {
+                    if (!blob) return;
+                    var a = document.createElement("a");
+                    a.href = URL.createObjectURL(blob);
+                    a.download = "expose-export-" + new Date().toISOString().slice(0, 10) + ".csv";
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                })
+                .catch(function (err) {
+                    console.error("[EXPOSE] CSV export error:", err.message);
+                })
+                .finally(function () {
+                    self.exporting = false;
+                });
         },
 
         /**

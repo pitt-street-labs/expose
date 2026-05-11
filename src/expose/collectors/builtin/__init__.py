@@ -13,5 +13,11 @@ import expose.collectors.builtin.ct_crtsh
 import expose.collectors.builtin.email_auth
 import expose.collectors.builtin.favicon_hash
 import expose.collectors.builtin.github_exposed
+import expose.collectors.builtin.dns_blacklist
+import expose.collectors.builtin.dns_passive_history
+import expose.collectors.builtin.dns_reverse_ptr
+import expose.collectors.builtin.dns_subdomain_enum
+import expose.collectors.builtin.dns_zone_transfer
+import expose.collectors.builtin.ma_discovery
 import expose.collectors.builtin.rdap_whois
 import expose.collectors.builtin.waf_detection  # noqa: F401

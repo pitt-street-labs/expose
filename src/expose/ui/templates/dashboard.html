@@ -174,6 +174,33 @@
         </section>
     </main>
 
+    <!-- ===== Export panel ===== -->
+    <div class="card" style="margin-top: 12px;" x-show="entities.length > 0 || entityCount > 0" x-cloak>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span class="pane-title">Export</span>
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <select x-model="exportFilter.entityType" class="selector-input" style="width: auto;">
+                    <option value="">All Types</option>
+                    <option value="domain">Domain</option>
+                    <option value="ip_address">IP Address</option>
+                    <option value="certificate">Certificate</option>
+                    <option value="organization">Organization</option>
+                </select>
+                <select x-model="exportFilter.tier" class="selector-input" style="width: auto;">
+                    <option value="">All Tiers</option>
+                    <option value="confirmed">Confirmed</option>
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="requires_review">Requires Review</option>
+                </select>
+                <button class="btn btn-primary" @click="downloadCsv()" :disabled="exporting">
+                    <span x-show="!exporting">Download CSV</span>
+                    <span x-show="exporting">Exporting...</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- ===== AI Insights panel (Stage 4b enrichment) ===== -->
     <div class="card" id="ai-insights-panel" x-data="aiInsights()" x-show="insights.length > 0" x-cloak>
         <h2 style="display: flex; align-items: center; gap: 0.5rem;">
