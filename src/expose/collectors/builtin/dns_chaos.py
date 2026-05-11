@@ -178,6 +178,21 @@ class DnsChaosCollector(Collector):
                         },
                     )
             latency = (time.monotonic() - start) * 1000.0
+            # Treat 401/403 as auth failures — the API key is missing or
+            # invalid.  Only 2xx/3xx/404 are considered healthy (404 just
+            # means the probe domain is not in the dataset).
+            if resp.status_code in (401, 403):
+                return CollectorHealthCheck(
+                    collector_id=self.collector_id,
+                    collector_version=self.collector_version,
+                    status=CollectorStatus.FAILURE,
+                    checked_at=datetime.now(tz=UTC),
+                    latency_ms=latency,
+                    error_message=(
+                        f"Chaos API returned HTTP {resp.status_code} — "
+                        "API key may be missing or invalid"
+                    ),
+                )
             return CollectorHealthCheck(
                 collector_id=self.collector_id,
                 collector_version=self.collector_version,

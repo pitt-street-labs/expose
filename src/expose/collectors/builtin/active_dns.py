@@ -18,6 +18,7 @@ configured resolver and does not require API keys.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -103,6 +104,9 @@ class ActiveDnsCollector(Collector):
         ``CollectorSourceUnreachableError``. Individual record-type
         failures (e.g., ``NoAnswer`` for TXT) are skipped without failing
         the whole expansion.
+
+        All record types are resolved concurrently via ``asyncio.gather``
+        for lower latency.
         """
         if not HAS_DNSPYTHON:
             msg = "dnspython not installed; install expose[collectors-dns]"
@@ -114,28 +118,42 @@ class ActiveDnsCollector(Collector):
         domain = seed.value
         canonical_domain = canonicalize_domain(domain)
 
-        for rdtype in _RECORD_TYPES:
+        # Resolve all record types in parallel.  Each coroutine returns
+        # (rdtype, answer) on success or raises an exception that is caught
+        # individually via the _sentinel wrapper.
+        _NXDOMAIN_SENTINEL = object()
+        _SKIP_SENTINEL = object()
+
+        async def _resolve_one(rdtype: str) -> tuple[str, Any]:
+            """Resolve a single record type, returning sentinels for expected errors."""
             try:
                 answer = await self._resolver.resolve(domain, rdtype)
+                return (rdtype, answer)
             except _dns_resolver.NXDOMAIN:
-                # Domain does not exist. Emit nothing for any record type.
-                return
+                return (rdtype, _NXDOMAIN_SENTINEL)
             except (
                 _dns_resolver.NoAnswer,
                 _dns_resolver.NoNameservers,
                 _dns_name.EmptyLabel,
             ):
-                # This specific record type has no answer; skip it.
-                continue
+                return (rdtype, _SKIP_SENTINEL)
             except _dns_resolver.LifetimeTimeout as exc:
                 msg = f"DNS resolution timed out for {domain!r}"
                 raise CollectorSourceUnreachableError(msg) from exc
             except Exception as exc:
-                # Catch-all for unexpected resolver errors (network
-                # unreachable, OS-level failures). Surface as source
-                # unreachable so the dispatcher can record the failure.
                 msg = f"DNS resolution failed for {domain!r}: {exc}"
                 raise CollectorSourceUnreachableError(msg) from exc
+
+        results = await asyncio.gather(
+            *[_resolve_one(rt) for rt in _RECORD_TYPES],
+        )
+
+        for rdtype, answer in results:
+            if answer is _NXDOMAIN_SENTINEL:
+                # Domain does not exist. Emit nothing.
+                return
+            if answer is _SKIP_SENTINEL:
+                continue
 
             observation = self._build_observation(
                 canonical_domain, rdtype, answer

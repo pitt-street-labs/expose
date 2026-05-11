@@ -338,3 +338,182 @@ async def test_resolver_does_not_cache(
         assert second["api_key"].secret_value == "ROTATED_VALUE"  # noqa: S105
     finally:
         del CREDENTIAL_SPECS["test-nocache"]
+
+
+# ---- Tests 13-17: End-to-end credential chain for real collectors ----------
+# These tests verify the full chain from backend storage through CREDENTIAL_SPECS
+# key_mapping resolution to the credential dict format that collectors expect.
+# They use the REAL CREDENTIAL_SPECS entries (not synthetic test entries) to
+# catch mismatches between the credential_resolver and the collector code.
+
+
+class TestRealCollectorCredentialChain:
+    """Verify the full credential chain for each collector that requires credentials.
+
+    For each collector, stores credentials under the backend keys used by
+    the credential import API (KNOWN_SLOTS), resolves via CredentialResolver,
+    then confirms the returned dict keys match what the collector's
+    ``__init__`` method looks up in ``self.config.credentials``.
+    """
+
+    async def test_scan_shodan_credential_chain(
+        self,
+        backend: InMemoryBackend,
+        resolver: CredentialResolver,
+    ) -> None:
+        """scan-shodan: stores under shodan-iwide backend key, resolves as shodan_api_key."""
+        await backend.set(
+            tenant_id=TENANT_A,
+            key="collector.shodan-iwide.api_key",
+            value="sk-test-shodan-key",
+        )
+        result = await resolver.resolve(TENANT_A, "scan-shodan")
+        assert len(result) == 1
+        assert "shodan_api_key" in result
+        assert result["shodan_api_key"].secret_value == "sk-test-shodan-key"  # noqa: S105
+
+    async def test_scan_censys_credential_chain(
+        self,
+        backend: InMemoryBackend,
+        resolver: CredentialResolver,
+    ) -> None:
+        """scan-censys: stores under scan-censys backend keys, resolves as censys_api_id/secret."""
+        await backend.set(
+            tenant_id=TENANT_A,
+            key="collector.scan-censys.api_id",
+            value="test-censys-id",
+        )
+        await backend.set(
+            tenant_id=TENANT_A,
+            key="collector.scan-censys.api_secret",
+            value="test-censys-secret",
+        )
+        result = await resolver.resolve(TENANT_A, "scan-censys")
+        assert len(result) == 2
+        assert "censys_api_id" in result
+        assert "censys_api_secret" in result
+        assert result["censys_api_id"].secret_value == "test-censys-id"  # noqa: S105
+        assert result["censys_api_secret"].secret_value == "test-censys-secret"  # noqa: S105
+
+    async def test_ct_censys_credential_chain(
+        self,
+        backend: InMemoryBackend,
+        resolver: CredentialResolver,
+    ) -> None:
+        """ct-censys: shares scan-censys backend keys via key_mapping."""
+        await backend.set(
+            tenant_id=TENANT_A,
+            key="collector.scan-censys.api_id",
+            value="shared-censys-id",
+        )
+        await backend.set(
+            tenant_id=TENANT_A,
+            key="collector.scan-censys.api_secret",
+            value="shared-censys-secret",
+        )
+        result = await resolver.resolve(TENANT_A, "ct-censys")
+        assert len(result) == 2
+        assert "censys_api_id" in result
+        assert "censys_api_secret" in result
+        # ct-censys shares the same backend keys as scan-censys
+        assert result["censys_api_id"].secret_value == "shared-censys-id"  # noqa: S105
+
+    async def test_scan_binaryedge_credential_chain(
+        self,
+        backend: InMemoryBackend,
+        resolver: CredentialResolver,
+    ) -> None:
+        """scan-binaryedge: stores under scan-binaryedge backend key."""
+        await backend.set(
+            tenant_id=TENANT_A,
+            key="collector.scan-binaryedge.api_key",
+            value="test-be-key",
+        )
+        result = await resolver.resolve(TENANT_A, "scan-binaryedge")
+        assert len(result) == 1
+        assert "binaryedge_api_key" in result
+        assert result["binaryedge_api_key"].secret_value == "test-be-key"  # noqa: S105
+
+    async def test_dns_chaos_credential_chain(
+        self,
+        backend: InMemoryBackend,
+        resolver: CredentialResolver,
+    ) -> None:
+        """dns-chaos: stores under dns-chaos backend key (no key_mapping, uses default)."""
+        await backend.set(
+            tenant_id=TENANT_A,
+            key="collector.dns-chaos.api_key",
+            value="test-chaos-key",
+        )
+        result = await resolver.resolve(TENANT_A, "dns-chaos")
+        assert len(result) == 1
+        assert "api_key" in result
+        assert result["api_key"].secret_value == "test-chaos-key"  # noqa: S105
+
+    async def test_tenant_isolation_across_collectors(
+        self,
+        backend: InMemoryBackend,
+        resolver: CredentialResolver,
+    ) -> None:
+        """Credentials stored for TENANT_A are not visible to TENANT_B."""
+        await backend.set(
+            tenant_id=TENANT_A,
+            key="collector.shodan-iwide.api_key",
+            value="tenant-a-key",
+        )
+        # TENANT_B should not see TENANT_A's credential
+        with pytest.raises(CredentialResolutionError, match="Missing credentials"):
+            await resolver.resolve(TENANT_B, "scan-shodan")
+
+    async def test_credential_keys_match_collector_expectations(
+        self,
+        backend: InMemoryBackend,
+        resolver: CredentialResolver,
+    ) -> None:
+        """Resolved credential dict keys match what collectors look up in config.credentials.
+
+        This test cross-references the CREDENTIAL_SPECS key names with the
+        actual credential lookup keys used in each collector's __init__ method.
+        """
+        # Store all credentials
+        await backend.set(
+            tenant_id=TENANT_A,
+            key="collector.shodan-iwide.api_key",
+            value="v",
+        )
+        await backend.set(
+            tenant_id=TENANT_A,
+            key="collector.scan-censys.api_id",
+            value="v",
+        )
+        await backend.set(
+            tenant_id=TENANT_A,
+            key="collector.scan-censys.api_secret",
+            value="v",
+        )
+        await backend.set(
+            tenant_id=TENANT_A,
+            key="collector.scan-binaryedge.api_key",
+            value="v",
+        )
+        await backend.set(
+            tenant_id=TENANT_A,
+            key="collector.dns-chaos.api_key",
+            value="v",
+        )
+
+        # These are the exact keys each collector uses in its __init__:
+        expected_keys = {
+            "scan-shodan": {"shodan_api_key"},
+            "scan-censys": {"censys_api_id", "censys_api_secret"},
+            "ct-censys": {"censys_api_id", "censys_api_secret"},
+            "scan-binaryedge": {"binaryedge_api_key"},
+            "dns-chaos": {"api_key"},
+        }
+
+        for collector_id, keys in expected_keys.items():
+            result = await resolver.resolve(TENANT_A, collector_id)
+            assert set(result.keys()) == keys, (
+                f"Key mismatch for {collector_id}: "
+                f"expected {keys}, got {set(result.keys())}"
+            )

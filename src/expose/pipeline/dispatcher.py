@@ -33,6 +33,11 @@ from uuid import UUID
 
 from collections.abc import Callable
 
+# Module-level health-check cache: maps collector_id to
+# (monotonic_timestamp, CollectorHealthCheck).  TTL is 60 seconds.
+_HEALTH_CACHE_TTL = 60.0
+_health_cache: dict[str, tuple[float, "CollectorHealthCheck"]] = {}
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from expose.collectors.base import (
@@ -214,12 +219,31 @@ class PipelineDispatcher:
     ) -> dict[str, CollectorCredential] | DispatchResult:
         """Resolve credentials or return a COLLECTOR_ERROR result on failure."""
         if self._credential_resolver is None:
+            logger.debug(
+                "No credential resolver configured — collector %s will "
+                "receive empty credentials",
+                job.collector_id,
+            )
             return {}
         try:
-            return await self._credential_resolver.resolve(
+            creds = await self._credential_resolver.resolve(
                 job.tenant_id, job.collector_id,
             )
+            if creds:
+                logger.debug(
+                    "Resolved %d credential(s) for collector %s: %s",
+                    len(creds),
+                    job.collector_id,
+                    list(creds.keys()),
+                )
+            return creds
         except CredentialResolutionError as exc:
+            logger.warning(
+                "Credential resolution failed for collector %s, tenant %s: %s",
+                job.collector_id,
+                job.tenant_id,
+                exc,
+            )
             return DispatchResult(
                 status=DispatchStatus.COLLECTOR_ERROR,
                 error_message=str(exc),
@@ -273,6 +297,10 @@ class PipelineDispatcher:
         can re-invoke it with a different egress profile applied to the
         collector config without duplicating the health-check/expand/error
         handling.
+
+        Health-check results are cached for 60 seconds per collector_id to
+        avoid redundant probes when the same collector is dispatched many
+        times within a single run.
         """
         config = CollectorConfig(
             tenant_id=job.tenant_id,
@@ -281,8 +309,15 @@ class PipelineDispatcher:
         )
         collector: Collector = collector_cls(config)
 
-        # Health check
-        health = await collector.health_check()
+        # Health check with TTL cache
+        now = time.monotonic()
+        cached = _health_cache.get(job.collector_id)
+        if cached is not None and (now - cached[0]) < _HEALTH_CACHE_TTL:
+            health = cached[1]
+        else:
+            health = await collector.health_check()
+            _health_cache[job.collector_id] = (now, health)
+
         if health.status not in (
             CollectorStatus.SUCCESS,
             CollectorStatus.PARTIAL_SUCCESS,
@@ -459,10 +494,20 @@ def _elapsed_ms(start_ns: int) -> float:
     return (time.monotonic_ns() - start_ns) / 1_000_000
 
 
+def clear_health_cache() -> None:
+    """Clear the module-level health-check cache.
+
+    Call at the start of each pipeline run to ensure fresh health probes
+    for the first dispatch of each collector.
+    """
+    _health_cache.clear()
+
+
 __all__ = [
     "DispatchJob",
     "DispatchResult",
     "DispatchStatus",
     "PipelineDispatcher",
+    "clear_health_cache",
     "current_tenant_id",
 ]

@@ -1142,3 +1142,113 @@ class TestEgressFallbackEndToEnd:
         assert result.status == DispatchStatus.SUCCESS
         # SOCKS5 with dns_through_proxy=True (default) is anonymizing
         assert result.egress_anonymized is True
+
+
+class TestCredentialChainEndToEnd:
+    """End-to-end tests: InMemoryBackend -> CredentialResolver -> Dispatcher -> CollectorConfig.
+
+    Uses a real InMemoryBackend and CredentialResolver (no mocks) to verify
+    that credentials stored in the backend reach the collector's config.
+    """
+
+    @pytest.mark.asyncio
+    async def test_real_resolver_delivers_credentials_to_collector(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """Credentials stored in InMemoryBackend reach CollectorConfig.credentials."""
+        from expose.pipeline.credential_resolver import (  # noqa: PLC0415
+            CREDENTIAL_SPECS,
+            CollectorCredentialSpec,
+            CredentialResolver,
+        )
+        from expose.secrets.memory_backend import InMemoryBackend  # noqa: PLC0415
+
+        # Register a test spec for the mock-capture collector
+        CREDENTIAL_SPECS["mock-capture"] = CollectorCredentialSpec(
+            collector_id="mock-capture",
+            required_keys=["api_key"],
+        )
+        try:
+            backend = InMemoryBackend()
+            await backend.set(
+                tenant_id=TENANT_ID,
+                key="collector.mock-capture.api_key",
+                value="real-secret-value",
+            )
+
+            resolver = CredentialResolver(backend)
+            MockConfigCapturingCollector.captured_config = None
+
+            dispatcher = PipelineDispatcher(
+                registry, scope_empty, TENANT_ID,
+                credential_resolver=resolver,
+            )
+            result = await dispatcher.dispatch(_make_job("mock-capture", seed))
+
+            assert result.status == DispatchStatus.SUCCESS
+            captured = MockConfigCapturingCollector.captured_config
+            assert captured is not None
+            assert "api_key" in captured.credentials
+            assert captured.credentials["api_key"].secret_value == "real-secret-value"  # noqa: S105, E501
+        finally:
+            CREDENTIAL_SPECS.pop("mock-capture", None)
+
+    @pytest.mark.asyncio
+    async def test_missing_credential_returns_collector_error(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """Missing credential in backend returns COLLECTOR_ERROR, not HEALTH_CHECK_FAILED."""
+        from expose.pipeline.credential_resolver import (  # noqa: PLC0415
+            CREDENTIAL_SPECS,
+            CollectorCredentialSpec,
+            CredentialResolver,
+        )
+        from expose.secrets.memory_backend import InMemoryBackend  # noqa: PLC0415
+
+        CREDENTIAL_SPECS["mock-tier1"] = CollectorCredentialSpec(
+            collector_id="mock-tier1",
+            required_keys=["api_key"],
+        )
+        try:
+            backend = InMemoryBackend()  # empty -- no credentials stored
+            resolver = CredentialResolver(backend)
+
+            dispatcher = PipelineDispatcher(
+                registry, scope_empty, TENANT_ID,
+                credential_resolver=resolver,
+            )
+            result = await dispatcher.dispatch(_make_job("mock-tier1", seed))
+
+            # Should fail at credential resolution, not at health check
+            assert result.status == DispatchStatus.COLLECTOR_ERROR
+            assert "Missing credentials" in (result.error_message or "")
+            assert "mock-tier1" in (result.error_message or "")
+        finally:
+            CREDENTIAL_SPECS.pop("mock-tier1", None)
+
+    @pytest.mark.asyncio
+    async def test_no_resolver_passes_empty_credentials(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """Without a credential resolver, collectors receive empty credentials dict."""
+        MockConfigCapturingCollector.captured_config = None
+
+        dispatcher = PipelineDispatcher(
+            registry, scope_empty, TENANT_ID,
+            credential_resolver=None,
+        )
+        result = await dispatcher.dispatch(_make_job("mock-capture", seed))
+
+        assert result.status == DispatchStatus.SUCCESS
+        captured = MockConfigCapturingCollector.captured_config
+        assert captured is not None
+        assert captured.credentials == {}

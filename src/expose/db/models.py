@@ -187,6 +187,14 @@ class Relationship(Base):
     )
 
     __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "from_entity_id",
+            "to_entity_id",
+            "edge_type",
+            "collector_id",
+            name="uq_relationships_logical_key",
+        ),
         Index(
             "idx_relationships_from",
             "tenant_id",

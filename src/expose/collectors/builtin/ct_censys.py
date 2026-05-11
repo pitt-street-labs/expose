@@ -211,6 +211,13 @@ class CensysCertCollector(Collector):
                 msg = "Censys rate limit exceeded"
                 raise CollectorError(msg)
 
+            if resp.status_code in (301, 302, 303, 307, 308):
+                msg = (
+                    f"Censys returned HTTP {resp.status_code} (redirect) — "
+                    "credentials may be missing or invalid"
+                )
+                raise CollectorError(msg)
+
             if resp.status_code == 401:  # noqa: PLR2004
                 msg = "Censys authentication failed (401)"
                 raise CollectorError(msg)

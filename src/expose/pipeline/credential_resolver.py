@@ -27,12 +27,15 @@ Secrets backend key convention: ``collector.{collector_id}.{key_name}``
 
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from expose.collectors.base import CollectorCredential
 from expose.secrets.backend import SecretNotFoundError, SecretsBackend
+
+logger = logging.getLogger(__name__)
 
 
 class CollectorCredentialSpec(BaseModel):
@@ -184,7 +187,17 @@ class CredentialResolver:
         ``collector_id``), returns ``{}``.
         """
         spec = CREDENTIAL_SPECS.get(collector_id)
-        if spec is None or not spec.required_keys:
+        if spec is None:
+            logger.debug(
+                "No credential spec for collector %r — treating as credential-free",
+                collector_id,
+            )
+            return {}
+        if not spec.required_keys:
+            logger.debug(
+                "Collector %r has no required keys — skipping credential resolution",
+                collector_id,
+            )
             return {}
 
         credentials: dict[str, CollectorCredential] = {}
@@ -195,7 +208,22 @@ class CredentialResolver:
             try:
                 value = await self._backend.get(tenant_id=tenant_id, key=backend_key)
                 credentials[key] = CollectorCredential(name=key, secret_value=value)
+                logger.debug(
+                    "Resolved credential %r for collector %r (backend_key=%r, tenant=%s)",
+                    key,
+                    collector_id,
+                    backend_key,
+                    tenant_id,
+                )
             except SecretNotFoundError:
+                logger.warning(
+                    "Credential %r not found for collector %r "
+                    "(backend_key=%r, tenant=%s)",
+                    key,
+                    collector_id,
+                    backend_key,
+                    tenant_id,
+                )
                 missing.append(key)
 
         if missing:
@@ -204,6 +232,12 @@ class CredentialResolver:
                 f"tenant {tenant_id}: {missing}"
             )
 
+        logger.debug(
+            "Resolved %d credential(s) for collector %r: %s",
+            len(credentials),
+            collector_id,
+            list(credentials.keys()),
+        )
         return credentials
 
 

@@ -20,7 +20,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import distinct, func, select, text, union_all, update
+from sqlalchemy import bindparam, distinct, func, select, text, union_all, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,6 +47,11 @@ class EntityRepository:
     methods are coroutines and require ``tenant_id``; cross-tenant calls return
     ``None`` or empty sequences.
     """
+
+    # Sentinel so callers can distinguish real repositories from mocks
+    # that auto-generate attributes.  ``_flush_batch`` in ``RunExecutor``
+    # checks this before calling ``batch_upsert``.
+    supports_batch_upsert: bool = True
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -108,6 +113,55 @@ class EntityRepository:
         entity: Entity = result.scalar_one()
         await self._session.flush()
         return entity
+
+    async def batch_upsert(
+        self,
+        entities: list[dict[str, Any]],
+    ) -> list[Entity]:
+        """Batch upsert multiple entities in a single multi-row
+        ``INSERT ... ON CONFLICT DO UPDATE`` statement.
+
+        Each dict in ``entities`` must contain the same keys accepted by
+        :meth:`create_or_update`: ``tenant_id``, ``entity_type``,
+        ``canonical_identifier``, ``properties``, ``attribution_status``,
+        ``attribution_confidence``.
+
+        Returns a list of hydrated :class:`Entity` ORM instances reflecting
+        the post-upsert state. A single ``flush()`` is issued at the end.
+        """
+        if not entities:
+            return []
+
+        values = [
+            {
+                "id": uuid4(),
+                "tenant_id": e["tenant_id"],
+                "entity_type": e["entity_type"],
+                "canonical_identifier": e["canonical_identifier"],
+                "properties": e["properties"],
+                "attribution_status": e["attribution_status"],
+                "attribution_confidence": e["attribution_confidence"],
+            }
+            for e in entities
+        ]
+
+        insert_stmt = pg_insert(Entity).values(values)
+        upsert_stmt = insert_stmt.on_conflict_do_update(
+            constraint="uq_entities_tenant_type_identifier",
+            set_={
+                "properties": insert_stmt.excluded.properties,
+                "attribution_status": insert_stmt.excluded.attribution_status,
+                "attribution_confidence": insert_stmt.excluded.attribution_confidence,
+                "last_observed_at": text("NOW()"),
+            },
+        ).returning(Entity)
+
+        result = await self._session.execute(
+            upsert_stmt, execution_options={"populate_existing": True}
+        )
+        upserted: list[Entity] = list(result.scalars().all())
+        await self._session.flush()
+        return upserted
 
     async def get_by_id(
         self,
@@ -188,6 +242,9 @@ class EntityRepository:
         - 3 collectors   -> ``high``, confidence 0.7
         - 4+ collectors  -> ``confirmed``, confidence 0.9
 
+        Uses a single ``UPDATE ... FROM (VALUES ...)`` statement to apply all
+        attribution changes in one round-trip instead of per-entity UPDATEs.
+
         Returns the number of entities whose attribution was updated (changed
         from their previous value). The caller controls transaction boundaries.
         """
@@ -233,7 +290,8 @@ class EntityRepository:
         result = await self._session.execute(stmt)
         rows = list(result.all())
 
-        updated = 0
+        # --- Compute changes and batch into a single UPDATE -------------------
+        updates: list[tuple[UUID, str, Decimal]] = []
         for entity_id, current_status, current_confidence, count in rows:
             # Determine the new tier
             new_status = _DEFAULT_STATUS
@@ -251,21 +309,31 @@ class EntityRepository:
             ):
                 continue
 
-            # Update the entity
-            upd = (
-                update(Entity)
-                .where(Entity.id == entity_id)
-                .values(
-                    attribution_status=new_status,
-                    attribution_confidence=Decimal(new_confidence),
-                )
-            )
-            await self._session.execute(upd)
-            updated += 1
+            updates.append((entity_id, new_status, Decimal(new_confidence)))
 
-        if updated > 0:
-            await self._session.flush()
-        return updated
+        if not updates:
+            return 0
+
+        # Build a VALUES list for a bulk UPDATE ... FROM (VALUES ...) statement.
+        # This issues a single UPDATE for all changed entities instead of N
+        # individual UPDATEs.
+        values_params = [
+            {"eid": eid, "new_status": ns, "new_confidence": nc}
+            for eid, ns, nc in updates
+        ]
+        bulk_update = (
+            update(Entity)
+            .where(
+                Entity.id == bindparam("eid"),
+            )
+            .values(
+                attribution_status=bindparam("new_status"),
+                attribution_confidence=bindparam("new_confidence"),
+            )
+        )
+        await self._session.execute(bulk_update, values_params)
+        await self._session.flush()
+        return len(updates)
 
 
 __all__ = ["EntityRepository"]

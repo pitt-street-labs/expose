@@ -22,6 +22,7 @@ dispatch and NATS-mediated dispatch without changing the executor.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import UTC, datetime
@@ -35,6 +36,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from expose.collectors.base import Observation, Seed
 from expose.compliance.misuse_detection import MisuseAlert, MisuseDetector
+from expose.pipeline.dispatcher import clear_health_cache
 from expose.pipeline.enrichment import EnrichmentPipeline
 from expose.pipeline.entity_seed_converter import (
     entities_to_seeds,
@@ -52,6 +54,10 @@ from expose.types.shared import EntityId, RunId, TenantId
 LogSink = Callable[[str, str], None]
 
 logger = logging.getLogger(__name__)
+
+# Maximum number of concurrent dispatcher tasks during a single pass.
+# Bounded via ``asyncio.Semaphore`` to avoid overwhelming external APIs.
+_MAX_CONCURRENT_DISPATCHES = 15
 
 # Maximum number of observations to accumulate before flushing to the entity
 # repository and running enrichment.  Prevents unbounded memory growth on
@@ -217,6 +223,10 @@ class RunExecutor:
         Returns a ``RunResult`` summarizing the run.
         """
         start_ns = time.monotonic_ns()
+
+        # Clear the health-check cache so the first dispatch of each collector
+        # in this run gets a fresh probe.
+        clear_health_cache()
 
         # === Validate and transition: pending -> running ======================
         run = await self._run_repo.get_by_id(
@@ -455,37 +465,66 @@ class RunExecutor:
     ) -> tuple[list[Observation], dict[str, int]]:
         """Run a single dispatch pass over (seed, collector) pairs.
 
+        All non-duplicate ``(seed.value, collector_id)`` pairs are dispatched
+        concurrently, bounded by ``_MAX_CONCURRENT_DISPATCHES``.  The
+        dispatcher itself only makes HTTP calls to external APIs and does not
+        touch the DB, so the single ``AsyncSession`` is safe: all DB writes
+        (entity upsert, relationship extraction, enrichment) happen
+        sequentially in ``_flush_batch`` *after* the gather completes.
+
         Skips any (seed.value, collector_id) pair already in
         ``dispatched_pairs``. Updates ``dispatched_pairs`` in-place as pairs
-        are dispatched.
+        are collected.
 
         Returns ``(all_observations, stats_dict)`` where ``stats_dict``
         contains keys: ``successful``, ``failed``, ``denied``,
         ``observations``, ``enrichment``, ``upsert_failures``.
         """
-        successful = 0
-        failed = 0
-        denied = 0
-        total_observations = 0
-        enrichment_count = 0
-        upsert_failures = 0
-        batch: list[Observation] = []
-        all_observations: list[Observation] = []
 
+        # --- 1. Collect all non-duplicate (seed, collector_id) pairs ----------
+        jobs: list[tuple[Seed, str, DispatchJob]] = []
         for seed in seeds:
             for collector_id in collector_ids:
                 pair_key = (seed.value, collector_id)
                 if pair_key in dispatched_pairs:
                     continue
                 dispatched_pairs.add(pair_key)
+                jobs.append((
+                    seed,
+                    collector_id,
+                    DispatchJob(
+                        collector_id=collector_id,
+                        seed=seed,
+                        run_id=run_id,
+                        tenant_id=tenant_id,
+                    ),
+                ))
 
-                job = DispatchJob(
-                    collector_id=collector_id,
-                    seed=seed,
-                    run_id=run_id,
-                    tenant_id=tenant_id,
-                )
-                self._log("info", f"Dispatching {collector_id} for {seed.value}")
+        if not jobs:
+            return [], {
+                "successful": 0,
+                "failed": 0,
+                "denied": 0,
+                "observations": 0,
+                "enrichment": 0,
+                "upsert_failures": 0,
+            }
+
+        # --- 2. Dispatch all jobs concurrently with semaphore ----------------
+        semaphore = asyncio.Semaphore(_MAX_CONCURRENT_DISPATCHES)
+
+        async def _bounded_dispatch(
+            seed: Seed,
+            collector_id: str,
+            job: DispatchJob,
+        ) -> tuple[str, str, DispatchResult | None]:
+            """Dispatch one job under the concurrency semaphore.
+
+            Returns ``(seed_value, collector_id, result_or_None)`` where
+            ``None`` signals an unhandled exception from the dispatcher.
+            """
+            self._log("info", f"Dispatching {collector_id} for {seed.value}")
+            async with semaphore:
                 try:
                     result = await self._dispatcher.dispatch(job)
                 except Exception:
@@ -498,41 +537,63 @@ class RunExecutor:
                         "error",
                         f"{collector_id} raised exception for {seed.value}",
                     )
-                    failed += 1
-                    continue
+                    return (seed.value, collector_id, None)
+                return (seed.value, collector_id, result)
 
-                if result.status == "success":
-                    successful += 1
-                    obs_count = len(result.observations)
-                    duration_s = result.duration_ms / 1000
-                    self._log(
-                        "info",
-                        f"{collector_id} completed: "
-                        f"{obs_count} observation(s) in {duration_s:.1f}s",
+        tasks = [
+            _bounded_dispatch(seed, collector_id, job)
+            for seed, collector_id, job in jobs
+        ]
+        outcomes = await asyncio.gather(*tasks)
+
+        # --- 3. Process results sequentially (DB-safe on single session) -----
+        successful = 0
+        failed = 0
+        denied = 0
+        total_observations = 0
+        enrichment_count = 0
+        upsert_failures = 0
+        batch: list[Observation] = []
+        all_observations: list[Observation] = []
+
+        for seed_value, collector_id, result in outcomes:
+            if result is None:
+                # Dispatcher raised an unhandled exception
+                failed += 1
+                continue
+
+            if result.status == "success":
+                successful += 1
+                obs_count = len(result.observations)
+                duration_s = result.duration_ms / 1000
+                self._log(
+                    "info",
+                    f"{collector_id} completed: "
+                    f"{obs_count} observation(s) in {duration_s:.1f}s",
+                )
+                batch.extend(result.observations)
+                all_observations.extend(result.observations)
+                # Flush when batch reaches threshold (Stage 3+4+4b)
+                if len(batch) >= _OBSERVATION_BATCH_SIZE:
+                    batch_enriched, batch_upsert_failures = (
+                        await self._flush_batch(batch, run_id, tenant_id)
                     )
-                    batch.extend(result.observations)
-                    all_observations.extend(result.observations)
-                    # Flush when batch reaches threshold (Stage 3+4+4b)
-                    if len(batch) >= _OBSERVATION_BATCH_SIZE:
-                        batch_enriched, batch_upsert_failures = (
-                            await self._flush_batch(batch, run_id, tenant_id)
-                        )
-                        total_observations += len(batch)
-                        enrichment_count += batch_enriched
-                        upsert_failures += batch_upsert_failures
-                        batch = []
-                elif result.status == "denied":
-                    denied += 1
-                    self._log(
-                        "warn",
-                        f"{collector_id} denied: {result.error_message or 'scope gate'}",
-                    )
-                else:
-                    failed += 1
-                    self._log(
-                        "warn",
-                        f"{collector_id} failed: {result.error_message or 'unknown error'}",
-                    )
+                    total_observations += len(batch)
+                    enrichment_count += batch_enriched
+                    upsert_failures += batch_upsert_failures
+                    batch = []
+            elif result.status == "denied":
+                denied += 1
+                self._log(
+                    "warn",
+                    f"{collector_id} denied: {result.error_message or 'scope gate'}",
+                )
+            else:
+                failed += 1
+                self._log(
+                    "warn",
+                    f"{collector_id} failed: {result.error_message or 'unknown error'}",
+                )
 
         # Flush remaining observations after the dispatch loop
         if batch:
@@ -565,69 +626,269 @@ class RunExecutor:
         (graph upsert + relationship extraction), and Stage 4b (LLM
         enrichment) for the given batch.
 
+        Uses ``batch_upsert`` when available on the entity repository to
+        issue a single multi-row ``INSERT ON CONFLICT DO UPDATE`` instead of
+        one statement per observation.
+
         Returns ``(enrichment_count, upsert_failures)`` for the batch.
         """
-        # --- Stage 4: Graph upsert -------------------------------------------
+        # --- Stage 4: Batch entity upsert ------------------------------------
         upsert_failures = 0
-        for obs in observations:
+        entity_map: dict[str, Any] = {}  # canonical_identifier -> Entity row
+
+        # Prefer the batch upsert path when the repository supports it.
+        # The sentinel ``supports_batch_upsert`` is ``True`` (a real bool)
+        # on ``EntityRepository``; on ``AsyncMock`` objects ``getattr``
+        # returns another Mock (not ``True``), so ``is True`` rejects it.
+        if getattr(self._entity_repo, "supports_batch_upsert", False) is True:
+            entity_dicts: list[dict[str, Any]] = []
+            for obs in observations:
+                entity_dicts.append({
+                    "tenant_id": TenantId(tenant_id),
+                    "entity_type": obs.subject.identifier_type.value,
+                    "canonical_identifier": obs.subject.identifier_value,
+                    "properties": _observation_properties(obs),
+                    "attribution_status": "unattributed",
+                    "attribution_confidence": Decimal("0.000"),
+                })
             try:
-                from_entity = await self._entity_repo.create_or_update(
-                    tenant_id=TenantId(tenant_id),
-                    entity_type=obs.subject.identifier_type.value,
-                    canonical_identifier=obs.subject.identifier_value,
-                    properties=_observation_properties(obs),
-                    attribution_status="unattributed",
-                    attribution_confidence=Decimal("0.000"),
-                )
-                self._log(
-                    "info",
-                    f"New entity: {obs.subject.identifier_type.value} "
-                    f"{obs.subject.identifier_value}",
-                )
+                upserted = await self._entity_repo.batch_upsert(entity_dicts)
+                for entity in upserted:
+                    entity_map[entity.canonical_identifier] = entity
+                    self._log(
+                        "info",
+                        f"New entity: {entity.entity_type} "
+                        f"{entity.canonical_identifier}",
+                    )
             except Exception:
-                logger.exception(
-                    "Entity upsert failed for %s/%s",
-                    obs.subject.identifier_type.value,
-                    obs.subject.identifier_value,
-                )
-                self._log(
-                    "error",
-                    f"Entity upsert failed: {obs.subject.identifier_value}",
-                )
-                upsert_failures += 1
-                continue
-
-            # --- Stage 4 (cont): Relationship extraction ----------------------
-            if self._relationship_repo is not None:
-                await self._extract_relationships(
-                    obs=obs,
-                    from_entity_id=EntityId(from_entity.id),
-                    tenant_id=TenantId(tenant_id),
-                )
-
-        # --- Stage 4b: LLM enrichment ----------------------------------------
-        enrichment_count = 0
-        if self._enrichment is not None:
+                logger.exception("Batch entity upsert failed")
+                self._log("error", "Batch entity upsert failed")
+                upsert_failures += len(observations)
+        else:
+            # Fallback: per-observation upsert (legacy path / mocked tests).
             for obs in observations:
                 try:
-                    enrichment_result = await self._enrichment.enrich_entity(
+                    from_entity = await self._entity_repo.create_or_update(
+                        tenant_id=TenantId(tenant_id),
                         entity_type=obs.subject.identifier_type.value,
                         canonical_identifier=obs.subject.identifier_value,
                         properties=_observation_properties(obs),
-                        attribution_confidence=float(Decimal("0.000")),
-                        tenant_id=tenant_id,
-                        run_id=run_id,
+                        attribution_status="unattributed",
+                        attribution_confidence=Decimal("0.000"),
                     )
-                    if enrichment_result:
-                        enrichment_count += 1
+                    entity_map[obs.subject.identifier_value] = from_entity
+                    self._log(
+                        "info",
+                        f"New entity: {obs.subject.identifier_type.value} "
+                        f"{obs.subject.identifier_value}",
+                    )
                 except Exception:
                     logger.exception(
-                        "Enrichment failed for %s/%s",
+                        "Entity upsert failed for %s/%s",
                         obs.subject.identifier_type.value,
                         obs.subject.identifier_value,
                     )
+                    self._log(
+                        "error",
+                        f"Entity upsert failed: {obs.subject.identifier_value}",
+                    )
+                    upsert_failures += 1
+
+        # --- Stage 4 (cont): Relationship extraction -------------------------
+        if self._relationship_repo is not None:
+            await self._extract_relationships_batch(
+                observations=observations,
+                entity_map=entity_map,
+                tenant_id=TenantId(tenant_id),
+            )
+
+        # --- Stage 4b: LLM enrichment (parallel, bounded to 5 concurrent) ---
+        enrichment_count = 0
+        if self._enrichment is not None:
+            enrichment_sem = asyncio.Semaphore(5)
+
+            async def _enrich_one(obs: Observation) -> bool:
+                async with enrichment_sem:
+                    try:
+                        enrichment_result = await self._enrichment.enrich_entity(  # type: ignore[union-attr]
+                            entity_type=obs.subject.identifier_type.value,
+                            canonical_identifier=obs.subject.identifier_value,
+                            properties=_observation_properties(obs),
+                            attribution_confidence=float(Decimal("0.000")),
+                            tenant_id=tenant_id,
+                            run_id=run_id,
+                        )
+                        return bool(enrichment_result)
+                    except Exception:
+                        logger.exception(
+                            "Enrichment failed for %s/%s",
+                            obs.subject.identifier_type.value,
+                            obs.subject.identifier_value,
+                        )
+                        return False
+
+            results = await asyncio.gather(
+                *[_enrich_one(obs) for obs in observations],
+            )
+            enrichment_count = sum(1 for r in results if r)
 
         return enrichment_count, upsert_failures
+
+    async def _extract_relationships_batch(
+        self,
+        *,
+        observations: list[Observation],
+        entity_map: dict[str, Any],
+        tenant_id: TenantId,
+    ) -> None:
+        """Batch relationship extraction across all observations.
+
+        For each observation whose subject has a known entity (in
+        ``entity_map``), extracts related references from the structured
+        payload, batch-upserts the related entities, then batch-creates
+        the relationship rows.
+
+        Failures are logged but never propagated -- relationship extraction
+        is best-effort and must not block entity ingestion.
+        """
+        assert self._relationship_repo is not None  # caller guards  # noqa: S101
+
+        # --- 1. Accumulate all related-entity data across observations --------
+        # Each entry: (from_canonical, entity_type, identifier, edge_type, obs)
+        all_related: list[tuple[str, str, str, str, Observation]] = []
+
+        for obs in observations:
+            from_canonical = obs.subject.identifier_value
+            if from_canonical not in entity_map:
+                continue  # subject upsert failed; skip relationships
+            payload = obs.structured_payload
+
+            # --- A/AAAA values from active_dns --------------------------------
+            if "values" in payload and payload.get("record_type") in (
+                "A",
+                "AAAA",
+            ):
+                for ip_val in payload["values"]:
+                    all_related.append(
+                        (from_canonical, "ip", str(ip_val), "resolves_to", obs)
+                    )
+
+            # --- resolved_ips from dns_subdomain_enum -------------------------
+            for ip_val in payload.get("resolved_ips", []):
+                all_related.append(
+                    (from_canonical, "ip", str(ip_val), "resolves_to", obs)
+                )
+
+            # --- CNAME target from active_dns ---------------------------------
+            if "target" in payload and payload.get("record_type") == "CNAME":
+                all_related.append(
+                    (
+                        from_canonical,
+                        "domain",
+                        str(payload["target"]),
+                        "cname_for",
+                        obs,
+                    )
+                )
+
+            # --- cname_chain from dns_subdomain_enum --------------------------
+            for cname_target in payload.get("cname_chain", []):
+                all_related.append(
+                    (from_canonical, "domain", str(cname_target), "cname_for", obs)
+                )
+
+            # --- MX exchanges from active_dns ---------------------------------
+            for mx in payload.get("exchanges", []):
+                exchange = mx.get("exchange") if isinstance(mx, dict) else None
+                if exchange:
+                    all_related.append(
+                        (from_canonical, "domain", str(exchange), "mx_for", obs)
+                    )
+
+            # --- NS nameservers from active_dns -------------------------------
+            for ns in payload.get("nameservers", []):
+                all_related.append(
+                    (from_canonical, "domain", str(ns), "ns_for", obs)
+                )
+
+        if not all_related:
+            return
+
+        # --- 2. Batch-upsert related entities --------------------------------
+        # De-duplicate by (entity_type, identifier) to avoid redundant upserts.
+        unique_related: dict[tuple[str, str], dict[str, Any]] = {}
+        for _, entity_type, identifier, _, _ in all_related:
+            key = (entity_type, identifier)
+            if key not in unique_related:
+                unique_related[key] = {
+                    "tenant_id": tenant_id,
+                    "entity_type": entity_type,
+                    "canonical_identifier": identifier,
+                    "properties": {},
+                    "attribution_status": "unattributed",
+                    "attribution_confidence": Decimal("0.000"),
+                }
+
+        # Build a lookup from canonical_identifier -> entity for related
+        related_entity_map: dict[str, Any] = {}
+        if getattr(self._entity_repo, "supports_batch_upsert", False) is True:
+            try:
+                upserted = await self._entity_repo.batch_upsert(
+                    list(unique_related.values())
+                )
+                for entity in upserted:
+                    related_entity_map[entity.canonical_identifier] = entity
+            except Exception:
+                logger.exception("Batch related-entity upsert failed")
+                return
+        else:
+            for data in unique_related.values():
+                try:
+                    entity = await self._entity_repo.create_or_update(**data)
+                    related_entity_map[data["canonical_identifier"]] = entity
+                except Exception:
+                    logger.exception(
+                        "Related entity upsert failed for %s/%s",
+                        data["entity_type"],
+                        data["canonical_identifier"],
+                    )
+
+        # --- 3. Batch-create relationships -----------------------------------
+        rel_dicts: list[dict[str, Any]] = []
+        for from_canonical, entity_type, identifier, edge_type, obs in all_related:
+            from_entity = entity_map.get(from_canonical)
+            to_entity = related_entity_map.get(identifier)
+            if from_entity is None or to_entity is None:
+                continue
+            rel_dicts.append({
+                "tenant_id": tenant_id,
+                "from_entity_id": EntityId(from_entity.id),
+                "to_entity_id": EntityId(to_entity.id),
+                "edge_type": edge_type,
+                "confidence": Decimal("0.900"),
+                "observed_at": obs.observed_at,
+                "collector_id": obs.collector_id,
+            })
+
+        if not rel_dicts:
+            return
+
+        if getattr(self._relationship_repo, "supports_batch_create", False) is True:
+            try:
+                await self._relationship_repo.batch_create(rel_dicts)
+            except Exception:
+                logger.exception("Batch relationship creation failed")
+        else:
+            for rel in rel_dicts:
+                try:
+                    await self._relationship_repo.create_or_update(**rel)
+                except Exception:
+                    logger.exception(
+                        "Relationship creation failed for %s -[%s]-> %s",
+                        rel["from_entity_id"],
+                        rel["edge_type"],
+                        rel["to_entity_id"],
+                    )
 
     async def _extract_relationships(
         self,
@@ -643,8 +904,12 @@ class RunExecutor:
           1. An entity upsert for the related entity (IP, domain, etc.)
           2. A relationship row linking ``from_entity_id`` to the new entity.
 
-        Failures are logged but never propagated — relationship extraction
+        Failures are logged but never propagated -- relationship extraction
         is best-effort and must not block entity ingestion.
+
+        .. note:: Kept for backward compatibility. New code paths use
+           ``_extract_relationships_batch`` which batches across all
+           observations in a flush cycle.
         """
         assert self._relationship_repo is not None  # caller guards  # noqa: S101
         payload = obs.structured_payload
