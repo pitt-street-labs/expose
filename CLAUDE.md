@@ -6,7 +6,7 @@ This file is loaded automatically when Claude is invoked in this directory. It c
 
 **EXPOSE** (EXtended Perimeter Ontology Security Evaluation) is an open-core External Attack Surface Intelligence (EASI) platform for Korlogos / Pitt Street Labs, with a federal-customer trajectory. Public name was selected in Session H on 2026-05-10. The internal codename **FF6K** (shortened from FatFinger6000) is preserved for development artifacts, internal communications, and historical references.
 
-This repository (`pitt-street-labs/ff6k` on internal Gitea — repo path retains the internal codename for now) is **specification-only** — no source code yet. Phase 1 implementation has not been authorized. The artifacts here are the locked foundation produced from two design sessions on 2026-05-09 plus the Session H rename pass on 2026-05-10.
+This repository (`pitt-street-labs/ff6k` on internal Gitea — repo path retains the internal codename for now) has a complete Phase 1 implementation authorized and executed across Sprint 3-4 sessions (2026-05-10). The locked specification foundation was produced from two design sessions on 2026-05-09 plus the Session H rename pass on 2026-05-10.
 
 **Naming convention going forward:**
 - Use **EXPOSE** in all public-facing and customer-facing artifacts (README, SPEC, ADRs, marketing materials)
@@ -19,7 +19,7 @@ This repository (`pitt-street-labs/ff6k` on internal Gitea — repo path retains
 
 2. **Do not modify locked artifacts** without an explicit session for that purpose. Locked: all 10 ADRs (`docs/adr/ADR-001..010`), `docs/SPEC.md`, `docs/positioning.md`, all 3 schemas (`schemas/`), `docs/issues-backlog.md`. These are the consensus output of the spec phase; silent edits destroy it. Mechanical rename passes (Session H on 2026-05-10) and similar deliberate session-driven sweeps are the exception.
 
-3. **Do not begin Phase 1 implementation** (Python source, collectors, engine code) until the project lead authorizes. Sessions B-G come first; H is complete.
+3. **Phase 1 implementation is authorized and active.** Sessions B-G deliverables are in progress alongside implementation.
 
 4. **Public name is now EXPOSE.** Session H closed on 2026-05-10. Use EXPOSE consistently in public-facing artifacts; FF6K continues as the internal codename. Do not invent variants.
 
@@ -42,7 +42,7 @@ This repository (`pitt-street-labs/ff6k` on internal Gitea — repo path retains
 | Internal codename | `FF6K` (use in dev artifacts, repo path, commit messages, internal references) |
 | Gitea repo | `pitt-street-labs/ff6k` (private, internal-codename path; rename deferred) |
 | Gitea URL | https://git.int.korlogos.com:8084/pitt-street-labs/ff6k |
-| Issue tracker | Gitea Issues at the repo above (41 issues; #38 Session H closed; #41 rulepack $schema bug) |
+| Issue tracker | Gitea Issues at the repo above (52 issues; 30+ closed) |
 | License | Apache 2.0 (engine); separate proprietary modules per ADR-009 |
 | MITRE ATT&CK anchor | Reconnaissance (TA0043) only for Core; Resource Development (TA0042) is a commercial Threat Context module concern |
 | Two-environment model | E1 = this codebase (deterministic engine); E2 = downstream LLM analysis (out of scope, anticipates Mythos via Project Glasswing) |
@@ -65,22 +65,25 @@ This repository (`pitt-street-labs/ff6k` on internal Gitea — repo path retains
 | Init script (already executed) | `init-and-push-to-gitea.sh` (committed as genesis record; token redacted) |
 | Advisory strategy documents | `docs/strategy/` — non-locked analyses: `persona-analysis.md`, `competitive-analysis.md` (Session B), `framework-annotation.md` (Session E), `sdlp.md` (Session F), `federal-customer-deployment-guide.md` (Session G), `critical-path.md`, plus session-driven additions |
 | Architecture diagrams | `docs/architecture/` — mermaid diagrams of pipeline stages, two-environment model, deployment topology, observation graph, multi-tenancy, scanner egress, attribution flow, product surfaces, federal deployment pattern |
-| Engine source code | `src/expose/` — 94 Python source files across 15 sub-packages: `api/` (FastAPI app + tenant/runs/graph/events/auth routers), `broker/` (NATS JetStream), `cli.py` (Click CLI with run/serve/db commands + --live flag), `collectors/` (framework + 5 builtin: ct-crtsh, cloud-ranges, rdap-whois, active-dns, active-http), `compliance/` (GDPR export/deletion + misuse detection), `crypto/` (FIPS SHA-256 adapter), `db/` (SQLAlchemy ORM + Alembic), `egress/` (EgressProfile ABC + direct/socks5/wireguard/http_connect), `eval/` (attribution eval harness + datasets + metrics), `import_/` (SpiderFoot importer), `maintenance/` (retention pruner + policy), `observability/` (OTel tracing + structlog + 5 metrics), `pipeline/` (dispatcher + executor + seed expansion + artifact generator/planner/validator + delta + manifest + credential resolver + enforcement), `quotas/` (per-tenant resource limits), `repositories/` (async tenant-scoped CRUD), `sanitization/` (text + canonicalize + PII), `scope/` (8-rule-type authorization matcher), `secrets/` (ABC + InMemory + Vault + env backends), `storage/` (ABC + local + S3 stub), `types/` (Pydantic schema mirrors), `ui/` (Jinja2 darkroom dashboard + D3 graph + Alpine.js) |
+| Engine source code | `src/expose/` — 111 Python source files across 18 sub-packages: `api/`, `broker/`, `cli.py`, `collectors/` (framework + 14 builtin), `compliance/`, `crypto/`, `db/`, `egress/`, `eval/`, `import_/`, `llm/` (SafeLLMClient + 4 provider adapters), `maintenance/`, `observability/`, `pipeline/` (dispatcher + executor + seed expansion + artifact generator + credential resolver + enforcement), `quotas/`, `repositories/`, `sanitization/`, `scope/`, `secrets/`, `storage/`, `types/`, `ui/` |
 | Database migrations | `alembic.ini` + `alembic/versions/` (v0001 initial_schema lands tenants/entities/relationships/runs) |
 | Container build | `Dockerfile` (multi-stage, multi-arch via buildx) + `.dockerignore` |
 | Helm chart | `deploy/helm-chart/` (skeleton — full per-component manifests land Sprint 5+) |
 | CI workflow | `.github/workflows/ci.yml` (lint + test + schema-sync + FIPS gate + helm-lint + multi-arch container build + ci-gate aggregator) |
 | Pre-commit | `.pre-commit-config.yaml` (ruff + gitleaks + check-jsonschema + helm lint) |
-| Tests | `tests/` — **805 tests passing as of 4c75c04.** 50 test files, 94 source files. Conftest provides `pg_container` + `nats_container` shared session fixtures. aiosqlite for fast API unit tests. |
+| Tests | `tests/` — **1059 tests passing as of d881c9a.** 61 test files, 111 source files. Conftest provides `pg_container` + `nats_container` shared session fixtures. aiosqlite for fast API unit tests. |
 | Deploy artifacts | `deploy/helm-chart/` (NetworkPolicy + PodSecurity hardened), `deploy/cosign-keypair-setup.md`, `deploy/grafana/` (2 dashboards + README), `scripts/generate-sbom.sh` |
 | Strategy docs | `docs/strategy/` — postgres-deployment-guide, lab-to-production-runbook, network-security-guide, sbom-and-signing-guide, air-gap-deployment-guide, persona-analysis, competitive-analysis, framework-annotation, sdlp, federal-customer-deployment-guide, critical-path |
+| GitHub-launch docs | `README.md` (public-facing), `CHANGELOG.md`, `ROADMAP.md`, `GOVERNANCE.md`, `CONTRIBUTING.md` (rewritten for public), `docs/collectors.md` (14-collector catalog), `docs/quickstart.md`, `docs/why-expose.md`, `docs/use-cases.md` |
+| GitHub templates | `.github/ISSUE_TEMPLATE/` (bug, feature, collector request), `.github/PULL_REQUEST_TEMPLATE.md`, `.github/DISCUSSION_TEMPLATE/` (ideas, Q&A, show-and-tell) |
+| SpiderFoot credentials | `spiderfoot-creds.txt` (gitignored, 31 API keys — Censys, Shodan, SecurityTrails, BinaryEdge, GreyNoise, VirusTotal, PassiveTotal, AlienVault, + 23 more) |
 | Example rule packs | `examples/rulepacks/` — baseline + cloud-first + conservative (3 packs, auto-validated) |
 | Eval datasets | `examples/eval-datasets/` — confirmed_yours + confirmed_not_yours (Phase 2 harness) |
 
 ## Issue tracker conventions
 
-- **30 closed / 11 open / 41 total.** v1-tagged: all closed. All high-priority issues closed.
-- Remaining 11 open: #7 (observability subchart, low), #11 (bucket creds, medium), #14 (GPU docs, medium), #15 (tie-breaker, medium), #16 (Ollama pool, low), #18 (trademark, low), #19 (CLA/DCO, medium), #22 (CoC enforcement, medium), #35 (ETHICS quarterly review, due 2026-08-09), #37 (persona follow-ups, medium), #39 (Tor egress, medium).
+- **30+ closed / 20+ open / 52 total.** v1-tagged: all closed. All original high-priority issues closed.
+- New issues from Pre-Push session: #48 (screenshot vision), #49 (trust degradation), #50 (WAF/origin discovery), #51 (dark web indicators), #52 (legal/social mentions).
 - Labels follow `epic:<slug>`, `area:<slug>`, `priority:<level>`, `type:<kind>`.
 - Reference issues by number in commits: `Closes #N` or `Refs #N`.
 - New work discovered during a session → file an issue immediately (Tier 3, pre-authorized) rather than letting it slip.
