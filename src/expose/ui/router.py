@@ -66,11 +66,9 @@ async def dashboard(request: Request) -> HTMLResponse:
     partials after initial render.
     """
     return templates.TemplateResponse(
-        "dashboard.html",
-        {
-            "request": request,
-            "page_title": "Dashboard",
-        },
+        request=request,
+        name="dashboard.html",
+        context={"page_title": "Dashboard"},
     )
 
 
@@ -82,12 +80,9 @@ async def run_detail(request: Request, run_id: UUID) -> HTMLResponse:
     that poll for updates while the run is in progress.
     """
     return templates.TemplateResponse(
-        "dashboard.html",
-        {
-            "request": request,
-            "page_title": "Run Detail",
-            "active_run_id": str(run_id),
-        },
+        request=request,
+        name="dashboard.html",
+        context={"page_title": "Run Detail", "active_run_id": str(run_id)},
     )
 
 
@@ -151,12 +146,9 @@ async def entities_partial(request: Request, tenant_id: UUID) -> HTMLResponse:
     ]
 
     return templates.TemplateResponse(
-        "partials/entity_table.html",
-        {
-            "request": request,
-            "entities": placeholder_entities,
-            "tenant_id": str(tenant_id),
-        },
+        request=request,
+        name="partials/entity_table.html",
+        context={"entities": placeholder_entities, "tenant_id": str(tenant_id)},
     )
 
 
@@ -189,9 +181,7 @@ async def run_status_partial(request: Request, run_id: UUID) -> HTMLResponse:
     }
 
     return templates.TemplateResponse(
-        "partials/run_status.html",
-        {
-            "request": request,
-            "run": placeholder_run,
-        },
+        request=request,
+        name="partials/run_status.html",
+        context={"run": placeholder_run},
     )
