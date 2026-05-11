@@ -37,13 +37,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from expose.collectors.base import Observation, Seed
 from expose.compliance.misuse_detection import MisuseAlert, MisuseDetector
+from expose.pipeline.collector_filter import filter_collectors
 from expose.pipeline.dispatcher import clear_health_cache
 from expose.pipeline.enrichment import EnrichmentPipeline
+from expose.pipeline.supply_chain import detect_providers
 from expose.pipeline.entity_seed_converter import (
     entities_to_seeds,
     extract_org_seeds_from_properties,
 )
 from expose.pipeline.seed_expansion import expand_seeds
+from expose.pipeline.target_profile import build_target_profile
 from expose.quotas.tracker import QuotaExceededError, QuotaTracker
 from expose.repositories.entity_repo import EntityRepository
 from expose.repositories.relationship_repo import RelationshipRepository
@@ -436,11 +439,56 @@ class RunExecutor:
             if pass_number >= max_passes:
                 break
 
-            # Query entities created during this run for seed expansion
+            # Query entities created during this run — reused for supply
+            # chain inference, target profiling, and multi-pass seed expansion.
             entities = await self._entity_repo.list_for_tenant(
                 tenant_id=TenantId(tenant_id),
                 limit=1000,
             )
+
+            # --- Supply chain inference ----------------------------------------
+            # Scan entities for provider fingerprints and create provider
+            # entities + depends_on relationships.
+            try:
+                await self._apply_supply_chain_detections(
+                    entities=entities,
+                    tenant_id=tenant_id,
+                    pass_number=pass_number,
+                )
+            except Exception:
+                logger.exception(
+                    "Supply chain inference failed after pass %d", pass_number
+                )
+
+            # --- Target profiling & collector filtering (after Pass 1) ---
+            # Build a profile of the target's infrastructure from Pass 1
+            # discoveries, then filter collectors for Pass 2+ based on
+            # signal-to-action rules.
+            if pass_number == 1 and entities:
+                try:
+                    target_profile = build_target_profile(entities)
+                    filter_result = filter_collectors(
+                        target_profile, collector_ids,
+                    )
+                    collector_ids = filter_result.filtered_collector_ids
+                    self._log(
+                        "info",
+                        f"Target profile: infra={target_profile.infrastructure_type}, "
+                        f"email={target_profile.email_provider}, "
+                        f"cdn={target_profile.cdn_provider}, "
+                        f"voip={target_profile.has_voip}, "
+                        f"certs={target_profile.cert_count}",
+                    )
+                    if filter_result.signals_active:
+                        self._log(
+                            "info",
+                            f"Active signals: {filter_result.signals_active}; "
+                            f"{len(filter_result.decisions)} filter decisions applied",
+                        )
+                except Exception:
+                    logger.exception(
+                        "Target profiling/collector filtering failed after pass 1"
+                    )
 
             # Convert discovered entities to new seeds
             new_seeds = entities_to_seeds(entities, already_scanned)
@@ -459,12 +507,8 @@ class RunExecutor:
                 (s.seed_type.value, s.value) for s in current_seeds
             )
 
-            # Pass 2+ uses only collectors that accept the new seed types
-            # (filter to those in the original enabled set)
-            current_collector_ids = [
-                cid for cid in collector_ids
-                if cid in {c for c in collector_ids}
-            ]
+            # Pass 2+ uses the (possibly filtered) collector set
+            current_collector_ids = list(collector_ids)
 
         entities_added = total_observations - upsert_failures
         if self._quota_tracker is not None and entities_added > 0:
@@ -1051,6 +1095,98 @@ class RunExecutor:
                     edge_type,
                     entity_type,
                     identifier,
+                )
+
+    async def _apply_supply_chain_detections(
+        self,
+        *,
+        entities: Any,
+        tenant_id: UUID,
+        pass_number: int,
+    ) -> None:
+        """Run supply chain inference and persist provider entities + edges.
+
+        For each ``ProviderDetection`` returned by ``detect_providers``:
+        1. Create/update a ``provider`` entity with
+           ``canonical_identifier = provider_id``.
+        2. Create a ``depends_on`` relationship from the source entity to the
+           provider entity.
+
+        Failures are logged but never propagated -- supply chain inference is
+        best-effort enrichment, not a critical pipeline stage.
+        """
+        detections = detect_providers(entities)
+        if not detections:
+            return
+
+        self._log(
+            "info",
+            f"Supply chain: {len(detections)} provider(s) detected "
+            f"in pass {pass_number}",
+        )
+
+        # Build a lookup from canonical_identifier -> Entity for source entities
+        entity_lookup: dict[str, Any] = {
+            e.canonical_identifier: e for e in entities
+        }
+
+        for detection in detections:
+            try:
+                # Upsert the provider entity
+                provider_entity = await self._entity_repo.create_or_update(
+                    tenant_id=TenantId(tenant_id),
+                    entity_type="provider",
+                    canonical_identifier=detection.provider_id,
+                    properties={
+                        "provider_name": detection.provider_name,
+                        "category": detection.category,
+                        "risk_notes": detection.risk_notes,
+                    },
+                    attribution_status="confirmed",
+                    attribution_confidence=Decimal("1.000"),
+                )
+
+                # Find the source entity
+                source = entity_lookup.get(detection.source_entity)
+                if source is None:
+                    logger.warning(
+                        "Supply chain: source entity %s not found in lookup",
+                        detection.source_entity,
+                    )
+                    continue
+
+                # Create depends_on relationship
+                if self._relationship_repo is not None:
+                    await self._relationship_repo.create_or_update(
+                        tenant_id=TenantId(tenant_id),
+                        from_entity_id=EntityId(source.id),
+                        to_entity_id=EntityId(provider_entity.id),
+                        edge_type="depends_on",
+                        confidence=Decimal("0.950"),
+                        observed_at=datetime.now(UTC),
+                        collector_id="supply-chain-inference",
+                        evidence_ref=(
+                            f"{detection.evidence_type}:"
+                            f"{detection.evidence_value}"
+                        ),
+                        properties={
+                            "evidence_type": detection.evidence_type,
+                            "evidence_value": detection.evidence_value,
+                            "category": detection.category,
+                        },
+                    )
+
+                self._log(
+                    "info",
+                    f"Supply chain: {detection.source_entity} depends_on "
+                    f"{detection.provider_name} ({detection.evidence_type}: "
+                    f"{detection.evidence_value})",
+                )
+            except Exception:
+                logger.exception(
+                    "Supply chain: failed to persist detection %s -> %s",
+                    detection.source_entity,
+                    detection.provider_id,
                 )
 
 

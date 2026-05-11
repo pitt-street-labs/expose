@@ -53,6 +53,9 @@ const ExposeGraph = (() => {
     /** Normal node radius baseline. Highest-risk node gets 2x. */
     const DERU_KUI_RADIUS_MULTIPLIER = 2;
 
+    /** Muted steel-blue for provider (supply chain) context nodes. */
+    const PROVIDER_COLOR = "#6b7d94";
+
     /** Link distance by relationship type; fallback for unknown types. */
     const LINK_DISTANCES = {
         resolves_to:     80,
@@ -61,6 +64,7 @@ const ExposeGraph = (() => {
         certificate_for: 70,
         mx_for:          100,
         ns_for:          100,
+        depends_on:      120,
         default:         90,
     };
 
@@ -89,6 +93,8 @@ const ExposeGraph = (() => {
 
     function nodeColor(d) {
         if (d.highest_risk) return "#ef4444";
+        // Provider nodes (supply chain context) get a distinct muted color.
+        if (d.entity_type === "provider") return PROVIDER_COLOR;
         return COLORS[d.attribution_status] || COLORS.unattributed;
     }
 
