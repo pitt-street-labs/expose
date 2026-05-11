@@ -76,8 +76,10 @@ function exposeApp() {
         credentialMessage: "",
         showSfImportModal: false,
         showBundleImportModal: false,
+        showGlobalImportModal: false,
         sfImportText: "",
         bundleImportText: "",
+        globalImportText: "",
 
         // Scan elapsed timer
         _scanStartTime: null,
@@ -175,6 +177,7 @@ function exposeApp() {
             this.credentialMessage = "";
             this.showSfImportModal = false;
             this.showBundleImportModal = false;
+            this.showGlobalImportModal = false;
 
             // Reset provenance panel
             this.provenanceData = null;
@@ -807,6 +810,49 @@ function exposeApp() {
             } catch (e) {
                 this.credentialMessage = "Import error: " + e.message;
                 console.error("[EXPOSE] Bundle import error:", e);
+            }
+        },
+
+        /**
+         * Import a native JSON bundle as global credentials (shared across all tenants).
+         */
+        async importGlobalBundle() {
+            if (!this.globalImportText.trim()) {
+                this.credentialMessage = "Paste credential bundle JSON first.";
+                return;
+            }
+            this.credentialMessage = "Importing global credential bundle...";
+            try {
+                var parsed = JSON.parse(this.globalImportText);
+                var creds = parsed.credentials || parsed;
+                var resp = await fetch(
+                    "/v1/credentials/global/import/bundle",
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            format_version: parsed.format_version || "1.0",
+                            credentials: creds,
+                        }),
+                    }
+                );
+                if (!resp.ok) {
+                    var errText = await resp.text();
+                    this.credentialMessage = "Global import failed (" + resp.status + "): " + errText;
+                    return;
+                }
+                var result = await resp.json();
+                this.credentialMessage = "Imported " + result.imported_count + " global credentials" +
+                    (result.skipped_count > 0 ? ", skipped " + result.skipped_count : "") + ".";
+                if (result.errors && result.errors.length > 0) {
+                    this.credentialMessage += " Errors: " + result.errors.join("; ");
+                }
+                this.showGlobalImportModal = false;
+                this.globalImportText = "";
+                await this.loadCredentials();
+            } catch (e) {
+                this.credentialMessage = "Global import error: " + e.message;
+                console.error("[EXPOSE] Global bundle import error:", e);
             }
         },
 

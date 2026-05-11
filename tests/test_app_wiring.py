@@ -77,6 +77,7 @@ _EXPECTED_ROUTER_FRAGMENTS = [
     ("graph", "/tenants/{tenant_id}/graph"),
     ("events", "/tenants/{tenant_id}/runs/{run_id}/events"),
     ("tenant_config", "/v1/tenants/{tenant_id}/config"),
+    ("global_credentials", "/v1/credentials/global"),
     ("ui", "/runs/{run_id}"),
 ]
 

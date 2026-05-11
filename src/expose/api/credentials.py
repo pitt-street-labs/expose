@@ -40,7 +40,7 @@ from expose.import_.credential_bundle import (
     mask_value,
 )
 from expose.secrets.backend import SecretNotFoundError, SecretsBackend
-from expose.secrets.memory_backend import InMemoryBackend, _DEFAULT_PERSIST_PATH
+from expose.secrets.memory_backend import GLOBAL_TENANT_ID, InMemoryBackend, _DEFAULT_PERSIST_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -207,6 +207,7 @@ class CredentialSlot(BaseModel):
     collector_ids: list[str]
     status: str  # "configured", "missing", "expired"
     masked_value: str | None  # "****abcd" or None if missing
+    source: str = "tenant"  # "tenant" or "global"
 
 
 class CredentialStatusResponse(BaseModel):
@@ -282,6 +283,12 @@ router = APIRouter(
 )
 
 
+global_router = APIRouter(
+    prefix="/v1/credentials/global",
+    tags=["credentials"],
+)
+
+
 @router.get("/", response_model=CredentialStatusResponse)
 async def list_credentials(tenant_id: UUID) -> CredentialStatusResponse:
     """List all credential slots with their current status.
@@ -292,10 +299,20 @@ async def list_credentials(tenant_id: UUID) -> CredentialStatusResponse:
     """
     slots: list[CredentialSlot] = []
     configured_count = 0
+    global_tid = UUID(GLOBAL_TENANT_ID)
 
     for slot_def in KNOWN_SLOTS:
+        # Check tenant-specific first
         try:
             value = await _backend.get(tenant_id=tenant_id, key=slot_def.backend_key)
+            # Determine source: did we find it under this tenant or via global fallback?
+            # Check if the tenant has its own copy by directly inspecting the store
+            # (the get() method falls back to global automatically).
+            source = "tenant"
+            if hasattr(_backend, "_store"):
+                tid_str = str(tenant_id)
+                if (tid_str, slot_def.backend_key) not in _backend._store:
+                    source = "global"
             slots.append(
                 CredentialSlot(
                     credential_id=slot_def.credential_id,
@@ -303,6 +320,7 @@ async def list_credentials(tenant_id: UUID) -> CredentialStatusResponse:
                     collector_ids=slot_def.collector_ids,
                     status="configured",
                     masked_value=mask_value(value),
+                    source=source,
                 )
             )
             configured_count += 1
@@ -314,6 +332,7 @@ async def list_credentials(tenant_id: UUID) -> CredentialStatusResponse:
                     collector_ids=slot_def.collector_ids,
                     status="missing",
                     masked_value=None,
+                    source="tenant",
                 )
             )
 
@@ -572,6 +591,146 @@ async def test_credential(tenant_id: UUID, credential_id: str) -> CredentialTest
     )
 
 
+# ---------------------------------------------------------------------------
+# Global credential endpoints — shared across all tenants
+# ---------------------------------------------------------------------------
+
+_GLOBAL_UUID = UUID(GLOBAL_TENANT_ID)
+
+
+@global_router.get("/", response_model=CredentialStatusResponse)
+async def list_global_credentials() -> CredentialStatusResponse:
+    """List all global credential slots with their current status.
+
+    Global credentials serve as defaults for tenants that have not
+    configured their own keys.
+    """
+    slots: list[CredentialSlot] = []
+    configured_count = 0
+
+    for slot_def in KNOWN_SLOTS:
+        # Directly check the global tenant — no fallback needed here.
+        if hasattr(_backend, "_store"):
+            key_present = (GLOBAL_TENANT_ID, slot_def.backend_key) in _backend._store
+        else:
+            try:
+                await _backend.get(tenant_id=_GLOBAL_UUID, key=slot_def.backend_key)
+                key_present = True
+            except SecretNotFoundError:
+                key_present = False
+
+        if key_present:
+            value = _backend._store[(GLOBAL_TENANT_ID, slot_def.backend_key)] if hasattr(_backend, "_store") else await _backend.get(tenant_id=_GLOBAL_UUID, key=slot_def.backend_key)
+            slots.append(
+                CredentialSlot(
+                    credential_id=slot_def.credential_id,
+                    display_name=slot_def.display_name,
+                    collector_ids=slot_def.collector_ids,
+                    status="configured",
+                    masked_value=mask_value(value),
+                    source="global",
+                )
+            )
+            configured_count += 1
+        else:
+            slots.append(
+                CredentialSlot(
+                    credential_id=slot_def.credential_id,
+                    display_name=slot_def.display_name,
+                    collector_ids=slot_def.collector_ids,
+                    status="missing",
+                    masked_value=None,
+                    source="global",
+                )
+            )
+
+    return CredentialStatusResponse(
+        tenant_id=_GLOBAL_UUID,
+        slots=slots,
+        configured_count=configured_count,
+        total_count=len(KNOWN_SLOTS),
+    )
+
+
+@global_router.post("/import/bundle", response_model=ImportResult)
+async def import_global_bundle(body: BundleImportRequest) -> ImportResult:
+    """Import credentials as global keys (shared across all tenants).
+
+    Same format as the per-tenant bundle import but stores keys under
+    the global tenant ID. These keys automatically apply to any tenant
+    that has not configured its own value for the same slot.
+    """
+    imported_count = 0
+    skipped_count = 0
+    errors: list[str] = []
+    slot_names: list[str] = []
+
+    for slot_id, value in body.credentials.items():
+        if not value or not value.strip():
+            skipped_count += 1
+            errors.append(f"Empty value for slot {slot_id!r}")
+            continue
+
+        slot_def = _SLOTS_BY_ID.get(slot_id)
+        if slot_def is None:
+            skipped_count += 1
+            errors.append(f"Unknown credential slot: {slot_id!r}")
+            continue
+
+        if value.startswith("****"):
+            skipped_count += 1
+            errors.append(f"Masked value for slot {slot_id!r} — cannot import masked credentials")
+            continue
+
+        await _backend.set(
+            tenant_id=_GLOBAL_UUID,
+            key=slot_def.backend_key,
+            value=value.strip(),
+        )
+        imported_count += 1
+        slot_names.append(slot_id)
+
+        logger.info(
+            "credential_imported_global_bundle",
+            extra={
+                "credential_id": slot_id,
+                "value": "<redacted>",
+            },
+        )
+
+    return ImportResult(
+        imported_count=imported_count,
+        skipped_count=skipped_count,
+        errors=errors,
+        slot_names=slot_names,
+    )
+
+
+@global_router.get("/export/bundle", response_model=BundleExportResponse)
+async def export_global_bundle() -> BundleExportResponse:
+    """Export global credentials as a JSON bundle with masked values."""
+    secrets: dict[str, str] = {}
+
+    for slot_def in KNOWN_SLOTS:
+        if hasattr(_backend, "_store"):
+            if (GLOBAL_TENANT_ID, slot_def.backend_key) in _backend._store:
+                secrets[slot_def.credential_id] = _backend._store[(GLOBAL_TENANT_ID, slot_def.backend_key)]
+        else:
+            try:
+                value = await _backend.get(tenant_id=_GLOBAL_UUID, key=slot_def.backend_key)
+                secrets[slot_def.credential_id] = value
+            except SecretNotFoundError:
+                continue
+
+    bundle = export_bundle(secrets, mask=True)
+
+    return BundleExportResponse(
+        format_version=bundle.format_version,
+        exported_at=bundle.exported_at.isoformat(),
+        credentials=bundle.credentials,
+    )
+
+
 __all__ = [
     "KNOWN_SLOTS",
     "BundleExportResponse",
@@ -581,6 +740,7 @@ __all__ = [
     "CredentialTestResult",
     "ImportResult",
     "SpiderFootImportRequest",
+    "global_router",
     "router",
     "set_backend",
 ]

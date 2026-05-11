@@ -136,6 +136,7 @@
                             <tr style="border-bottom: 1px solid var(--border); text-align: left;">
                                 <th style="padding: 0.5rem 0.5rem; color: var(--text-muted); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;">Credential</th>
                                 <th style="padding: 0.5rem 0.5rem; color: var(--text-muted); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;">Status</th>
+                                <th style="padding: 0.5rem 0.5rem; color: var(--text-muted); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;">Source</th>
                                 <th style="padding: 0.5rem 0.5rem; color: var(--text-muted); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;">Value</th>
                                 <th style="padding: 0.5rem 0.5rem; color: var(--text-muted); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;">Collectors</th>
                                 <th style="padding: 0.5rem 0.5rem; color: var(--text-muted); font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;">Actions</th>
@@ -156,6 +157,14 @@
                                             background: slot.status === 'configured' ? 'rgba(52, 211, 153, 0.15)' : 'rgba(156, 163, 175, 0.15)',
                                             color: slot.status === 'configured' ? 'var(--green, #34d399)' : 'var(--text-muted, #9ca3af)'
                                         }" x-text="slot.status"></span>
+                                    </td>
+                                    <td style="padding: 0.5rem;">
+                                        <span x-show="slot.source === 'global' && slot.status === 'configured'"
+                                              style="display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; background: rgba(99, 102, 241, 0.15); color: var(--accent, #6366f1); border: 1px solid rgba(99, 102, 241, 0.3);">&#127760; Global</span>
+                                        <span x-show="slot.source === 'tenant' && slot.status === 'configured'"
+                                              style="display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; background: rgba(52, 211, 153, 0.1); color: var(--text-muted, #9ca3af); border: 1px solid rgba(52, 211, 153, 0.2);">Tenant</span>
+                                        <span x-show="slot.status !== 'configured'"
+                                              style="font-size: 0.7rem; color: var(--text-dim);">---</span>
                                     </td>
                                     <td style="padding: 0.5rem; font-family: monospace; font-size: 0.75rem; color: var(--text-muted);"
                                         x-text="slot.masked_value || '---'"></td>
@@ -183,6 +192,10 @@
                         <button class="btn btn-ghost" style="font-size: 0.75rem;"
                                 @click="showBundleImportModal = true">
                             Import JSON
+                        </button>
+                        <button class="btn btn-ghost" style="font-size: 0.75rem; border-color: rgba(99, 102, 241, 0.4); color: var(--accent, #6366f1);"
+                                @click="showGlobalImportModal = true">
+                            &#127760; Import Global
                         </button>
                         <button class="btn btn-ghost" style="font-size: 0.75rem;"
                                 @click="exportCredentialBundle()">
@@ -227,6 +240,23 @@
                 <div style="display: flex; gap: 8px; margin-top: var(--space-sm);">
                     <button class="btn btn-primary" style="font-size: 0.75rem;" @click="importBundle()">Import</button>
                     <button class="btn btn-ghost" style="font-size: 0.75rem;" @click="showBundleImportModal = false; bundleImportText = '';">Cancel</button>
+                </div>
+            </div>
+
+            <!-- Global Import Modal -->
+            <div x-show="showGlobalImportModal" x-cloak x-transition
+                 style="margin-top: var(--space-md); padding: var(--space-sm); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: var(--radius-md); background: rgba(99, 102, 241, 0.03);">
+                <h3 style="font-size: 0.85rem; margin: 0 0 var(--space-sm) 0;">&#127760; Import Global Credentials</h3>
+                <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: var(--space-sm);">
+                    Global credentials are shared across <strong>all tenants</strong>. A tenant's own
+                    keys take priority; global keys fill in where a tenant has no override.
+                </p>
+                <textarea x-model="globalImportText" rows="6"
+                          style="width: 100%; font-family: monospace; font-size: 0.75rem; background: var(--bg-secondary, #1a1a2e); color: var(--text-primary); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-xs);"
+                          placeholder='{"shodan_api_key": "your-key", "github_token": "ghp_..."}'></textarea>
+                <div style="display: flex; gap: 8px; margin-top: var(--space-sm);">
+                    <button class="btn btn-primary" style="font-size: 0.75rem;" @click="importGlobalBundle()">Import Global</button>
+                    <button class="btn btn-ghost" style="font-size: 0.75rem;" @click="showGlobalImportModal = false; globalImportText = '';">Cancel</button>
                 </div>
             </div>
         </div>

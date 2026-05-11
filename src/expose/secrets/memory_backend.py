@@ -23,7 +23,14 @@ from expose.secrets.backend import SecretNotFoundError, SecretsBackend
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_PERSIST_PATH = Path.home() / ".expose-credentials.json"
+_DEFAULT_PERSIST_PATH = Path(
+    os.environ.get("EXPOSE_CREDENTIALS_PATH", str(Path.home() / ".expose-credentials.json"))
+)
+
+#: Sentinel tenant ID for global credentials that apply to all tenants.
+#: When a key lookup fails for a specific tenant, the backend falls back
+#: to checking this global pool.
+GLOBAL_TENANT_ID: Final[str] = "00000000-0000-0000-0000-000000000000"
 
 
 class InMemoryBackend(SecretsBackend):
@@ -72,12 +79,20 @@ class InMemoryBackend(SecretsBackend):
             os.close(fd)
 
     async def get(self, *, tenant_id: UUID, key: str) -> str:
+        tid = str(tenant_id)
+        # Try tenant-specific first, then fall back to global pool.
         try:
-            return self._store[(str(tenant_id), key)]
+            return self._store[(tid, key)]
         except KeyError:
-            raise SecretNotFoundError(
-                f"No secret stored for tenant {tenant_id} key {key!r}"
-            ) from None
+            pass
+        if tid != GLOBAL_TENANT_ID:
+            try:
+                return self._store[(GLOBAL_TENANT_ID, key)]
+            except KeyError:
+                pass
+        raise SecretNotFoundError(
+            f"No secret stored for tenant {tenant_id} key {key!r}"
+        )
 
     async def set(self, *, tenant_id: UUID, key: str, value: str) -> None:
         self._store[(str(tenant_id), key)] = value
@@ -98,4 +113,4 @@ class InMemoryBackend(SecretsBackend):
         )
 
 
-__all__ = ["InMemoryBackend"]
+__all__ = ["GLOBAL_TENANT_ID", "InMemoryBackend"]

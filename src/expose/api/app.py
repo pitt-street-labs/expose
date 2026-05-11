@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from expose import __version__
 from expose.api.admin import router as admin_router
+from expose.api.credentials import global_router as global_credentials_router
 from expose.api.credentials import router as credentials_router
 from expose.api.enforcement import router as enforcement_router
 from expose.api.events import router as events_router
@@ -351,6 +352,7 @@ def create_app(
     app.include_router(events_router)
     app.include_router(tenant_config_router)
     app.include_router(credentials_router)
+    app.include_router(global_credentials_router)
     app.include_router(export_router)
     app.include_router(findings_router)
     app.include_router(enforcement_router)
