@@ -133,3 +133,4 @@ desktop.ini
 *.bak
 *.backup
 *.orig
+.playwright-mcp/
