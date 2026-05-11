@@ -35,8 +35,9 @@ class DatabaseSettings(BaseSettings):
     password: SecretStr = SecretStr("")
     sslmode: str = "prefer"
 
-    pool_size: int = Field(default=10, ge=1)
-    max_overflow: int = Field(default=20, ge=0)
+    pool_size: int = Field(default=20, ge=1)
+    max_overflow: int = Field(default=10, ge=0)
+    pool_timeout: int = Field(default=5, ge=1)
     pool_pre_ping: bool = True
     echo: bool = False
 
@@ -56,6 +57,7 @@ def create_async_engine_from_settings(settings: DatabaseSettings) -> AsyncEngine
         settings.dsn(),
         pool_size=settings.pool_size,
         max_overflow=settings.max_overflow,
+        pool_timeout=settings.pool_timeout,
         pool_pre_ping=settings.pool_pre_ping,
         echo=settings.echo,
         connect_args={"ssl": settings.sslmode if settings.sslmode != "disable" else None},

@@ -65,6 +65,16 @@ function exposeApp() {
         sfImportText: "",
         bundleImportText: "",
 
+        // Summary stats for at-a-glance risk posture
+        stats: {
+            totalEntities: 0,
+            confirmedThreats: 0,
+            highRisk: 0,
+            collectors: 0,
+            lastScan: '--',
+            nonProduction: 0,
+        },
+
         /**
          * Handle tenant selection change.
          * Updates HTMX polling targets, resets graph state, and starts
@@ -95,6 +105,15 @@ function exposeApp() {
             if (!this.selectedTenantId) {
                 this.entityCount = 0;
                 this.activeRunId = null;
+                // Reset summary stats
+                this.stats = {
+                    totalEntities: 0,
+                    confirmedThreats: 0,
+                    highRisk: 0,
+                    collectors: 0,
+                    lastScan: '--',
+                    nonProduction: 0,
+                };
                 // Destroy graph when no tenant is selected
                 if (typeof ExposeGraph !== "undefined" && this._graphInitialized) {
                     ExposeGraph.destroy();
@@ -114,6 +133,9 @@ function exposeApp() {
 
             // Initialize graph and start polling
             this._initGraphAndPoll();
+
+            // Load summary stats for the at-a-glance panel
+            this.loadStats();
         },
 
         /**
@@ -292,6 +314,9 @@ function exposeApp() {
             this._refreshEntityTable();
             this._refreshRunStatus();
             fetchGraphData(this.selectedTenantId);
+
+            // Refresh summary stats after run completion
+            this.loadStats();
 
             // Refresh AI insights if the component exists
             var aiPanel = document.querySelector("[x-data='aiInsights()']");
@@ -663,6 +688,112 @@ function exposeApp() {
             }
         },
 
+        /* ==================================================================
+           Summary Stats
+           ================================================================== */
+
+        /**
+         * Fetch summary statistics for the at-a-glance risk posture panel.
+         * Computes entity counts, attribution tier breakdowns, collector
+         * count, last scan timestamp, and non-production exposure from the
+         * entities and runs API endpoints.
+         */
+        async loadStats() {
+            if (!this.selectedTenantId) return;
+
+            try {
+                // Fetch entities and runs in parallel
+                var tenantUrl = "/v1/tenants/" + this.selectedTenantId;
+                var [entitiesResp, runsResp, configResp] = await Promise.all([
+                    fetch(tenantUrl + "/entities"),
+                    fetch(tenantUrl + "/runs"),
+                    fetch(tenantUrl + "/config/"),
+                ]);
+
+                // --- Entity stats ---
+                if (entitiesResp.ok) {
+                    var entData = await entitiesResp.json();
+                    var entities = entData.entities || entData.items || [];
+                    this.stats.totalEntities = entities.length;
+
+                    var confirmed = 0;
+                    var high = 0;
+                    var nonProd = 0;
+
+                    for (var i = 0; i < entities.length; i++) {
+                        var e = entities[i];
+                        var tier = (e.attribution_tier || "").toLowerCase();
+                        if (tier === "confirmed") confirmed++;
+                        if (tier === "high") high++;
+
+                        // Non-production: check environment or properties
+                        var env = "";
+                        if (e.properties && e.properties.environment) {
+                            env = e.properties.environment.toLowerCase();
+                        } else if (e.environment) {
+                            env = e.environment.toLowerCase();
+                        }
+                        if (env === "dev" || env === "development" ||
+                            env === "test" || env === "testing" ||
+                            env === "staging" || env === "stage" ||
+                            env === "sandbox" || env === "qa") {
+                            nonProd++;
+                        }
+                    }
+
+                    this.stats.confirmedThreats = confirmed;
+                    this.stats.highRisk = high;
+                    this.stats.nonProduction = nonProd;
+                }
+
+                // --- Last scan timestamp ---
+                if (runsResp.ok) {
+                    var runsData = await runsResp.json();
+                    var runs = runsData.runs || runsData.items || [];
+                    if (runs.length > 0) {
+                        // Find the most recent completed run
+                        var latest = null;
+                        for (var j = 0; j < runs.length; j++) {
+                            var run = runs[j];
+                            var ts = run.completed_at || run.started_at || run.created_at;
+                            if (ts && (!latest || ts > latest)) {
+                                latest = ts;
+                            }
+                        }
+                        if (latest) {
+                            // Format as relative or short absolute time
+                            var d = new Date(latest);
+                            var now = new Date();
+                            var diffMs = now - d;
+                            var diffMin = Math.floor(diffMs / 60000);
+                            if (diffMin < 1) {
+                                this.stats.lastScan = "just now";
+                            } else if (diffMin < 60) {
+                                this.stats.lastScan = diffMin + "m ago";
+                            } else if (diffMin < 1440) {
+                                this.stats.lastScan = Math.floor(diffMin / 60) + "h ago";
+                            } else {
+                                this.stats.lastScan = Math.floor(diffMin / 1440) + "d ago";
+                            }
+                        } else {
+                            this.stats.lastScan = "--";
+                        }
+                    } else {
+                        this.stats.lastScan = "--";
+                    }
+                }
+
+                // --- Collector count from tenant config ---
+                if (configResp.ok) {
+                    var cfgData = await configResp.json();
+                    var enabledCollectors = cfgData.enabled_collectors || [];
+                    this.stats.collectors = enabledCollectors.length;
+                }
+            } catch (e) {
+                console.warn("[EXPOSE] Stats fetch failed:", e);
+            }
+        },
+
         /**
          * Initialize on mount — read any pre-set values from the DOM.
          */
@@ -681,11 +812,12 @@ function exposeApp() {
                 }
             });
 
-            // If a tenant is already selected (e.g. page reload), kick off graph
+            // If a tenant is already selected (e.g. page reload), kick off graph + stats
             if (this.selectedTenantId) {
                 // Defer to allow DOM to settle
                 setTimeout(function () {
                     self._initGraphAndPoll();
+                    self.loadStats();
                 }, 100);
             }
         },

@@ -199,6 +199,34 @@
         </div>
     </div>
 
+    <!-- ===== Summary Stats ===== -->
+    <div class="summary-stats" x-show="selectedTenantId" x-cloak>
+        <div class="stat-card">
+            <div class="stat-value" x-text="stats.totalEntities">0</div>
+            <div class="stat-label">Entities</div>
+        </div>
+        <div class="stat-card stat-card--accent">
+            <div class="stat-value" x-text="stats.confirmedThreats">0</div>
+            <div class="stat-label">Confirmed</div>
+        </div>
+        <div class="stat-card stat-card--warning">
+            <div class="stat-value" x-text="stats.highRisk">0</div>
+            <div class="stat-label">High Risk</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" x-text="stats.collectors">0</div>
+            <div class="stat-label">Collectors</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" x-text="stats.lastScan">--</div>
+            <div class="stat-label">Last Scan</div>
+        </div>
+        <div class="stat-card" x-show="stats.nonProduction > 0">
+            <div class="stat-value stat-value--error" x-text="stats.nonProduction">0</div>
+            <div class="stat-label">Non-Prod Exposed</div>
+        </div>
+    </div>
+
     <!-- ===== Split pane ===== -->
     <main class="split-pane">
 
@@ -395,6 +423,46 @@
 </div>
 
 <style>
+/* Summary Stats Panel */
+.summary-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: var(--space-sm);
+    margin: 0 var(--space-lg);
+    margin-bottom: var(--space-md);
+    animation: emerge 0.3s ease-out;
+}
+.stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-md);
+    text-align: center;
+    transition: border-color var(--transition-fast);
+}
+.stat-card:hover {
+    border-color: var(--border-subtle);
+    background: var(--surface-raised);
+}
+.stat-card .stat-value {
+    font-family: var(--font-mono);
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.2;
+}
+.stat-label {
+    font-family: var(--font-sans);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-top: var(--space-xs);
+}
+.stat-card--accent .stat-value { color: var(--accent); }
+.stat-card--warning .stat-value { color: var(--warning); }
+.stat-value--error { color: var(--error) !important; }
+
 .ai-insight-row {
     padding: 0.75rem 0;
     border-bottom: 1px solid var(--border);

@@ -42,6 +42,11 @@ from expose.types.shared import RunId, TenantId
 
 logger = logging.getLogger(__name__)
 
+# Maximum number of observations to accumulate before flushing to the entity
+# repository and running enrichment.  Prevents unbounded memory growth on
+# large scans (e.g., subdomain enumeration returning 10k+ results).
+_OBSERVATION_BATCH_SIZE = 500
+
 
 # === State machine ============================================================
 
@@ -233,11 +238,14 @@ class RunExecutor:
         expanded = expand_seeds(seeds)
         expanded_count = len(expanded)
 
-        # === Stage 2: Dispatch ================================================
+        # === Stage 2: Dispatch (with batched upsert + enrichment) ============
         successful = 0
         failed = 0
         denied = 0
-        all_observations: list[Observation] = []
+        total_observations = 0
+        enrichment_count = 0
+        upsert_failures = 0
+        batch: list[Observation] = []
 
         for seed in expanded:
             for collector_id in collector_ids:
@@ -260,62 +268,33 @@ class RunExecutor:
 
                 if result.status == "success":
                     successful += 1
-                    all_observations.extend(result.observations)
+                    batch.extend(result.observations)
+                    # Flush when batch reaches threshold (Stage 3+4+4b)
+                    if len(batch) >= _OBSERVATION_BATCH_SIZE:
+                        batch_enriched, batch_upsert_failures = (
+                            await self._flush_batch(batch, run_id, tenant_id)
+                        )
+                        total_observations += len(batch)
+                        enrichment_count += batch_enriched
+                        upsert_failures += batch_upsert_failures
+                        batch = []
                 elif result.status == "denied":
                     denied += 1
                 else:
                     failed += 1
 
-        # === Stage 3: Sanitization (inside collectors per SPEC §7) ============
-        # No action here — collectors apply sanitization before emitting
-        # observations. The canonical observation flowing out of dispatch is
-        # already sanitized.
+        # Flush remaining observations after the dispatch loop
+        if batch:
+            batch_enriched, batch_upsert_failures = await self._flush_batch(
+                batch, run_id, tenant_id
+            )
+            total_observations += len(batch)
+            enrichment_count += batch_enriched
+            upsert_failures += batch_upsert_failures
 
-        # === Stage 4: Graph upsert ============================================
-        upsert_failures = 0
-        for obs in all_observations:
-            try:
-                await self._entity_repo.create_or_update(
-                    tenant_id=TenantId(tenant_id),
-                    entity_type=obs.subject.identifier_type.value,
-                    canonical_identifier=obs.subject.identifier_value,
-                    properties=_observation_properties(obs),
-                    attribution_status="unattributed",
-                    attribution_confidence=Decimal("0.000"),
-                )
-            except Exception:
-                logger.exception(
-                    "Entity upsert failed for %s/%s",
-                    obs.subject.identifier_type.value,
-                    obs.subject.identifier_value,
-                )
-                upsert_failures += 1
-
-        entities_added = len(all_observations) - upsert_failures
+        entities_added = total_observations - upsert_failures
         if self._quota_tracker is not None and entities_added > 0:
             self._quota_tracker.record_entities_added(tenant_id, entities_added)
-
-        # === Stage 4b: LLM enrichment ========================================
-        enrichment_count = 0
-        if self._enrichment is not None:
-            for obs in all_observations:
-                try:
-                    enrichment_result = await self._enrichment.enrich_entity(
-                        entity_type=obs.subject.identifier_type.value,
-                        canonical_identifier=obs.subject.identifier_value,
-                        properties=_observation_properties(obs),
-                        attribution_confidence=float(Decimal("0.000")),
-                        tenant_id=tenant_id,
-                        run_id=run_id,
-                    )
-                    if enrichment_result:
-                        enrichment_count += 1
-                except Exception:
-                    logger.exception(
-                        "Enrichment failed for %s/%s",
-                        obs.subject.identifier_type.value,
-                        obs.subject.identifier_value,
-                    )
 
         # TODO(stage-5): Artifact generation — out of scope for Sprint 3-4
         # When implemented, this stage will serialize the observation graph
@@ -368,11 +347,68 @@ class RunExecutor:
             successful_dispatches=successful,
             failed_dispatches=failed,
             denied_dispatches=denied,
-            total_observations=len(all_observations),
+            total_observations=total_observations,
             enrichment_count=enrichment_count,
             duration_ms=duration_ms,
             misuse_alerts=misuse_alerts,
         )
+
+    async def _flush_batch(
+        self,
+        observations: list[Observation],
+        run_id: UUID,
+        tenant_id: UUID,
+    ) -> tuple[int, int]:
+        """Upsert and enrich a batch of observations.
+
+        Performs Stage 3 (no-op, sanitization done in collectors), Stage 4
+        (graph upsert), and Stage 4b (LLM enrichment) for the given batch.
+
+        Returns ``(enrichment_count, upsert_failures)`` for the batch.
+        """
+        # --- Stage 4: Graph upsert -------------------------------------------
+        upsert_failures = 0
+        for obs in observations:
+            try:
+                await self._entity_repo.create_or_update(
+                    tenant_id=TenantId(tenant_id),
+                    entity_type=obs.subject.identifier_type.value,
+                    canonical_identifier=obs.subject.identifier_value,
+                    properties=_observation_properties(obs),
+                    attribution_status="unattributed",
+                    attribution_confidence=Decimal("0.000"),
+                )
+            except Exception:
+                logger.exception(
+                    "Entity upsert failed for %s/%s",
+                    obs.subject.identifier_type.value,
+                    obs.subject.identifier_value,
+                )
+                upsert_failures += 1
+
+        # --- Stage 4b: LLM enrichment ----------------------------------------
+        enrichment_count = 0
+        if self._enrichment is not None:
+            for obs in observations:
+                try:
+                    enrichment_result = await self._enrichment.enrich_entity(
+                        entity_type=obs.subject.identifier_type.value,
+                        canonical_identifier=obs.subject.identifier_value,
+                        properties=_observation_properties(obs),
+                        attribution_confidence=float(Decimal("0.000")),
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                    )
+                    if enrichment_result:
+                        enrichment_count += 1
+                except Exception:
+                    logger.exception(
+                        "Enrichment failed for %s/%s",
+                        obs.subject.identifier_type.value,
+                        obs.subject.identifier_value,
+                    )
+
+        return enrichment_count, upsert_failures
 
 
 def _observation_properties(obs: Observation) -> dict[str, Any]:
