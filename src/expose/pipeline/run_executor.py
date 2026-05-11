@@ -201,6 +201,7 @@ class RunExecutor:
         misuse_detector: MisuseDetector | None = None,
         enrichment_pipeline: EnrichmentPipeline | None = None,
         log_sink: LogSink | None = None,
+        event_bus: Any | None = None,
     ) -> None:
         self._dispatcher = dispatcher
         self._run_repo = run_repo
@@ -210,11 +211,41 @@ class RunExecutor:
         self._misuse_detector = misuse_detector
         self._enrichment = enrichment_pipeline
         self._log_sink = log_sink
+        self._event_bus = event_bus
 
     def _log(self, level: str, msg: str) -> None:
         """Emit a structured log entry to the log sink, if configured."""
         if self._log_sink is not None:
             self._log_sink(level, msg)
+
+    async def _publish(
+        self,
+        event_type: str,
+        run_id: UUID,
+        tenant_id: UUID,
+        data: dict[str, Any] | None = None,
+    ) -> None:
+        """Publish a lifecycle event to the event bus, if configured.
+
+        No-ops silently when ``event_bus`` is ``None``.  Any exception from
+        the bus is caught and logged at DEBUG level so event publishing never
+        breaks the pipeline run.
+        """
+        if self._event_bus is not None:
+            try:
+                from expose.api.events import RunEvent, RunEventType  # noqa: PLC0415
+
+                await self._event_bus.publish(
+                    RunEvent(
+                        event_type=RunEventType(event_type),
+                        run_id=run_id,
+                        tenant_id=tenant_id,
+                        timestamp=datetime.now(UTC),
+                        data=data or {},
+                    )
+                )
+            except Exception:
+                logger.debug("Failed to publish event %s", event_type)
 
     async def _dns_filter_seeds(self, seeds: list[Seed]) -> list[Seed]:
         """Remove DOMAIN seeds that do not resolve via DNS.
@@ -345,6 +376,8 @@ class RunExecutor:
             new_state="running",
         )
 
+        await self._publish("run_started", run_id, tenant_id)
+
         # === Quota pre-flight check ===========================================
         if self._quota_tracker is not None:
             try:
@@ -444,6 +477,16 @@ class RunExecutor:
                 pass_stats["observations"] - pass_stats["upsert_failures"]
             )
 
+            await self._publish(
+                "entities_discovered",
+                run_id,
+                tenant_id,
+                data={
+                    "pass_number": pass_number,
+                    "entity_count": entities_discovered_per_pass[-1],
+                },
+            )
+
             # --- Update attribution scores based on collector diversity -------
             try:
                 await self._entity_repo.update_attribution_scores(
@@ -452,6 +495,53 @@ class RunExecutor:
             except Exception:
                 logger.exception(
                     "Attribution scoring failed after pass %d", pass_number
+                )
+
+            # --- Stage 4a: Rule-based attribution evaluation -----------------
+            try:
+                from expose.pipeline.rule_evaluator import RuleEvaluator
+
+                if hasattr(self, "_rule_pack") and self._rule_pack is not None:
+                    rule_evaluator = RuleEvaluator(
+                        rule_pack=self._rule_pack,
+                        scope_context=getattr(self, "_scope_context", None),
+                    )
+                    eval_entities = await self._entity_repo.list_for_tenant(
+                        tenant_id=TenantId(tenant_id),
+                        limit=1000,
+                    )
+                    for entity in eval_entities:
+                        entity_data = {
+                            "entity_type": entity.entity_type,
+                            "canonical_identifier": entity.canonical_identifier,
+                            "properties": entity.properties or {},
+                            "attribution_status": entity.attribution_status,
+                            "attribution_confidence": float(
+                                entity.attribution_confidence
+                            ),
+                        }
+                        eval_result = rule_evaluator.evaluate(entity_data)
+                        if eval_result.matched_rules:
+                            await self._entity_repo.create_or_update(
+                                tenant_id=TenantId(tenant_id),
+                                entity_type=entity.entity_type,
+                                canonical_identifier=entity.canonical_identifier,
+                                properties=entity.properties or {},
+                                attribution_status=eval_result.attribution_tier,
+                                attribution_confidence=Decimal(
+                                    str(round(eval_result.final_confidence, 3))
+                                ),
+                            )
+                            self._log(
+                                "info",
+                                f"Rule evaluation: {entity.canonical_identifier} "
+                                f"-> {eval_result.attribution_tier} "
+                                f"({eval_result.final_confidence:.3f}), "
+                                f"rules={eval_result.matched_rules}",
+                            )
+            except Exception:
+                logger.exception(
+                    "Rule evaluation failed after pass %d", pass_number
                 )
 
             # --- Check for more passes ---------------------------------------
@@ -577,6 +667,13 @@ class RunExecutor:
             tenant_id=TenantId(tenant_id),
             run_id=RunId(run_id),
             new_state=final_state,
+        )
+
+        await self._publish(
+            "run_completed",
+            run_id,
+            tenant_id,
+            data={"final_state": final_state},
         )
 
         if self._quota_tracker is not None:
@@ -872,6 +969,36 @@ class RunExecutor:
                         f"Entity upsert failed: {obs.subject.identifier_value}",
                     )
                     upsert_failures += 1
+
+        # --- Lead scoring (post-upsert, pre-relationship) -------------------
+        if entity_map:
+            from expose.pipeline.lead_scoring import LeadScoringEngine  # noqa: PLC0415
+
+            scorer = LeadScoringEngine()
+            for canonical_id, entity in entity_map.items():
+                try:
+                    obs_for_entity = [
+                        _observation_properties(o)
+                        for o in observations
+                        if o.subject.identifier_value == canonical_id
+                    ]
+                    score_result = scorer.score_entity(
+                        entity_identifier=canonical_id,
+                        observations=obs_for_entity,
+                    )
+                    updated_props = dict(entity.properties or {})
+                    updated_props["_lead_score"] = score_result.score
+                    updated_props["_priority_tier"] = score_result.priority_tier.value
+                    await self._entity_repo.create_or_update(
+                        tenant_id=TenantId(tenant_id),
+                        entity_type=entity.entity_type,
+                        canonical_identifier=canonical_id,
+                        properties=updated_props,
+                        attribution_status=entity.attribution_status,
+                        attribution_confidence=entity.attribution_confidence,
+                    )
+                except Exception:
+                    logger.exception("Lead scoring failed for %s", canonical_id)
 
         # --- Stage 4 (cont): Relationship extraction -------------------------
         if self._relationship_repo is not None:

@@ -24,6 +24,8 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
+import pytest
+
 from expose.collectors.base import (
     Observation,
     ObservationSubject,
@@ -161,7 +163,8 @@ async def test_small_scan_flushes_once_at_end() -> None:
     flushed_obs = mock_flush.call_args_list[0].args[0]
     assert len(flushed_obs) == obs_count
     assert result.total_observations == obs_count
-    assert e_repo.create_or_update.call_count == obs_count
+    # create_or_update: obs_count entity upserts + obs_count lead scoring = 2x
+    assert e_repo.create_or_update.call_count == obs_count * 2
 
 
 async def test_large_scan_flushes_multiple_times() -> None:
@@ -202,7 +205,8 @@ async def test_large_scan_flushes_multiple_times() -> None:
     for call in mock_flush.call_args_list:
         assert len(call.args[0]) == batch_size
     assert result.total_observations == total_obs
-    assert e_repo.create_or_update.call_count == total_obs
+    # create_or_update: total_obs entity upserts + total_obs lead scoring = 2x
+    assert e_repo.create_or_update.call_count == total_obs * 2
 
 
 async def test_exact_batch_size_flushes_during_loop() -> None:
@@ -223,8 +227,13 @@ async def test_exact_batch_size_flushes_during_loop() -> None:
     assert result.total_observations == batch_size
 
 
-async def test_enrichment_runs_per_batch() -> None:
+async def test_enrichment_runs_per_batch(monkeypatch: pytest.MonkeyPatch) -> None:
     """Enrichment is called per-batch during flush, not deferred to end."""
+    from expose.pipeline import run_executor as _mod
+
+    # Raise the enrichment cap so all unique entities are enriched
+    monkeypatch.setattr(_mod, "_MAX_LLM_ENRICHMENTS_PER_BATCH", 1000)
+
     batch_size = _OBSERVATION_BATCH_SIZE
 
     mock_pipeline = AsyncMock(spec=EnrichmentPipeline)
@@ -285,7 +294,8 @@ async def test_entity_repo_upsert_called_for_every_observation() -> None:
 
     await executor.execute(**_execute_kwargs())
 
-    assert e_repo.create_or_update.call_count == total
+    # create_or_update: total entity upserts + total lead scoring = 2x
+    assert e_repo.create_or_update.call_count == total * 2
     # Verify all distinct identifiers were upserted
     upserted = {
         c.kwargs["canonical_identifier"]
@@ -310,8 +320,13 @@ async def test_empty_scan_no_flush() -> None:
     e_repo.create_or_update.assert_not_called()
 
 
-async def test_run_result_totals_match_expected() -> None:
+async def test_run_result_totals_match_expected(monkeypatch: pytest.MonkeyPatch) -> None:
     """RunResult fields are accurate for a multi-batch run."""
+    from expose.pipeline import run_executor as _mod
+
+    # Raise the enrichment cap so all unique entities are enriched
+    monkeypatch.setattr(_mod, "_MAX_LLM_ENRICHMENTS_PER_BATCH", 1000)
+
     batch_size = _OBSERVATION_BATCH_SIZE
     obs_per_dispatch = batch_size  # exactly one flush per dispatch
 
@@ -348,8 +363,15 @@ async def test_run_result_totals_match_expected() -> None:
     assert result.enrichment_count == obs_per_dispatch * 2
 
 
-async def test_enrichment_failure_in_one_batch_does_not_affect_others() -> None:
+async def test_enrichment_failure_in_one_batch_does_not_affect_others(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Enrichment errors in one batch don't prevent enrichment in subsequent batches."""
+    from expose.pipeline import run_executor as _mod
+
+    # Raise the enrichment cap so all unique entities are enriched
+    monkeypatch.setattr(_mod, "_MAX_LLM_ENRICHMENTS_PER_BATCH", 1000)
+
     batch_size = _OBSERVATION_BATCH_SIZE
 
     # First batch (500): all enrichments raise.
@@ -393,21 +415,26 @@ async def test_enrichment_failure_in_one_batch_does_not_affect_others() -> None:
 async def test_upsert_failures_tracked_across_batches() -> None:
     """Upsert failures from multiple batches are accumulated correctly."""
     batch_size = _OBSERVATION_BATCH_SIZE
-    # 600 total: first flush at 500 (2 failures), trailing flush at 100 (1 failure)
+    # 600 total observations, delivered in one dispatch result.  The batch
+    # accumulates 600 obs (>= 500 threshold) and flushes once.  Three upsert
+    # failures are injected at indices 10, 20, and 550.
     total = batch_size + 100
+    num_failures = 3
+    failure_indices = {10, 20, 550}
 
-    # Build side_effect: first 500 have 2 failures, next 100 have 1 failure
+    # Build side_effect for create_or_update.
+    # Phase 1 — entity upserts (600 calls, 3 failures):
     effects: list = []
-    for i in range(batch_size):
-        if i in (10, 20):
+    successes = 0
+    for i in range(total):
+        if i in failure_indices:
             effects.append(RuntimeError("db error"))
         else:
             effects.append(MagicMock())
-    for i in range(100):
-        if i == 50:
-            effects.append(RuntimeError("db error"))
-        else:
-            effects.append(MagicMock())
+            successes += 1
+    # Phase 2 — lead scoring (1 call per successfully-upserted entity):
+    for _ in range(successes):
+        effects.append(MagicMock())
 
     e_repo = AsyncMock()
     e_repo.create_or_update = AsyncMock(side_effect=effects)
@@ -422,4 +449,5 @@ async def test_upsert_failures_tracked_across_batches() -> None:
     assert result.total_observations == total
     # 3 upsert failures should not prevent run completion
     assert result.final_state == "completed"
-    assert e_repo.create_or_update.call_count == total
+    # create_or_update: total entity upserts + (total - failures) lead scoring
+    assert e_repo.create_or_update.call_count == total + (total - num_failures)

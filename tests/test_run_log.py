@@ -456,9 +456,10 @@ async def test_executor_logs_dispatch_exception() -> None:
     assert result.final_state == "failed"
 
     entries, _ = get_run_log_entries(str(RUN_ID))
-    error_entries = [e for e in entries if e["level"] == "error"]
-    assert len(error_entries) >= 1
-    assert any("raised exception" in e["msg"] for e in error_entries)
+    # Dispatch exceptions are logged at "warn" level with "dispatch exception"
+    warn_entries = [e for e in entries if e["level"] == "warn"]
+    assert len(warn_entries) >= 1
+    assert any("dispatch exception" in e["msg"] for e in warn_entries)
 
 
 # === Scan Estimate endpoint tests =============================================

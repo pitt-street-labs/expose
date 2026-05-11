@@ -67,6 +67,24 @@ RDAP_DOMAIN_RESPONSE = json.dumps({
 })
 
 
+# === Fixtures =================================================================
+
+
+@pytest.fixture(autouse=True)
+def _clear_collector_caches():
+    """Clear module-level caches in collectors between tests.
+
+    The ct-crtsh collector caches HTTP responses in module-level dicts.
+    Without clearing, a successful response cached by a prior test is served
+    from cache, bypassing the respx mock routes entirely.
+    """
+    from expose.collectors.builtin.ct_crtsh import clear_crt_sh_cache
+
+    clear_crt_sh_cache()
+    yield
+    clear_crt_sh_cache()
+
+
 # === Helpers ==================================================================
 
 

@@ -260,6 +260,7 @@ async def _run_pipeline_background(
                     relationship_repo=relationship_repo,
                     enrichment_pipeline=enrichment_pipeline,
                     log_sink=log_sink,
+                    event_bus=event_bus,
                 )
 
                 await executor.execute(

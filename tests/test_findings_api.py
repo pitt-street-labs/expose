@@ -13,14 +13,25 @@ Validates issue #69 — Priority Findings panel API:
     as a Python translation for coverage)
  9. Default limit returns all placeholder findings
 10. Invalid query parameters rejected with 422
+11. Real scored entities returned when DB has them (is_placeholder=False)
+12. Placeholder fallback when DB has no scored entities
+13. min_score filter works with real scored entities
+14. limit applies correctly with real scored entities
+15. _flush_batch calls lead scoring for upserted entities
 
 Uses ``httpx.AsyncClient`` with ``ASGITransport`` against a standalone
-FastAPI app that includes only the findings router (no DB required).
+FastAPI app that includes only the findings router (no DB required for
+placeholder tests; mock session_factory for real-data tests).
 """
 
 from __future__ import annotations
 
-from uuid import UUID
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from decimal import Decimal
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import FastAPI
@@ -353,3 +364,413 @@ class TestBuildPlaceholderFindings:
         )
         scores = [f.score for f in result.findings]
         assert scores == sorted(scores, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Helpers for real-data and pipeline tests
+# ---------------------------------------------------------------------------
+
+
+def _make_entity_row(
+    canonical_identifier: str,
+    entity_type: str = "domain",
+    properties: dict[str, Any] | None = None,
+    attribution_status: str = "unattributed",
+    attribution_confidence: Decimal = Decimal("0.000"),
+) -> MagicMock:
+    """Build a mock Entity ORM row with the given properties."""
+    entity = MagicMock()
+    entity.id = uuid4()
+    entity.tenant_id = UUID(_TENANT_ID)
+    entity.entity_type = entity_type
+    entity.canonical_identifier = canonical_identifier
+    entity.properties = properties or {}
+    entity.attribution_status = attribution_status
+    entity.attribution_confidence = attribution_confidence
+    entity.last_observed_at = datetime.now(tz=UTC)
+    return entity
+
+
+def _make_scored_entity(
+    canonical_identifier: str,
+    score: int,
+    tier: str = "low",
+    entity_type: str = "domain",
+) -> MagicMock:
+    """Build a mock Entity with ``_lead_score`` and ``_priority_tier``."""
+    return _make_entity_row(
+        canonical_identifier=canonical_identifier,
+        entity_type=entity_type,
+        properties={
+            "_lead_score": score,
+            "_priority_tier": tier,
+            "_collector_id": "test-collector",
+        },
+    )
+
+
+def _mock_session_factory(entities: list[Any]):
+    """Build a mock async session factory that returns the given entities.
+
+    Returns an async context-manager-compatible callable that mimics
+    ``async_sessionmaker().__call__()`` -> session with ``.execute()``.
+    """
+    mock_result = MagicMock()
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = entities
+    mock_result.scalars.return_value = mock_scalars
+
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    @asynccontextmanager
+    async def factory():
+        yield mock_session
+
+    return factory
+
+
+def _make_app_with_session_factory(entities: list[Any]) -> FastAPI:
+    """Build a FastAPI app with a mock session_factory on app.state."""
+    app = FastAPI()
+    app.include_router(router)
+    app.state.session_factory = _mock_session_factory(entities)
+    return app
+
+
+# ---------------------------------------------------------------------------
+# 11. Real scored entities returned (is_placeholder=False)
+# ---------------------------------------------------------------------------
+
+
+async def test_real_scored_entities_returned() -> None:
+    """When DB has scored entities, return them with is_placeholder=False."""
+    entities = [
+        _make_scored_entity("staging.example.com", 85, "critical"),
+        _make_scored_entity("api.example.com", 45, "high"),
+        _make_scored_entity("www.example.com", 10, "low"),
+    ]
+    app = _make_app_with_session_factory(entities)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        resp = await client.get(f"{_BASE_URL}/")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["is_placeholder"] is False
+    assert len(data["findings"]) == 3
+    # Should be sorted by score descending
+    scores = [f["score"] for f in data["findings"]]
+    assert scores == sorted(scores, reverse=True)
+    assert data["findings"][0]["entity_identifier"] == "staging.example.com"
+    assert data["findings"][0]["score"] == 85
+
+
+# ---------------------------------------------------------------------------
+# 12. Placeholder fallback when DB has no scored entities
+# ---------------------------------------------------------------------------
+
+
+async def test_placeholder_fallback_with_empty_db() -> None:
+    """When DB has entities but none are scored, fall back to placeholders."""
+    entities = [
+        _make_entity_row("example.com"),  # no _lead_score
+    ]
+    app = _make_app_with_session_factory(entities)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        resp = await client.get(f"{_BASE_URL}/")
+
+    data = resp.json()
+    assert data["is_placeholder"] is True
+    assert len(data["findings"]) == len(_PLACEHOLDER_FINDINGS)
+
+
+async def test_placeholder_fallback_with_no_session_factory() -> None:
+    """When no session_factory exists (no DB), return placeholders."""
+    app = _make_app()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        resp = await client.get(f"{_BASE_URL}/")
+
+    data = resp.json()
+    assert data["is_placeholder"] is True
+    assert len(data["findings"]) == len(_PLACEHOLDER_FINDINGS)
+
+
+# ---------------------------------------------------------------------------
+# 13. min_score filter works with real scored entities
+# ---------------------------------------------------------------------------
+
+
+async def test_min_score_filter_real_data() -> None:
+    """min_score should filter real scored entities correctly."""
+    entities = [
+        _make_scored_entity("critical.example.com", 90, "critical"),
+        _make_scored_entity("high.example.com", 55, "high"),
+        _make_scored_entity("low.example.com", 15, "low"),
+    ]
+    app = _make_app_with_session_factory(entities)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        resp = await client.get(f"{_BASE_URL}/?min_score=50")
+
+    data = resp.json()
+    assert data["is_placeholder"] is False
+    assert len(data["findings"]) == 2
+    for finding in data["findings"]:
+        assert finding["score"] >= 50
+
+
+# ---------------------------------------------------------------------------
+# 14. limit applies correctly with real scored entities
+# ---------------------------------------------------------------------------
+
+
+async def test_limit_real_data() -> None:
+    """limit should cap the number of real scored entities returned."""
+    entities = [
+        _make_scored_entity("a.example.com", 90, "critical"),
+        _make_scored_entity("b.example.com", 80, "critical"),
+        _make_scored_entity("c.example.com", 70, "critical"),
+        _make_scored_entity("d.example.com", 60, "high"),
+        _make_scored_entity("e.example.com", 50, "high"),
+    ]
+    app = _make_app_with_session_factory(entities)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        resp = await client.get(f"{_BASE_URL}/?limit=3")
+
+    data = resp.json()
+    assert data["is_placeholder"] is False
+    assert len(data["findings"]) == 3
+    assert data["total_scored"] == 5
+    # Top 3 by score
+    assert data["findings"][0]["score"] == 90
+    assert data["findings"][2]["score"] == 70
+
+
+# ---------------------------------------------------------------------------
+# 15. _flush_batch calls lead scoring for upserted entities
+# ---------------------------------------------------------------------------
+
+
+async def test_flush_batch_calls_lead_scoring() -> None:
+    """Verify _flush_batch invokes LeadScoringEngine after entity upsert."""
+    from expose.collectors.base import (
+        Observation,
+        ObservationSubject,
+        ObservationType,
+        Seed,
+        SeedType,
+    )
+    from expose.pipeline.run_executor import RunExecutor
+    from expose.types.canonical import IdentifierType
+
+    tenant_id = UUID(_TENANT_ID)
+    run_id = uuid4()
+    observed = datetime(2026, 5, 10, 12, 0, 0, tzinfo=UTC)
+
+    obs = Observation(
+        collector_id="test-collector",
+        collector_version="1.0.0",
+        tenant_id=tenant_id,
+        observation_type=ObservationType.DNS_RESOLUTION,
+        subject=ObservationSubject(
+            identifier_type=IdentifierType.DOMAIN,
+            identifier_value="test.example.com",
+        ),
+        observed_at=observed,
+        structured_payload={"resolved_ip": "93.184.216.34"},
+    )
+
+    # Build mock entity returned by create_or_update
+    mock_entity = _make_entity_row(
+        "test.example.com",
+        entity_type="domain",
+        properties={"resolved_ip": "93.184.216.34"},
+    )
+
+    entity_repo = AsyncMock()
+    entity_repo.create_or_update = AsyncMock(return_value=mock_entity)
+
+    run_repo = AsyncMock()
+    dispatcher = AsyncMock()
+
+    executor = RunExecutor(
+        dispatcher=dispatcher,
+        run_repo=run_repo,
+        entity_repo=entity_repo,
+    )
+
+    with patch(
+        "expose.pipeline.lead_scoring.LeadScoringEngine"
+    ) as mock_engine_cls:
+        mock_scorer = MagicMock()
+        mock_score_result = MagicMock()
+        mock_score_result.score = 42
+        mock_score_result.priority_tier = MagicMock()
+        mock_score_result.priority_tier.value = "high"
+        mock_scorer.score_entity.return_value = mock_score_result
+        mock_engine_cls.return_value = mock_scorer
+
+        await executor._flush_batch([obs], run_id, tenant_id)
+
+        # LeadScoringEngine should have been instantiated and called
+        mock_engine_cls.assert_called_once()
+        mock_scorer.score_entity.assert_called_once()
+
+        # Verify the scoring call used correct entity_identifier
+        call_kwargs = mock_scorer.score_entity.call_args
+        assert call_kwargs.kwargs["entity_identifier"] == "test.example.com"
+        assert isinstance(call_kwargs.kwargs["observations"], list)
+
+        # Verify create_or_update was called twice:
+        # 1. Initial entity upsert
+        # 2. Lead score property update
+        assert entity_repo.create_or_update.call_count == 2
+
+        # The second call should include _lead_score and _priority_tier
+        second_call = entity_repo.create_or_update.call_args_list[1]
+        props = second_call.kwargs["properties"]
+        assert props["_lead_score"] == 42
+        assert props["_priority_tier"] == "high"
+
+
+async def test_flush_batch_scoring_exception_does_not_crash() -> None:
+    """Lead scoring failure for one entity must not crash the batch."""
+    from expose.collectors.base import (
+        Observation,
+        ObservationSubject,
+        ObservationType,
+    )
+    from expose.pipeline.run_executor import RunExecutor
+    from expose.types.canonical import IdentifierType
+
+    tenant_id = UUID(_TENANT_ID)
+    run_id = uuid4()
+    observed = datetime(2026, 5, 10, 12, 0, 0, tzinfo=UTC)
+
+    obs = Observation(
+        collector_id="test-collector",
+        collector_version="1.0.0",
+        tenant_id=tenant_id,
+        observation_type=ObservationType.DNS_RESOLUTION,
+        subject=ObservationSubject(
+            identifier_type=IdentifierType.DOMAIN,
+            identifier_value="fail.example.com",
+        ),
+        observed_at=observed,
+        structured_payload={"resolved_ip": "1.2.3.4"},
+    )
+
+    mock_entity = _make_entity_row("fail.example.com")
+    entity_repo = AsyncMock()
+    entity_repo.create_or_update = AsyncMock(return_value=mock_entity)
+
+    executor = RunExecutor(
+        dispatcher=AsyncMock(),
+        run_repo=AsyncMock(),
+        entity_repo=entity_repo,
+    )
+
+    with patch(
+        "expose.pipeline.lead_scoring.LeadScoringEngine"
+    ) as mock_engine_cls:
+        mock_scorer = MagicMock()
+        mock_scorer.score_entity.side_effect = RuntimeError("scoring boom")
+        mock_engine_cls.return_value = mock_scorer
+
+        # Should not raise — exception is caught and logged
+        enrichment_count, upsert_failures = await executor._flush_batch(
+            [obs], run_id, tenant_id,
+        )
+
+        # The batch should still complete (upsert succeeded)
+        assert upsert_failures == 0
+
+
+async def test_flush_batch_no_scoring_when_entity_map_empty() -> None:
+    """When all entity upserts fail, lead scoring should be skipped."""
+    from expose.collectors.base import (
+        Observation,
+        ObservationSubject,
+        ObservationType,
+    )
+    from expose.pipeline.run_executor import RunExecutor
+    from expose.types.canonical import IdentifierType
+
+    tenant_id = UUID(_TENANT_ID)
+    run_id = uuid4()
+    observed = datetime(2026, 5, 10, 12, 0, 0, tzinfo=UTC)
+
+    obs = Observation(
+        collector_id="test-collector",
+        collector_version="1.0.0",
+        tenant_id=tenant_id,
+        observation_type=ObservationType.DNS_RESOLUTION,
+        subject=ObservationSubject(
+            identifier_type=IdentifierType.DOMAIN,
+            identifier_value="broken.example.com",
+        ),
+        observed_at=observed,
+        structured_payload={},
+    )
+
+    entity_repo = AsyncMock()
+    entity_repo.create_or_update = AsyncMock(
+        side_effect=RuntimeError("db error"),
+    )
+
+    executor = RunExecutor(
+        dispatcher=AsyncMock(),
+        run_repo=AsyncMock(),
+        entity_repo=entity_repo,
+    )
+
+    with patch(
+        "expose.pipeline.lead_scoring.LeadScoringEngine"
+    ) as mock_engine_cls:
+        await executor._flush_batch([obs], run_id, tenant_id)
+
+        # Scoring engine should never be instantiated when entity_map is empty
+        mock_engine_cls.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# 16. Real data: ranks are sequential
+# ---------------------------------------------------------------------------
+
+
+async def test_real_data_ranks_sequential() -> None:
+    """Real scored entities should have sequential ranks starting at 1."""
+    entities = [
+        _make_scored_entity("a.example.com", 90, "critical"),
+        _make_scored_entity("b.example.com", 60, "high"),
+    ]
+    app = _make_app_with_session_factory(entities)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        resp = await client.get(f"{_BASE_URL}/")
+
+    data = resp.json()
+    ranks = [f["rank"] for f in data["findings"]]
+    assert ranks == [1, 2]

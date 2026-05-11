@@ -344,7 +344,8 @@ async def test_entity_upsert_called_for_each_observation() -> None:
     )
 
     # 1 seed x 1 collector = 1 dispatch, yielding 2 observations
-    assert e_repo.create_or_update.call_count == 2
+    # Lead scoring adds 1 extra create_or_update call per entity (2 obs + 2 lead)
+    assert e_repo.create_or_update.call_count == 4
     upsert_ids = {
         c.kwargs["canonical_identifier"]
         for c in e_repo.create_or_update.call_args_list
@@ -1059,8 +1060,8 @@ async def test_relationship_created_for_dns_a_record() -> None:
         collector_ids=["active-dns"],
     )
 
-    # entity_repo.create_or_update: 1 for subject + 2 for IPs = 3 calls
-    assert e_repo.create_or_update.call_count == 3
+    # entity_repo.create_or_update: 1 for subject + 2 for IPs + 1 lead scoring = 4 calls
+    assert e_repo.create_or_update.call_count == 4
     # relationship_repo.create_or_update: 2 relationships (one per IP)
     assert rel_repo.create_or_update.call_count == 2
     edge_types = {
@@ -1184,8 +1185,8 @@ async def test_no_relationships_without_relationship_repo() -> None:
         collector_ids=["active-dns"],
     )
 
-    # Only the subject entity is upserted (no related entity upserts)
-    assert e_repo.create_or_update.call_count == 1
+    # Subject entity upsert + 1 lead scoring update = 2 calls
+    assert e_repo.create_or_update.call_count == 2
     assert result.final_state == "completed"
 
 
@@ -1237,8 +1238,8 @@ async def test_no_relationships_for_plain_observation() -> None:
 
     # No relationship patterns matched -> no relationship upserts
     rel_repo.create_or_update.assert_not_called()
-    # Only the subject entity upserted
-    assert e_repo.create_or_update.call_count == 1
+    # Subject entity upsert + 1 lead scoring update = 2 calls
+    assert e_repo.create_or_update.call_count == 2
 
 
 # === DNS filter tests ========================================================
@@ -1482,9 +1483,10 @@ async def test_batch_upsert_success_path() -> None:
 
     assert result.final_state == "completed"
     assert result.total_observations == 1
-    # batch_upsert was called, create_or_update was NOT
+    # batch_upsert was called for the entity upsert
     e_repo.batch_upsert.assert_called_once()
-    e_repo.create_or_update.assert_not_called()
+    # Lead scoring calls create_or_update once per entity (post-upsert)
+    assert e_repo.create_or_update.call_count == 1
 
 
 async def test_batch_upsert_failure_falls_back_to_per_entity() -> None:
@@ -1507,8 +1509,9 @@ async def test_batch_upsert_failure_falls_back_to_per_entity() -> None:
     assert result.total_observations == 2
     # batch_upsert was attempted and failed
     e_repo.batch_upsert.assert_called_once()
-    # Fallback: create_or_update called once per observation
-    assert e_repo.create_or_update.call_count == 2
+    # Fallback: create_or_update called once per observation + once per entity
+    # for lead scoring = 4 total
+    assert e_repo.create_or_update.call_count == 4
     upsert_ids = {
         c.kwargs["canonical_identifier"]
         for c in e_repo.create_or_update.call_args_list
@@ -1672,3 +1675,195 @@ async def test_enrichment_no_enrichment_pipeline() -> None:
 
     assert result.enrichment_count == 0
     assert result.total_observations == 1
+
+
+# === RunEventBus SSE integration tests ======================================
+
+
+def _build_executor_with_event_bus(
+    event_bus: AsyncMock | None = None,
+    run_state: str = "pending",
+) -> tuple[RunExecutor, AsyncMock, AsyncMock, AsyncMock, AsyncMock]:
+    """Wire up a RunExecutor with a mock event_bus.
+
+    Returns (executor, dispatcher_mock, run_repo_mock, entity_repo_mock, event_bus_mock).
+    """
+    disp = AsyncMock()
+    r_repo = AsyncMock()
+    e_repo = AsyncMock()
+    bus = event_bus if event_bus is not None else AsyncMock()
+
+    r_repo.get_by_id = AsyncMock(return_value=_make_run_row(run_state))
+    r_repo.update_state = AsyncMock()
+    e_repo.create_or_update = AsyncMock(return_value=MagicMock())
+    e_repo.list_for_tenant = AsyncMock(return_value=[])
+    e_repo.update_attribution_scores = AsyncMock(return_value=0)
+
+    executor = RunExecutor(
+        dispatcher=disp,
+        run_repo=r_repo,
+        entity_repo=e_repo,
+        event_bus=bus,
+    )
+    return executor, disp, r_repo, e_repo, bus
+
+
+async def test_event_bus_accepted() -> None:
+    """RunExecutor accepts event_bus parameter without error."""
+    bus = AsyncMock()
+    executor = RunExecutor(
+        dispatcher=AsyncMock(),
+        run_repo=AsyncMock(),
+        entity_repo=AsyncMock(),
+        event_bus=bus,
+    )
+    assert executor._event_bus is bus  # noqa: SLF001
+
+
+async def test_event_run_started_published() -> None:
+    """RUN_STARTED event published after pending -> running transition."""
+    from expose.api.events import RunEventType
+
+    executor, disp, _r_repo, _e_repo, bus = _build_executor_with_event_bus()
+    disp.dispatch = AsyncMock(return_value=_success_result(_make_observation()))
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    # Find all publish calls and extract the event objects
+    publish_calls = bus.publish.call_args_list
+    event_types = [call.args[0].event_type for call in publish_calls]
+    assert RunEventType.RUN_STARTED in event_types
+
+    # Verify the RUN_STARTED event is the first one published
+    assert event_types[0] == RunEventType.RUN_STARTED
+
+    # Verify the event has correct run_id and tenant_id
+    started_event = publish_calls[0].args[0]
+    assert started_event.run_id == RUN_ID
+    assert started_event.tenant_id == TENANT_ID
+
+
+async def test_event_pass_completed_published() -> None:
+    """ENTITIES_DISCOVERED published after each dispatch pass with pass data."""
+    from expose.api.events import RunEventType
+
+    obs = _make_observation()
+    executor, disp, _r_repo, e_repo, bus = _build_executor_with_event_bus()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    # Multi-pass: return a new entity after pass 1, empty after pass 2
+    new_entity = _make_entity_mock(
+        entity_type="domain",
+        canonical_identifier="sub.example.com",
+    )
+    e_repo.list_for_tenant = AsyncMock(side_effect=[[new_entity], []])
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+        max_passes=3,
+    )
+
+    # Collect all ENTITIES_DISCOVERED events
+    publish_calls = bus.publish.call_args_list
+    pass_events = [
+        call.args[0]
+        for call in publish_calls
+        if call.args[0].event_type == RunEventType.ENTITIES_DISCOVERED
+    ]
+
+    # Should have one ENTITIES_DISCOVERED event per pass (2 passes)
+    assert len(pass_events) == 2
+
+    # Pass 1 event should have pass_number=1
+    assert pass_events[0].data["pass_number"] == 1
+    assert "entity_count" in pass_events[0].data
+
+    # Pass 2 event should have pass_number=2
+    assert pass_events[1].data["pass_number"] == 2
+
+
+async def test_event_run_completed_published() -> None:
+    """RUN_COMPLETED published at the end of a successful run."""
+    from expose.api.events import RunEventType
+
+    executor, disp, _r_repo, _e_repo, bus = _build_executor_with_event_bus()
+    disp.dispatch = AsyncMock(return_value=_success_result(_make_observation()))
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    publish_calls = bus.publish.call_args_list
+    event_types = [call.args[0].event_type for call in publish_calls]
+
+    # RUN_COMPLETED should be among the published events
+    assert RunEventType.RUN_COMPLETED in event_types
+
+    # RUN_COMPLETED should be the last event published
+    assert event_types[-1] == RunEventType.RUN_COMPLETED
+
+    # Verify the data includes final_state
+    completed_event = publish_calls[-1].args[0]
+    assert completed_event.data["final_state"] == "completed"
+    assert completed_event.run_id == RUN_ID
+    assert completed_event.tenant_id == TENANT_ID
+
+
+async def test_event_no_crash_without_bus() -> None:
+    """No events published when event_bus is None (no crash)."""
+    executor, disp, _r_repo, _e_repo = _build_executor()
+    disp.dispatch = AsyncMock(return_value=_success_result(_make_observation()))
+
+    # executor._event_bus is None (default from _build_executor)
+    assert executor._event_bus is None  # noqa: SLF001
+
+    # Execute should complete without error despite no event_bus
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    assert result.final_state == "completed"
+    assert result.successful_dispatches == 1
+
+
+async def test_event_types_match_enum() -> None:
+    """Event types published by the executor match RunEventType enum values."""
+    from expose.api.events import RunEventType
+
+    executor, disp, _r_repo, _e_repo, bus = _build_executor_with_event_bus()
+    disp.dispatch = AsyncMock(return_value=_success_result(_make_observation()))
+
+    await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    publish_calls = bus.publish.call_args_list
+    for call in publish_calls:
+        event = call.args[0]
+        # Every event_type must be a valid RunEventType member
+        assert isinstance(event.event_type, RunEventType), (
+            f"Event type {event.event_type!r} is not a RunEventType member"
+        )
+
+    # Verify at least RUN_STARTED, ENTITIES_DISCOVERED, and RUN_COMPLETED present
+    event_types = {call.args[0].event_type for call in publish_calls}
+    assert RunEventType.RUN_STARTED in event_types
+    assert RunEventType.ENTITIES_DISCOVERED in event_types
+    assert RunEventType.RUN_COMPLETED in event_types

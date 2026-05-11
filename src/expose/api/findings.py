@@ -315,6 +315,88 @@ async def _build_takeover_findings(
     return findings
 
 
+async def _build_scored_findings(
+    session_factory: Any,
+    tenant_id: UUID,
+) -> list[FindingEntry]:
+    """Query entities with ``_lead_score`` in properties and build findings.
+
+    Returns a list of ``FindingEntry`` objects for entities that have been
+    scored by the ``LeadScoringEngine`` during pipeline execution.  Each
+    entity's ``_lead_score`` and ``_priority_tier`` properties (written by
+    the lead scoring step in ``_flush_batch``) are used to populate the
+    finding entry.
+
+    Returns an empty list when no session factory is available or no
+    scored entities exist.
+    """
+    if session_factory is None:
+        return []
+
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from expose.db.models import Entity  # noqa: PLC0415
+
+    async with session_factory() as session:
+        stmt = (
+            select(Entity)
+            .where(Entity.tenant_id == tenant_id)
+            .order_by(Entity.last_observed_at.desc())
+            .limit(500)
+        )
+        result = await session.execute(stmt)
+        rows = result.scalars().all()
+
+    findings: list[FindingEntry] = []
+    rank = 1
+    for entity in rows:
+        props = entity.properties or {}
+        lead_score = props.get("_lead_score")
+        if lead_score is None:
+            continue
+
+        # Coerce to int (may be stored as float in JSONB)
+        try:
+            score = int(lead_score)
+        except (TypeError, ValueError):
+            continue
+
+        priority_tier = props.get("_priority_tier", "low")
+
+        # Build signal list from stored properties — extract any signal-like
+        # keys that were preserved alongside the score.
+        signals: list[dict[str, Any]] = []
+        for key, val in props.items():
+            if key.startswith("_") or key in (
+                "collector_id",
+                "collector_version",
+            ):
+                continue
+            if isinstance(val, (int, float)) and key not in (
+                "lead_score",
+                "priority_tier",
+            ):
+                signals.append({"signal": key, "weight": val})
+
+        findings.append(FindingEntry(
+            rank=rank,
+            entity_identifier=entity.canonical_identifier,
+            entity_type=entity.entity_type,
+            score=score,
+            priority_tier=priority_tier,
+            justification=(
+                f"{entity.canonical_identifier}: lead score {score} "
+                f"({priority_tier})"
+            ),
+            signals=signals,
+        ))
+        rank += 1
+
+    # Sort by score descending for consistent ordering
+    findings.sort(key=lambda f: f.score, reverse=True)
+    return findings
+
+
 @router.get("/")
 async def get_findings(
     request: Request,
@@ -325,29 +407,30 @@ async def get_findings(
     """Return top entities ranked by lead score.
 
     When a database session factory is available, queries for entities
-    with subdomain takeover risks (``_takeover_risk`` property) and
-    merges them with placeholder findings. Takeover risks sort to the
-    top as critical findings.
+    with lead scores (``_lead_score`` property written by the pipeline's
+    lead scoring step) and subdomain takeover risks (``_takeover_risk``
+    property). Real scored entities are returned with
+    ``is_placeholder=False``.
 
-    When no database is available (dev/test mode), returns placeholder
-    findings that demonstrate the prioritized-findings UX.
+    When no database is available or no scored entities exist, returns
+    placeholder findings that demonstrate the prioritized-findings UX.
 
     Findings are always sorted by score descending (highest risk first).
     """
     session_factory = getattr(request.app.state, "session_factory", None)
 
-    # Fetch takeover-risk findings from the database if available
+    # Fetch real scored entities and takeover findings from the database
+    scored_findings = await _build_scored_findings(session_factory, tenant_id)
     takeover_findings = await _build_takeover_findings(session_factory, tenant_id)
 
-    if takeover_findings:
-        # Merge takeover risks (critical) with placeholder findings
-        placeholder_entries = [
-            FindingEntry(rank=1, **item)  # rank re-assigned below
-            for item in _PLACEHOLDER_FINDINGS
-        ]
-        all_entries = takeover_findings + placeholder_entries
+    # Combine real findings from both sources
+    real_findings = takeover_findings + scored_findings
+    has_real_data = len(real_findings) > 0
+
+    if has_real_data:
+        all_entries = real_findings
     else:
-        # No DB or no takeover risks — use placeholder data
+        # No DB or no scored entities — use placeholder data
         all_entries = [
             FindingEntry(rank=1, **item)  # rank re-assigned below
             for item in _PLACEHOLDER_FINDINGS
@@ -379,5 +462,5 @@ async def get_findings(
         findings=ranked,
         total_scored=total_scored,
         generated_at=datetime.now(tz=UTC),
-        is_placeholder=len(takeover_findings) == 0,
+        is_placeholder=not has_real_data,
     )
