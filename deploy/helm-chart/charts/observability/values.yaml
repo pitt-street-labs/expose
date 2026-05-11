@@ -1,0 +1,106 @@
+# EXPOSE Observability subchart — default values.
+#
+# This subchart is opt-in. Set `observability.bundled.enabled: true` in the
+# parent chart values (or `enabled: true` when installing standalone) to
+# deploy Prometheus + Grafana with pre-configured EXPOSE dashboards.
+#
+# Operators who already run their own Prometheus/Grafana should leave this
+# disabled and use the scrape annotations on the control-plane Service
+# (observability.prometheus.enabled in the parent chart) plus the dashboard
+# JSON files in deploy/grafana/.
+
+enabled: false
+
+# --- Prometheus configuration -----------------------------------------------
+prometheus:
+  # Scrape target: the EXPOSE control-plane Service exposes /metrics.
+  scrape:
+    serviceName: ""          # auto-resolved to {{ .Release.Name }}-control-plane
+    port: 8090
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+
+  retention: 7d
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+# --- Grafana configuration --------------------------------------------------
+grafana:
+  # Dashboards are auto-provisioned via ConfigMap with the grafana_dashboard
+  # label. The Grafana sidecar watches for ConfigMaps in the release namespace
+  # with label `grafana_dashboard: "1"` and loads them automatically.
+  dashboards:
+    enabled: true
+    # Label value the Grafana sidecar looks for (default matches
+    # kube-prometheus-stack's sidecar config).
+    label: grafana_dashboard
+    labelValue: "1"
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+# --- kube-prometheus-stack overrides ----------------------------------------
+# These values are passed through to the kube-prometheus-stack dependency.
+# Only the subset relevant to EXPOSE is configured here; operators can
+# override any kube-prometheus-stack value under this key.
+kube-prometheus-stack:
+  # Disable components we do not need for a minimal EXPOSE monitoring stack.
+  alertmanager:
+    enabled: false
+  kubeStateMetrics:
+    enabled: false
+  nodeExporter:
+    enabled: false
+  kubeApiServer:
+    enabled: false
+  kubelet:
+    enabled: false
+  kubeControllerManager:
+    enabled: false
+  kubeScheduler:
+    enabled: false
+  kubeProxy:
+    enabled: false
+  kubeEtcd:
+    enabled: false
+  coreDns:
+    enabled: false
+
+  prometheus:
+    prometheusSpec:
+      retention: 7d
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          memory: 512Mi
+      # Pick up ServiceMonitors in the release namespace.
+      serviceMonitorSelectorNilUsesHelmValues: false
+
+  grafana:
+    enabled: true
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 256Mi
+    sidecar:
+      dashboards:
+        enabled: true
+        label: grafana_dashboard
+        labelValue: "1"
+        searchNamespace: ALL
+    # Default datasource pointing at the bundled Prometheus.
+    additionalDataSources: []

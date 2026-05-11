@@ -4,7 +4,7 @@
   "cases": [
     {
       "case_id": "cy-001",
-      "description": "IP in tenant's authorized AWS account range with 3 collector confirmations",
+      "description": "IP in tenant's authorized AWS account range with 3 collector confirmations including cloud match",
       "entity_type": "ip",
       "canonical_identifier": "203.0.113.42",
       "observations": [
@@ -63,7 +63,7 @@
     },
     {
       "case_id": "cy-003",
-      "description": "Cloud resource ID directly in tenant's authorized scope",
+      "description": "Cloud resource ID directly in tenant's authorized scope with ARN-style identifier",
       "entity_type": "cloud_resource_id",
       "canonical_identifier": "arn:aws:ec2:us-east-1:123456789012:instance/i-0abc123def456",
       "observations": [
@@ -82,6 +82,361 @@
           "collector_id": "cert-transparency",
           "subject": "internal.acme.example.com",
           "issuer": "Acme Internal CA"
+        }
+      ],
+      "expected_attribution": "confirmed",
+      "expected_confidence_min": 0.95,
+      "expected_confidence_max": 1.0
+    },
+    {
+      "case_id": "cy-004",
+      "description": "Subdomain resolving to GCP project IP with cloud account match and registrant confirmation",
+      "entity_type": "domain",
+      "canonical_identifier": "api.staging.acme.example.com",
+      "observations": [
+        {
+          "collector_id": "cloud-range-check",
+          "cloud_account_match": true,
+          "provider": "gcp",
+          "matched_range": "35.192.0.0/12"
+        },
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Acme Corp",
+          "matches_tenant": true
+        },
+        {
+          "collector_id": "active-dns",
+          "record_type": "A",
+          "value": "35.200.10.5"
+        }
+      ],
+      "expected_attribution": "confirmed",
+      "expected_confidence_min": 0.95,
+      "expected_confidence_max": 1.0
+    },
+    {
+      "case_id": "cy-005",
+      "description": "Azure VM IP confirmed via subscription ID and cert transparency plus WHOIS",
+      "entity_type": "ip",
+      "canonical_identifier": "40.112.72.205",
+      "observations": [
+        {
+          "collector_id": "cloud-range-check",
+          "cloud_account_match": true,
+          "provider": "azure",
+          "subscription_id": "sub-9a8b7c6d-e5f4-3210-abcd-ef1234567890"
+        },
+        {
+          "collector_id": "cert-transparency",
+          "subject": "portal.acme.example.com",
+          "issuer": "DigiCert"
+        },
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Acme Corp",
+          "matches_tenant": true
+        }
+      ],
+      "expected_attribution": "confirmed",
+      "expected_confidence_min": 0.95,
+      "expected_confidence_max": 1.0
+    },
+    {
+      "case_id": "cy-006",
+      "description": "Primary MX domain with WHOIS, DNS, HTTP, and cloud match signals",
+      "entity_type": "domain",
+      "canonical_identifier": "mail.acme.example.com",
+      "observations": [
+        {
+          "collector_id": "cloud-range-check",
+          "cloud_account_match": true,
+          "provider": "aws",
+          "matched_range": "54.240.0.0/18"
+        },
+        {
+          "collector_id": "active-dns",
+          "record_type": "MX",
+          "value": "mail.acme.example.com",
+          "priority": 10
+        },
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Acme Corporation",
+          "matches_tenant": true
+        },
+        {
+          "collector_id": "active-http",
+          "status_code": 200,
+          "server_header": "Microsoft-IIS/10.0"
+        }
+      ],
+      "expected_attribution": "confirmed",
+      "expected_confidence_min": 0.95,
+      "expected_confidence_max": 1.0
+    },
+    {
+      "case_id": "cy-007",
+      "description": "VPN gateway IP with cloud account match and multiple infrastructure signals",
+      "entity_type": "ip",
+      "canonical_identifier": "203.0.113.100",
+      "observations": [
+        {
+          "collector_id": "cloud-range-check",
+          "cloud_account_match": true,
+          "provider": "aws",
+          "matched_range": "203.0.113.96/28"
+        },
+        {
+          "collector_id": "tls-handshake",
+          "subject": "vpn.acme.example.com",
+          "protocol": "TLSv1.3",
+          "cipher": "TLS_AES_256_GCM_SHA384"
+        },
+        {
+          "collector_id": "banner-grab",
+          "port": 443,
+          "banner": "OpenVPN",
+          "service": "vpn"
+        }
+      ],
+      "expected_attribution": "confirmed",
+      "expected_confidence_min": 0.95,
+      "expected_confidence_max": 1.0
+    },
+    {
+      "case_id": "cy-008",
+      "description": "CDN origin IP with cloud match and cert SAN listing multiple tenant subdomains",
+      "entity_type": "ip",
+      "canonical_identifier": "198.51.100.50",
+      "observations": [
+        {
+          "collector_id": "cloud-range-check",
+          "cloud_account_match": true,
+          "provider": "aws",
+          "matched_range": "198.51.100.48/29"
+        },
+        {
+          "collector_id": "cert-transparency",
+          "subject": "cdn.acme.example.com",
+          "san_values": ["cdn.acme.example.com", "static.acme.example.com", "img.acme.example.com"],
+          "issuer": "Amazon"
+        },
+        {
+          "collector_id": "waf-origin-discovery",
+          "origin_ip": "198.51.100.50",
+          "front_domain": "cdn.acme.example.com"
+        }
+      ],
+      "expected_attribution": "confirmed",
+      "expected_confidence_min": 0.95,
+      "expected_confidence_max": 1.0
+    },
+    {
+      "case_id": "cy-009",
+      "description": "Kubernetes ingress domain with cloud project match and multiple collector signals",
+      "entity_type": "domain",
+      "canonical_identifier": "k8s.acme.example.com",
+      "observations": [
+        {
+          "collector_id": "cloud-range-check",
+          "cloud_account_match": true,
+          "provider": "gcp",
+          "project_id": "acme-prod-12345"
+        },
+        {
+          "collector_id": "active-http",
+          "status_code": 200,
+          "server_header": "envoy",
+          "x_powered_by": "Kubernetes"
+        },
+        {
+          "collector_id": "cert-transparency",
+          "subject": "k8s.acme.example.com",
+          "issuer": "Let's Encrypt"
+        },
+        {
+          "collector_id": "active-dns",
+          "record_type": "A",
+          "value": "35.201.15.22"
+        }
+      ],
+      "expected_attribution": "confirmed",
+      "expected_confidence_min": 0.95,
+      "expected_confidence_max": 1.0
+    },
+    {
+      "case_id": "cy-010",
+      "description": "S3 bucket endpoint confirmed via cloud account match with WHOIS and DNS",
+      "entity_type": "domain",
+      "canonical_identifier": "assets.acme.example.com",
+      "observations": [
+        {
+          "collector_id": "cloud-range-check",
+          "cloud_account_match": true,
+          "provider": "aws",
+          "service": "s3",
+          "bucket_name": "acme-assets-prod"
+        },
+        {
+          "collector_id": "active-dns",
+          "record_type": "CNAME",
+          "value": "acme-assets-prod.s3.amazonaws.com"
+        },
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Acme Corp",
+          "matches_tenant": true
+        }
+      ],
+      "expected_attribution": "confirmed",
+      "expected_confidence_min": 0.95,
+      "expected_confidence_max": 1.0
+    },
+    {
+      "case_id": "cy-011",
+      "description": "Load balancer IP with cloud match confirmed by 4 different collectors",
+      "entity_type": "ip",
+      "canonical_identifier": "13.107.42.14",
+      "observations": [
+        {
+          "collector_id": "cloud-range-check",
+          "cloud_account_match": true,
+          "provider": "azure",
+          "matched_range": "13.107.42.0/24"
+        },
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Acme Corp",
+          "matches_tenant": true
+        },
+        {
+          "collector_id": "active-http",
+          "status_code": 200,
+          "server_header": "Microsoft-Azure-Application-Gateway/v2"
+        },
+        {
+          "collector_id": "cert-transparency",
+          "subject": "gateway.acme.example.com",
+          "issuer": "DigiCert"
+        }
+      ],
+      "expected_attribution": "confirmed",
+      "expected_confidence_min": 0.95,
+      "expected_confidence_max": 1.0
+    },
+    {
+      "case_id": "cy-012",
+      "description": "CI/CD domain with cloud match and multiple DevOps-related signals",
+      "entity_type": "domain",
+      "canonical_identifier": "ci.acme.example.com",
+      "observations": [
+        {
+          "collector_id": "cloud-range-check",
+          "cloud_account_match": true,
+          "provider": "aws",
+          "matched_range": "52.0.0.0/8"
+        },
+        {
+          "collector_id": "active-http",
+          "status_code": 403,
+          "server_header": "Jenkins",
+          "x_jenkins": "2.440.1"
+        },
+        {
+          "collector_id": "cert-transparency",
+          "subject": "ci.acme.example.com",
+          "issuer": "Let's Encrypt"
+        }
+      ],
+      "expected_attribution": "confirmed",
+      "expected_confidence_min": 0.95,
+      "expected_confidence_max": 1.0
+    },
+    {
+      "case_id": "cy-013",
+      "description": "Database endpoint IP with cloud match and internal cert authority",
+      "entity_type": "ip",
+      "canonical_identifier": "10.0.5.120",
+      "observations": [
+        {
+          "collector_id": "cloud-range-check",
+          "cloud_account_match": true,
+          "provider": "aws",
+          "matched_range": "10.0.0.0/8"
+        },
+        {
+          "collector_id": "tls-handshake",
+          "subject": "db-primary.acme.internal",
+          "issuer": "Acme Internal CA",
+          "port": 5432
+        },
+        {
+          "collector_id": "banner-grab",
+          "port": 5432,
+          "service": "postgresql",
+          "version": "16.2"
+        }
+      ],
+      "expected_attribution": "confirmed",
+      "expected_confidence_min": 0.95,
+      "expected_confidence_max": 1.0
+    },
+    {
+      "case_id": "cy-014",
+      "description": "Monitoring subdomain with cloud match and comprehensive collector signals",
+      "entity_type": "domain",
+      "canonical_identifier": "grafana.acme.example.com",
+      "observations": [
+        {
+          "collector_id": "cloud-range-check",
+          "cloud_account_match": true,
+          "provider": "aws",
+          "matched_range": "54.150.0.0/16"
+        },
+        {
+          "collector_id": "active-http",
+          "status_code": 200,
+          "server_header": "Grafana",
+          "x_grafana_version": "11.0.0"
+        },
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Acme Corp",
+          "matches_tenant": true
+        },
+        {
+          "collector_id": "active-dns",
+          "record_type": "A",
+          "value": "54.150.22.33"
+        }
+      ],
+      "expected_attribution": "confirmed",
+      "expected_confidence_min": 0.95,
+      "expected_confidence_max": 1.0
+    },
+    {
+      "case_id": "cy-015",
+      "description": "CIDR block entirely within tenant's authorized cloud range",
+      "entity_type": "cidr",
+      "canonical_identifier": "203.0.113.0/28",
+      "observations": [
+        {
+          "collector_id": "cloud-range-check",
+          "cloud_account_match": true,
+          "provider": "aws",
+          "matched_range": "203.0.113.0/24"
+        },
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Acme Corp",
+          "matches_tenant": true,
+          "netblock": "203.0.113.0/24"
+        },
+        {
+          "collector_id": "bgp-prefixes",
+          "origin_asn": 64512,
+          "prefix": "203.0.113.0/24"
         }
       ],
       "expected_attribution": "confirmed",

@@ -389,6 +389,91 @@ class EvidenceManager:
 
         return expired
 
+    async def expire_evidence(
+        self,
+        tenant_id: str,
+        max_age_days: int,
+    ) -> list[str]:
+        """Convenience method: expire evidence older than *max_age_days*.
+
+        Unlike :meth:`expire` which uses per-blob ``retention_seconds``,
+        this method applies a blanket age cutoff to all blobs under the
+        manager's prefix.  Designed for administrative retention policies
+        (e.g. "delete all evidence older than 90 days for tenant X").
+
+        The *tenant_id* parameter is used for logging and audit purposes
+        only -- the actual scoping is controlled by the manager's
+        ``key_prefix`` (set at construction time).
+
+        Args:
+            tenant_id: Tenant identifier (for logging/audit).
+            max_age_days: Maximum age in days.  Blobs stored more than
+                this many days ago are deleted regardless of their
+                per-blob ``retention_seconds``.
+
+        Returns:
+            List of content hashes that were expired and deleted.
+        """
+        meta_prefix = (
+            f"{self._key_prefix}/{_META_PREFIX}"
+            if self._key_prefix
+            else _META_PREFIX
+        )
+        keys = await self._backend.list_keys(prefix=meta_prefix)
+        now = datetime.now(tz=UTC)
+        cutoff_seconds = max_age_days * 24 * 3600
+        expired: list[str] = []
+
+        for batch_start in range(0, len(keys), _BATCH_SIZE):
+            batch_keys = keys[batch_start : batch_start + _BATCH_SIZE]
+
+            for fetch_start in range(0, len(batch_keys), _META_FETCH_BATCH_SIZE):
+                fetch_keys = batch_keys[
+                    fetch_start : fetch_start + _META_FETCH_BATCH_SIZE
+                ]
+
+                async def _fetch_ref(key: str) -> EvidenceRef | None:
+                    try:
+                        meta_bytes = await self._backend.get(key)
+                        return EvidenceRef.model_validate_json(meta_bytes)
+                    except (StorageKeyNotFoundError, Exception):
+                        return None
+
+                refs = await asyncio.gather(
+                    *[_fetch_ref(k) for k in fetch_keys],
+                )
+
+                for ref in refs:
+                    if ref is None:
+                        continue
+                    age_seconds = now.timestamp() - ref.stored_at.timestamp()
+                    if age_seconds >= cutoff_seconds:
+                        await self.delete(ref.content_hash)
+                        expired.append(ref.content_hash)
+
+        return expired
+
+    async def verify_integrity(self, content_hash: str) -> bool:
+        """Verify the integrity of a stored evidence blob.
+
+        Re-computes the SHA-256 digest of the stored bytes and compares
+        it to the content-addressed key.
+
+        Args:
+            content_hash: 64-character lowercase hex SHA-256 digest.
+
+        Returns:
+            ``True`` if the stored data matches the content hash,
+            ``False`` if the blob is corrupted or missing.
+        """
+        try:
+            blob_key = self._blob_key(content_hash)
+            data = await self._backend.get(blob_key)
+            actual_hash = compute_sha256_hex(data)
+            return actual_hash == content_hash
+        except StorageKeyNotFoundError:
+            return False
+
 
 __all__ = [
     "EvidenceIntegrityError",

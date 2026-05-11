@@ -14,7 +14,7 @@
     },
     {
       "case_id": "cn-002",
-      "description": "Domain with WHOIS showing different registrant and different cloud account",
+      "description": "Domain with WHOIS showing different registrant and no cloud match",
       "entity_type": "domain",
       "canonical_identifier": "evil-corp.example.net",
       "observations": [
@@ -30,7 +30,7 @@
     },
     {
       "case_id": "cn-003",
-      "description": "Shared CDN IP -- belongs to CDN provider, not tenant",
+      "description": "Shared CDN IP belonging to CDN provider infrastructure, not tenant",
       "entity_type": "ip",
       "canonical_identifier": "198.51.100.200",
       "observations": [
@@ -47,7 +47,7 @@
     },
     {
       "case_id": "cn-004",
-      "description": "Domain parked by a registrar -- no active infrastructure",
+      "description": "Domain parked by a registrar with no active infrastructure",
       "entity_type": "domain",
       "canonical_identifier": "parked-placeholder.example.org",
       "observations": [
@@ -55,6 +55,155 @@
           "collector_id": "active-http",
           "status_code": 200,
           "server_header": "registrar-parking"
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    },
+    {
+      "case_id": "cn-005",
+      "description": "Google public DNS IP -- clearly not tenant owned",
+      "entity_type": "ip",
+      "canonical_identifier": "8.8.8.8",
+      "observations": [],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.2
+    },
+    {
+      "case_id": "cn-006",
+      "description": "Competitor domain with confirmed different registrant and different cloud provider",
+      "entity_type": "domain",
+      "canonical_identifier": "competitor-platform.example.org",
+      "observations": [
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Competitor Inc",
+          "matches_tenant": false
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    },
+    {
+      "case_id": "cn-007",
+      "description": "Cloudflare anycast IP belonging to Cloudflare infrastructure",
+      "entity_type": "ip",
+      "canonical_identifier": "104.16.0.1",
+      "observations": [],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.2
+    },
+    {
+      "case_id": "cn-008",
+      "description": "Third-party SaaS domain used by tenant but owned by vendor",
+      "entity_type": "domain",
+      "canonical_identifier": "acme.salesforce.com",
+      "observations": [
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Salesforce Inc",
+          "matches_tenant": false
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    },
+    {
+      "case_id": "cn-009",
+      "description": "Expired domain previously owned by tenant, now owned by domain squatter",
+      "entity_type": "domain",
+      "canonical_identifier": "old-brand.example.com",
+      "observations": [
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Domain Squatter LLC",
+          "matches_tenant": false,
+          "registration_date": "2026-01-15"
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    },
+    {
+      "case_id": "cn-010",
+      "description": "AWS IP in a different account with no cloud match",
+      "entity_type": "ip",
+      "canonical_identifier": "54.210.100.50",
+      "observations": [
+        {
+          "collector_id": "cloud-range-check",
+          "cloud_account_match": false,
+          "provider": "aws",
+          "service_category": "ec2"
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    },
+    {
+      "case_id": "cn-011",
+      "description": "GitHub Pages domain owned by open-source project, not tenant",
+      "entity_type": "domain",
+      "canonical_identifier": "docs.unrelated-project.io",
+      "observations": [],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.2
+    },
+    {
+      "case_id": "cn-012",
+      "description": "RFC 5737 documentation IP -- not routable, clearly not tenant owned",
+      "entity_type": "ip",
+      "canonical_identifier": "192.0.2.1",
+      "observations": [],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.2
+    },
+    {
+      "case_id": "cn-013",
+      "description": "Domain with registrant in a completely different country and industry",
+      "entity_type": "domain",
+      "canonical_identifier": "tokyo-sushi-restaurant.example.jp",
+      "observations": [
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Tokyo Sushi Co Ltd",
+          "matches_tenant": false,
+          "registrant_country": "JP"
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    },
+    {
+      "case_id": "cn-014",
+      "description": "IP belonging to Akamai CDN edge network, not tenant infrastructure",
+      "entity_type": "ip",
+      "canonical_identifier": "23.235.32.10",
+      "observations": [],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.2
+    },
+    {
+      "case_id": "cn-015",
+      "description": "Domain registered to a government agency in a different sector",
+      "entity_type": "domain",
+      "canonical_identifier": "data.weather.example.gov",
+      "observations": [
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "National Weather Service",
+          "matches_tenant": false
         }
       ],
       "expected_attribution": "not_yours",

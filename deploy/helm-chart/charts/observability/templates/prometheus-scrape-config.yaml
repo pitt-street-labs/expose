@@ -1,0 +1,36 @@
+{{- if .Values.enabled }}
+# ServiceMonitor for Prometheus Operator — auto-discovers the EXPOSE
+# control-plane /metrics endpoint. Requires the Prometheus Operator CRD
+# (installed by kube-prometheus-stack dependency).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}-expose-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: expose-observability
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: expose
+    release: {{ .Release.Name }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: expose
+      app.kubernetes.io/component: control-plane
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: http
+      path: {{ .Values.prometheus.scrape.path }}
+      interval: {{ .Values.prometheus.scrape.interval }}
+      scrapeTimeout: {{ .Values.prometheus.scrape.scrapeTimeout }}
+      honorLabels: true
+      metricRelabelings:
+        # Keep only expose.* metrics to avoid noise from Go runtime /
+        # process metrics unless operators explicitly want them.
+        - sourceLabels: [__name__]
+          regex: "expose_.*|python_.*|process_.*"
+          action: keep
+{{- end }}

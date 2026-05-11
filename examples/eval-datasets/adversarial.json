@@ -4,7 +4,7 @@
   "cases": [
     {
       "case_id": "ad-001",
-      "description": "Typosquat domain designed to fool string matching -- not tenant-owned",
+      "description": "Typosquat domain designed to fool string matching -- 'Acme Corp Lookalike LLC' is not 'Acme Corp'",
       "entity_type": "domain",
       "canonical_identifier": "acme-corp.example.net",
       "observations": [
@@ -25,7 +25,7 @@
     },
     {
       "case_id": "ad-002",
-      "description": "IP with spoofed cloud signals -- many observations but none genuinely from tenant cloud",
+      "description": "IP with spoofed cloud signals -- 3 observations but no genuine cloud account match",
       "entity_type": "ip",
       "canonical_identifier": "198.51.100.222",
       "observations": [
@@ -68,7 +68,7 @@
     },
     {
       "case_id": "ad-004",
-      "description": "Honeypot IP with deliberately planted tenant-like banners -- 3 observations to trigger stub threshold",
+      "description": "Honeypot IP with deliberately planted tenant-like banners -- 3 observations but no cloud match",
       "entity_type": "ip",
       "canonical_identifier": "192.0.2.200",
       "observations": [
@@ -87,6 +87,250 @@
           "collector_id": "cert-transparency",
           "subject": "acme-fake.example.com",
           "issuer": "Self-Signed"
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    },
+    {
+      "case_id": "ad-005",
+      "description": "Homograph attack domain using visually similar characters (rn looks like m)",
+      "entity_type": "domain",
+      "canonical_identifier": "acrnecorp.example.com",
+      "observations": [
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Phishing Operations Inc",
+          "matches_tenant": false
+        },
+        {
+          "collector_id": "active-http",
+          "status_code": 200,
+          "server_header": "nginx",
+          "body_snippet": "Acme Corp Login"
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    },
+    {
+      "case_id": "ad-006",
+      "description": "Certificate overlap via shared CDN -- same cert issuer and SAN format as tenant but different org",
+      "entity_type": "domain",
+      "canonical_identifier": "unrelated-site.cdn-provider.example.net",
+      "observations": [
+        {
+          "collector_id": "cert-transparency",
+          "subject": "unrelated-site.cdn-provider.example.net",
+          "issuer": "Let's Encrypt",
+          "san_values": ["unrelated-site.cdn-provider.example.net"]
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    },
+    {
+      "case_id": "ad-007",
+      "description": "Domain with tenant company name in path but owned by news organization (press mention)",
+      "entity_type": "domain",
+      "canonical_identifier": "news-outlet.example.com",
+      "observations": [
+        {
+          "collector_id": "active-http",
+          "status_code": 200,
+          "server_header": "WordPress",
+          "body_snippet": "Acme Corp announced quarterly earnings today"
+        },
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Global News Network",
+          "matches_tenant": false
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    },
+    {
+      "case_id": "ad-008",
+      "description": "Phishing clone with 4 observations mimicking real tenant signals but no cloud match",
+      "entity_type": "domain",
+      "canonical_identifier": "secure-login-acme.example.org",
+      "observations": [
+        {
+          "collector_id": "active-http",
+          "status_code": 200,
+          "server_header": "nginx",
+          "body_snippet": "Acme Corp Employee Portal - Sign In"
+        },
+        {
+          "collector_id": "cert-transparency",
+          "subject": "secure-login-acme.example.org",
+          "issuer": "Let's Encrypt"
+        },
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Privacy Protect LLC",
+          "matches_tenant": false,
+          "privacy_protected": true
+        },
+        {
+          "collector_id": "active-dns",
+          "record_type": "A",
+          "value": "45.33.32.156"
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    },
+    {
+      "case_id": "ad-009",
+      "description": "IP previously owned by tenant (cloud elastic IP) now reassigned to different customer",
+      "entity_type": "ip",
+      "canonical_identifier": "52.87.100.200",
+      "observations": [
+        {
+          "collector_id": "cloud-range-check",
+          "cloud_account_match": false,
+          "provider": "aws",
+          "previously_associated": true
+        },
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Amazon Technologies Inc",
+          "matches_tenant": false
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    },
+    {
+      "case_id": "ad-010",
+      "description": "Domain with similar registrant name but different legal entity (Acme Industries vs Acme Corp)",
+      "entity_type": "domain",
+      "canonical_identifier": "acme-industries.example.com",
+      "observations": [
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Acme Industries International",
+          "matches_tenant": false
+        },
+        {
+          "collector_id": "cert-transparency",
+          "subject": "acme-industries.example.com",
+          "issuer": "DigiCert"
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    },
+    {
+      "case_id": "ad-011",
+      "description": "Subdomain takeover candidate -- CNAME points to deprovisioned cloud resource",
+      "entity_type": "domain",
+      "canonical_identifier": "old-feature.acme.example.com",
+      "observations": [
+        {
+          "collector_id": "active-dns",
+          "record_type": "CNAME",
+          "value": "acme-old-feature.azurewebsites.net",
+          "nxdomain": true
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    },
+    {
+      "case_id": "ad-012",
+      "description": "IP with BGP hijack indicators -- announced by unexpected ASN",
+      "entity_type": "ip",
+      "canonical_identifier": "203.0.113.250",
+      "observations": [
+        {
+          "collector_id": "bgp-prefixes",
+          "origin_asn": 99999,
+          "expected_asn": 64512,
+          "hijack_suspected": true
+        },
+        {
+          "collector_id": "active-http",
+          "status_code": 200,
+          "server_header": "nginx"
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    },
+    {
+      "case_id": "ad-013",
+      "description": "Domain registered one day ago with tenant keywords -- likely brand abuse, not legitimate",
+      "entity_type": "domain",
+      "canonical_identifier": "acme-support-portal.example.net",
+      "observations": [
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Quick Domains LLC",
+          "matches_tenant": false,
+          "registration_date": "2026-05-10",
+          "domain_age_days": 1
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    },
+    {
+      "case_id": "ad-014",
+      "description": "IP with SSL cert containing tenant domain in SAN but cert is self-signed and untrusted",
+      "entity_type": "ip",
+      "canonical_identifier": "192.0.2.175",
+      "observations": [
+        {
+          "collector_id": "tls-handshake",
+          "subject": "acme.example.com",
+          "issuer": "Self-Signed",
+          "self_signed": true,
+          "san_values": ["acme.example.com", "*.acme.example.com"]
+        },
+        {
+          "collector_id": "cloud-range-check",
+          "cloud_account_match": false,
+          "provider": "unknown"
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    },
+    {
+      "case_id": "ad-015",
+      "description": "Domain with multiple high-volume observations but all from untrusted or spoofable sources",
+      "entity_type": "domain",
+      "canonical_identifier": "totally-legit-acme.example.biz",
+      "observations": [
+        {
+          "collector_id": "active-http",
+          "status_code": 200,
+          "server_header": "Apache",
+          "body_snippet": "Welcome to Acme Corp Official Website"
+        },
+        {
+          "collector_id": "active-dns",
+          "record_type": "TXT",
+          "value": "v=spf1 include:acme.example.com ~all"
+        },
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Legitimate Business Corp",
+          "matches_tenant": false
         }
       ],
       "expected_attribution": "not_yours",

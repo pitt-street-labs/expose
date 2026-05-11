@@ -25,7 +25,7 @@
     },
     {
       "case_id": "am-002",
-      "description": "Domain with mixed signals -- cert matches but registrant differs",
+      "description": "Domain with mixed signals -- cert matches but registrant differs (partner hosting)",
       "entity_type": "domain",
       "canonical_identifier": "partner-portal.example.com",
       "observations": [
@@ -46,7 +46,7 @@
     },
     {
       "case_id": "am-003",
-      "description": "Single collector observation with weak signal -- could go either way",
+      "description": "Single DNS CNAME record pointing to cloud provider -- minimal evidence",
       "entity_type": "domain",
       "canonical_identifier": "staging.internal.example.com",
       "observations": [
@@ -59,6 +59,248 @@
       "expected_attribution": "medium",
       "expected_confidence_min": 0.40,
       "expected_confidence_max": 0.70
+    },
+    {
+      "case_id": "am-004",
+      "description": "Shared nameserver but different registrant -- nameserver overlap is weak signal",
+      "entity_type": "domain",
+      "canonical_identifier": "vendor-app.example.com",
+      "observations": [
+        {
+          "collector_id": "active-dns",
+          "record_type": "NS",
+          "nameservers": ["ns1.shared-dns-provider.example.net", "ns2.shared-dns-provider.example.net"]
+        },
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Vendor Solutions Corp",
+          "matches_tenant": false
+        }
+      ],
+      "expected_attribution": "high",
+      "expected_confidence_min": 0.50,
+      "expected_confidence_max": 0.85
+    },
+    {
+      "case_id": "am-005",
+      "description": "IP with reverse DNS pointing to tenant domain but no cloud match",
+      "entity_type": "ip",
+      "canonical_identifier": "198.51.100.75",
+      "observations": [
+        {
+          "collector_id": "active-dns",
+          "record_type": "PTR",
+          "value": "server1.acme.example.com"
+        },
+        {
+          "collector_id": "cloud-range-check",
+          "cloud_account_match": false,
+          "provider": "aws"
+        }
+      ],
+      "expected_attribution": "high",
+      "expected_confidence_min": 0.50,
+      "expected_confidence_max": 0.85
+    },
+    {
+      "case_id": "am-006",
+      "description": "Domain with only a single HTTP response -- server header suggests tenant tech stack",
+      "entity_type": "domain",
+      "canonical_identifier": "dev.internal.example.com",
+      "observations": [
+        {
+          "collector_id": "active-http",
+          "status_code": 401,
+          "server_header": "AcmeAppServer/3.2",
+          "www_authenticate": "Bearer"
+        }
+      ],
+      "expected_attribution": "medium",
+      "expected_confidence_min": 0.40,
+      "expected_confidence_max": 0.70
+    },
+    {
+      "case_id": "am-007",
+      "description": "Cert SAN includes tenant domain among 50 SAN entries (shared wildcard CDN cert)",
+      "entity_type": "domain",
+      "canonical_identifier": "cdn-edge.example.com",
+      "observations": [
+        {
+          "collector_id": "cert-transparency",
+          "subject": "*.cdn-provider.example.net",
+          "san_count": 50,
+          "san_includes_tenant": true,
+          "issuer": "GlobalSign"
+        },
+        {
+          "collector_id": "active-dns",
+          "record_type": "CNAME",
+          "value": "cdn-edge.cdn-provider.example.net"
+        }
+      ],
+      "expected_attribution": "high",
+      "expected_confidence_min": 0.50,
+      "expected_confidence_max": 0.85
+    },
+    {
+      "case_id": "am-008",
+      "description": "IP in cloud range but WHOIS shows hosting provider, not tenant (VPS)",
+      "entity_type": "ip",
+      "canonical_identifier": "45.33.32.156",
+      "observations": [
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Linode LLC",
+          "matches_tenant": false
+        },
+        {
+          "collector_id": "active-http",
+          "status_code": 200,
+          "server_header": "nginx"
+        }
+      ],
+      "expected_attribution": "high",
+      "expected_confidence_min": 0.50,
+      "expected_confidence_max": 0.85
+    },
+    {
+      "case_id": "am-009",
+      "description": "Subdomain with wildcard DNS -- resolves but could be anyone's content",
+      "entity_type": "domain",
+      "canonical_identifier": "unknown-service.example.com",
+      "observations": [
+        {
+          "collector_id": "active-dns",
+          "record_type": "A",
+          "value": "203.0.113.200",
+          "is_wildcard": true
+        }
+      ],
+      "expected_attribution": "medium",
+      "expected_confidence_min": 0.40,
+      "expected_confidence_max": 0.70
+    },
+    {
+      "case_id": "am-010",
+      "description": "Domain on same ASN as tenant but registered to a different subsidiary",
+      "entity_type": "domain",
+      "canonical_identifier": "subsidiary-brand.example.net",
+      "observations": [
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Acme Subsidiary LLC",
+          "matches_tenant": false
+        },
+        {
+          "collector_id": "bgp-prefixes",
+          "asn": 64512,
+          "same_asn_as_tenant": true
+        }
+      ],
+      "expected_attribution": "high",
+      "expected_confidence_min": 0.50,
+      "expected_confidence_max": 0.85
+    },
+    {
+      "case_id": "am-011",
+      "description": "IP with tenant copyright in HTTP body but no WHOIS or cloud match",
+      "entity_type": "ip",
+      "canonical_identifier": "192.0.2.50",
+      "observations": [
+        {
+          "collector_id": "active-http",
+          "status_code": 200,
+          "body_snippet": "Copyright 2026 Acme Corp. All rights reserved.",
+          "server_header": "Apache/2.4"
+        }
+      ],
+      "expected_attribution": "medium",
+      "expected_confidence_min": 0.40,
+      "expected_confidence_max": 0.70
+    },
+    {
+      "case_id": "am-012",
+      "description": "Domain with expired cert that previously matched tenant -- stale signal",
+      "entity_type": "domain",
+      "canonical_identifier": "legacy-app.example.com",
+      "observations": [
+        {
+          "collector_id": "cert-transparency",
+          "subject": "legacy-app.example.com",
+          "issuer": "Let's Encrypt",
+          "not_after": "2025-06-01T00:00:00Z",
+          "expired": true
+        },
+        {
+          "collector_id": "active-http",
+          "status_code": 502,
+          "server_header": "cloudflare"
+        }
+      ],
+      "expected_attribution": "high",
+      "expected_confidence_min": 0.50,
+      "expected_confidence_max": 0.85
+    },
+    {
+      "case_id": "am-013",
+      "description": "IP with banner showing tenant product name but hosted at third-party DC",
+      "entity_type": "ip",
+      "canonical_identifier": "192.0.2.123",
+      "observations": [
+        {
+          "collector_id": "banner-grab",
+          "port": 8443,
+          "banner": "AcmeProduct Enterprise v5.2",
+          "service": "https"
+        },
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Equinix Data Center",
+          "matches_tenant": false
+        }
+      ],
+      "expected_attribution": "high",
+      "expected_confidence_min": 0.50,
+      "expected_confidence_max": 0.85
+    },
+    {
+      "case_id": "am-014",
+      "description": "Domain resolving to tenant IP range but with privacy-protected WHOIS",
+      "entity_type": "domain",
+      "canonical_identifier": "mystery-service.example.org",
+      "observations": [
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "REDACTED FOR PRIVACY",
+          "matches_tenant": false,
+          "privacy_protected": true
+        }
+      ],
+      "expected_attribution": "medium",
+      "expected_confidence_min": 0.40,
+      "expected_confidence_max": 0.70
+    },
+    {
+      "case_id": "am-015",
+      "description": "MX record pointing to tenant mail server but domain owned by partner",
+      "entity_type": "domain",
+      "canonical_identifier": "partner-comms.example.com",
+      "observations": [
+        {
+          "collector_id": "active-dns",
+          "record_type": "MX",
+          "value": "mail.acme.example.com",
+          "priority": 10
+        },
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Partner Communications Ltd",
+          "matches_tenant": false
+        }
+      ],
+      "expected_attribution": "high",
+      "expected_confidence_min": 0.50,
+      "expected_confidence_max": 0.85
     }
   ]
 }

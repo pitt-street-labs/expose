@@ -153,9 +153,10 @@ observability:
     endpoint: ""            # otlp://prometheus.observability.svc:4317 etc.
     insecure: false
 
-  # Bundled "everything included" subchart deferred to #7.
-  bundled:
-    enabled: false
+  # Bundled Prometheus + Grafana subchart (#7). Opt-in for operators without
+  # an existing monitoring stack. To enable, set `expose-observability.enabled`
+  # to true in the subchart overrides section below (or pass
+  # --set expose-observability.enabled=true at install time).
 
   # Prometheus scrape annotations on pods. Enable to have Prometheus
   # auto-discover and scrape the /metrics endpoint.
@@ -271,3 +272,20 @@ runSchedule:
   # Per-tenant cron expression for default daily runs. Operators override
   # per-tenant via tenant config (Phase 3 admin API).
   defaultCron: "0 2 * * *"  # 02:00 UTC daily
+
+# === Subchart overrides =====================================================
+# Values passed to the expose-observability subchart. The `condition` field
+# in Chart.yaml gates inclusion; these values configure the subchart when
+# enabled. Operators enable via `observability.bundled.enabled: true` which
+# triggers the condition AND sets `expose-observability.enabled: true` below.
+expose-observability:
+  enabled: false
+  prometheus:
+    retention: 7d
+    resources:
+      requests: { cpu: "100m", memory: "256Mi" }
+      limits:   { memory: "512Mi" }
+  grafana:
+    resources:
+      requests: { cpu: "50m", memory: "128Mi" }
+      limits:   { memory: "256Mi" }

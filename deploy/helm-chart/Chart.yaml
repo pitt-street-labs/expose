@@ -20,6 +20,11 @@ sources:
 maintainers:
   - name: Korlogos / Pitt Street Labs
 icon: https://expose.korlogos.com/icon.png
+dependencies:
+  - name: expose-observability
+    version: "0.1.0"
+    repository: "file://charts/observability"
+    condition: expose-observability.enabled
 annotations:
   category: Security
   licenses: Apache-2.0

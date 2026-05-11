@@ -180,21 +180,69 @@ async def test_binary_round_trip(backend: LocalStorageBackend) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 11. S3 stub raises NotImplementedError
+# 11. S3 backend requires boto3 or a client
 # ---------------------------------------------------------------------------
-async def test_s3_stub_raises() -> None:
-    """Every method on the S3 stub raises NotImplementedError."""
-    s3 = S3StorageBackend(bucket="test-bucket")
-    with pytest.raises(NotImplementedError, match="S3 backend not yet implemented"):
-        await s3.put("key", b"data")
-    with pytest.raises(NotImplementedError, match="S3 backend not yet implemented"):
-        await s3.get("key")
-    with pytest.raises(NotImplementedError, match="S3 backend not yet implemented"):
-        await s3.exists("key")
-    with pytest.raises(NotImplementedError, match="S3 backend not yet implemented"):
-        await s3.delete("key")
-    with pytest.raises(NotImplementedError, match="S3 backend not yet implemented"):
-        await s3.list_keys()
+def test_s3_requires_boto3_or_client() -> None:
+    """S3StorageBackend raises ImportError without boto3 and no client."""
+    import expose.storage.s3 as s3_module
+
+    original_boto3 = s3_module._boto3
+    try:
+        s3_module._boto3 = None
+        with pytest.raises(ImportError, match="boto3 is required"):
+            S3StorageBackend(bucket="test-bucket")
+    finally:
+        s3_module._boto3 = original_boto3
+
+
+async def test_s3_with_mock_client_works() -> None:
+    """S3StorageBackend with a mock client can put/get/exists/delete/list."""
+    from unittest.mock import MagicMock
+
+    store: dict[str, dict] = {}
+    client = MagicMock()
+
+    def put_object(*, Bucket, Key, Body, **kw):
+        store[Key] = {"Body": Body}
+
+    def get_object(*, Bucket, Key, **kw):
+        if Key not in store:
+            raise Exception("NoSuchKey")
+        body = MagicMock()
+        body.read = MagicMock(return_value=store[Key]["Body"])
+        return {"Body": body}
+
+    def head_object(*, Bucket, Key, **kw):
+        if Key not in store:
+            raise Exception("404")
+        return {}
+
+    def delete_object(*, Bucket, Key, **kw):
+        store.pop(Key, None)
+
+    def list_objects_v2(*, Bucket, **kw):
+        prefix = kw.get("Prefix", "")
+        return {
+            "Contents": [{"Key": k} for k in sorted(store) if k.startswith(prefix)],
+            "IsTruncated": False,
+        }
+
+    client.put_object = MagicMock(side_effect=put_object)
+    client.get_object = MagicMock(side_effect=get_object)
+    client.head_object = MagicMock(side_effect=head_object)
+    client.delete_object = MagicMock(side_effect=delete_object)
+    client.list_objects_v2 = MagicMock(side_effect=list_objects_v2)
+
+    s3 = S3StorageBackend(bucket="test-bucket", client=client)
+
+    uri = await s3.put("key", b"data")
+    assert uri == "s3://test-bucket/key"
+    assert await s3.get("key") == b"data"
+    assert await s3.exists("key") is True
+    assert await s3.delete("key") is True
+    assert await s3.exists("key") is False
+    keys = await s3.list_keys()
+    assert keys == []
 
 
 # ---------------------------------------------------------------------------

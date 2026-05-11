@@ -1,0 +1,51 @@
+{{- if .Values.enabled }}
+=== EXPOSE Observability Stack ================================================
+
+Bundled Prometheus + Grafana monitoring has been deployed.
+
+Prometheus:
+  - Retention: {{ .Values.prometheus.retention }}
+  - Scraping: {{ .Release.Name }}-control-plane:{{ .Values.prometheus.scrape.port }}{{ .Values.prometheus.scrape.path }}
+  - Interval: {{ .Values.prometheus.scrape.interval }}
+
+Grafana:
+  - Two EXPOSE dashboards auto-provisioned:
+    * expose-overview  — pipeline health, entity counts, error rates
+    * expose-tenant    — per-tenant scan metrics, collector performance
+
+To access Grafana:
+
+  kubectl port-forward svc/{{ .Release.Name }}-grafana 3000:80 -n {{ .Release.Namespace }}
+
+  Default credentials (from kube-prometheus-stack):
+    Username: admin
+    Password: kubectl get secret {{ .Release.Name }}-grafana -n {{ .Release.Namespace }} \
+              -o jsonpath="{.data.admin-password}" | base64 -d
+
+Key metrics to watch:
+  - expose_pipeline_runs_total        — completed scan runs
+  - expose_pipeline_entities_total    — discovered entities
+  - expose_pipeline_duration_seconds  — pipeline stage latency
+  - expose_pipeline_errors_total      — error counts by stage
+
+For production deployments, consider disabling this subchart and wiring
+the EXPOSE /metrics endpoint to your existing monitoring stack. See:
+  deploy/grafana/README.md  — standalone dashboard import instructions
+
+{{- else }}
+
+=== EXPOSE Observability Stack (DISABLED) =====================================
+
+The bundled observability stack is not enabled. To enable it, set:
+
+  observability:
+    bundled:
+      enabled: true
+
+Or pass --set observability.bundled.enabled=true at install time.
+
+Operators with existing Prometheus can scrape EXPOSE metrics using the
+annotations on the control-plane Service (observability.prometheus.enabled
+in the parent chart values).
+
+{{- end }}

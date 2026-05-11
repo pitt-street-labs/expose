@@ -1,0 +1,23 @@
+apiVersion: v2
+name: expose-observability
+description: |
+  Optional bundled monitoring stack (Prometheus + Grafana) for EXPOSE Core.
+  Enable for deployments without an existing observability backend. Wraps
+  kube-prometheus-stack with pre-configured scrape targets and Grafana
+  dashboards for the EXPOSE pipeline metrics.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - monitoring
+  - prometheus
+  - grafana
+  - observability
+home: https://github.com/korlogos/expose
+maintainers:
+  - name: Korlogos / Pitt Street Labs
+dependencies:
+  - name: kube-prometheus-stack
+    version: ">=61.0.0"
+    repository: https://prometheus-community.github.io/helm-charts
+    condition: enabled

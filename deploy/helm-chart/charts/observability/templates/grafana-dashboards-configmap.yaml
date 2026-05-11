@@ -1,0 +1,22 @@
+{{- if .Values.enabled }}
+{{- if .Values.grafana.dashboards.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-expose-grafana-dashboards
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: expose-observability
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: expose
+    {{ .Values.grafana.dashboards.label }}: {{ .Values.grafana.dashboards.labelValue | quote }}
+  annotations:
+    helm.sh/hook-weight: "-5"
+data:
+  expose-overview.json: |-
+{{ .Files.Get "dashboards/expose-overview.json" | indent 4 }}
+  expose-tenant.json: |-
+{{ .Files.Get "dashboards/expose-tenant.json" | indent 4 }}
+{{- end }}
+{{- end }}
