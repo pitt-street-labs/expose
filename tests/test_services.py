@@ -645,6 +645,7 @@ class TestRunService:
                 pipeline_version="1.0.0",
                 state="completed",
                 started_at=datetime.now(UTC),
+                run_metadata={},
             )
             run2 = Run(
                 id=uuid4(),
@@ -652,6 +653,7 @@ class TestRunService:
                 pipeline_version="1.0.0",
                 state="pending",
                 started_at=datetime.now(UTC),
+                run_metadata={},
             )
             session.add(run1)
             session.add(run2)
@@ -684,6 +686,7 @@ class TestRunService:
                 pipeline_version="1.0.0",
                 state="running",
                 started_at=datetime.now(UTC),
+                run_metadata={},
             )
             session.add(run)
             await session.commit()
@@ -732,6 +735,7 @@ class TestRunService:
                 pipeline_version="1.0.0",
                 state="completed",
                 started_at=datetime.now(UTC),
+                run_metadata={},
             )
             session.add(run)
             await session.commit()
@@ -906,10 +910,12 @@ class TestRunService:
             session.add(Run(
                 id=uuid4(), tenant_id=tid_a, pipeline_version="1.0.0",
                 state="completed", started_at=datetime.now(UTC),
+                run_metadata={},
             ))
             session.add(Run(
                 id=uuid4(), tenant_id=tid_b, pipeline_version="1.0.0",
                 state="pending", started_at=datetime.now(UTC),
+                run_metadata={},
             ))
             await session.commit()
 

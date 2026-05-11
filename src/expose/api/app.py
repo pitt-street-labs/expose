@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from expose import __version__
 from expose.api.admin import router as admin_router
 from expose.api.credentials import router as credentials_router
+from expose.api.enforcement import router as enforcement_router
 from expose.api.events import router as events_router
 from expose.api.export import router as export_router
 from expose.api.findings import router as findings_router
@@ -138,6 +139,7 @@ async def _scheduler_run_trigger(
             pipeline_version=__version__,
             state="pending",
             started_at=_datetime.now(UTC),
+            run_metadata={},
         )
         session.add(run)
         await session.commit()
@@ -318,6 +320,7 @@ def create_app(
     app.include_router(credentials_router)
     app.include_router(export_router)
     app.include_router(findings_router)
+    app.include_router(enforcement_router)
     app.include_router(rbac_router)
     app.include_router(webhooks_router)
 

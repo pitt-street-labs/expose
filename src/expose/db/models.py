@@ -238,6 +238,11 @@ class Run(Base):
     canonical_artifact_ref: Mapped[str | None] = mapped_column(String(256), nullable=True)
     manifest_ref: Mapped[str | None] = mapped_column(String(256), nullable=True)
     target_count: Mapped[int | None] = mapped_column(nullable=True)
+    run_metadata: Mapped[dict[str, Any]] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"),
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
 
     tenant: Mapped[Tenant] = relationship(back_populates="runs")
 

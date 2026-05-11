@@ -102,43 +102,51 @@ class FaviconHashCollector(Collector):
         host = seed.value.strip()
         identifier_type, canonical_value = _resolve_identifier(host, seed.seed_type)
 
-        # Try HTTPS first, then HTTP.
-        schemes = ["https", "http"]
-        for scheme in schemes:
-            base_url = f"{scheme}://{host}"
-            result = await self._try_fetch_favicon(base_url)
-            if result is not None:
-                favicon_bytes, favicon_url, content_type = result
-                sha256_hash = compute_sha256_hex(favicon_bytes)
-                mmh3_hash = _compute_mmh3_hash(favicon_bytes)
+        # Create a single AsyncClient for the entire expand() call so that
+        # TCP/TLS connections are reused across scheme probes (issue #128).
+        async with httpx.AsyncClient(
+            verify=False,  # noqa: S501
+            timeout=self.config.request_timeout_seconds,
+            follow_redirects=True,
+            headers={"User-Agent": self.config.user_agent},
+        ) as client:
+            # Try HTTPS first, then HTTP.
+            schemes = ["https", "http"]
+            for scheme in schemes:
+                base_url = f"{scheme}://{host}"
+                result = await self._try_fetch_favicon(base_url, client)
+                if result is not None:
+                    favicon_bytes, favicon_url, content_type = result
+                    sha256_hash = compute_sha256_hex(favicon_bytes)
+                    mmh3_hash = _compute_mmh3_hash(favicon_bytes)
 
-                yield Observation(
-                    collector_id=self.collector_id,
-                    collector_version=self.collector_version,
-                    tenant_id=self.config.tenant_id,
-                    observation_type=ObservationType.HTTP_RESPONSE,
-                    subject=ObservationSubject(
-                        identifier_type=identifier_type,
-                        identifier_value=canonical_value,
-                    ),
-                    observed_at=datetime.now(tz=UTC),
-                    structured_payload={
-                        "favicon_sha256": sha256_hash,
-                        "favicon_mmh3": mmh3_hash,
-                        "favicon_size_bytes": len(favicon_bytes),
-                        "favicon_url": favicon_url,
-                        "favicon_content_type": content_type,
-                    },
-                    evidence_blob=favicon_bytes,
-                    evidence_blob_content_type=content_type,
-                )
-                return  # One favicon is enough.
+                    yield Observation(
+                        collector_id=self.collector_id,
+                        collector_version=self.collector_version,
+                        tenant_id=self.config.tenant_id,
+                        observation_type=ObservationType.HTTP_RESPONSE,
+                        subject=ObservationSubject(
+                            identifier_type=identifier_type,
+                            identifier_value=canonical_value,
+                        ),
+                        observed_at=datetime.now(tz=UTC),
+                        structured_payload={
+                            "favicon_sha256": sha256_hash,
+                            "favicon_mmh3": mmh3_hash,
+                            "favicon_size_bytes": len(favicon_bytes),
+                            "favicon_url": favicon_url,
+                            "favicon_content_type": content_type,
+                        },
+                        evidence_blob=favicon_bytes,
+                        evidence_blob_content_type=content_type,
+                    )
+                    return  # One favicon is enough.
 
         # No favicon found on any scheme/path — not an error, just no data.
         logger.debug("favicon-hash: no favicon found for host %s", host)
 
     async def _try_fetch_favicon(
-        self, base_url: str
+        self, base_url: str, client: httpx.AsyncClient
     ) -> tuple[bytes, str, str] | None:
         """Try to fetch a favicon from the given base URL.
 
@@ -148,26 +156,20 @@ class FaviconHashCollector(Collector):
             warnings.filterwarnings("ignore", category=DeprecationWarning)
             warnings.filterwarnings("ignore", message="Unverified HTTPS request")
             try:
-                async with httpx.AsyncClient(
-                    verify=False,  # noqa: S501
-                    timeout=self.config.request_timeout_seconds,
-                    follow_redirects=True,
-                    headers={"User-Agent": self.config.user_agent},
-                ) as client:
-                    for path in _FAVICON_PATHS:
-                        url = base_url + path
-                        try:
-                            resp = await client.get(url)
-                            if (
-                                resp.status_code == 200  # noqa: PLR2004
-                                and len(resp.content) > 0
-                            ):
-                                ct = resp.headers.get(
-                                    "content-type", "image/x-icon"
-                                )
-                                return resp.content, str(resp.url), ct
-                        except httpx.HTTPError:
-                            continue
+                for path in _FAVICON_PATHS:
+                    url = base_url + path
+                    try:
+                        resp = await client.get(url)
+                        if (
+                            resp.status_code == 200  # noqa: PLR2004
+                            and len(resp.content) > 0
+                        ):
+                            ct = resp.headers.get(
+                                "content-type", "image/x-icon"
+                            )
+                            return resp.content, str(resp.url), ct
+                    except httpx.HTTPError:
+                        continue
             except httpx.HTTPError:
                 return None
         return None
@@ -181,11 +183,11 @@ class FaviconHashCollector(Collector):
                 warnings.filterwarnings(
                     "ignore", message="Unverified HTTPS request"
                 )
-                async with httpx.AsyncClient(verify=False) as client:  # noqa: S501
-                    resp = await client.get(
-                        _HEALTH_CHECK_URL,
-                        timeout=self.config.request_timeout_seconds,
-                    )
+                async with httpx.AsyncClient(
+                    verify=False,  # noqa: S501
+                    timeout=self.config.request_timeout_seconds,
+                ) as client:
+                    resp = await client.get(_HEALTH_CHECK_URL)
             latency = (time.monotonic() - start) * 1000.0
             return CollectorHealthCheck(
                 collector_id=self.collector_id,

@@ -205,6 +205,8 @@ class RunExecutor:
         enrichment_pipeline: EnrichmentPipeline | None = None,
         log_sink: LogSink | None = None,
         event_bus: Any | None = None,
+        rule_pack: Any | None = None,
+        scope_context: Any | None = None,
     ) -> None:
         self._dispatcher = dispatcher
         self._run_repo = run_repo
@@ -215,6 +217,8 @@ class RunExecutor:
         self._enrichment = enrichment_pipeline
         self._log_sink = log_sink
         self._event_bus = event_bus
+        self._rule_pack = rule_pack
+        self._scope_context = scope_context
         self._dns_executor: ThreadPoolExecutor | None = None
 
     def _log(self, level: str, msg: str) -> None:
@@ -853,8 +857,15 @@ class RunExecutor:
             ``None`` signals an unhandled exception from the dispatcher.
             """
             self._log("info", f"Dispatching {collector_id} for {seed.value}")
+            await self._publish(
+                "collector_started",
+                run_id,
+                tenant_id,
+                data={"collector_id": collector_id, "seed_value": seed.value},
+            )
             async with semaphore:
                 try:
+                    _dispatch_start = time.monotonic_ns()
                     result = await asyncio.wait_for(
                         self._dispatcher.dispatch(job),
                         timeout=120.0,
@@ -869,6 +880,12 @@ class RunExecutor:
                         "warn",
                         f"{collector_id} dispatch timed out after 120s",
                     )
+                    await self._publish(
+                        "collector_failed",
+                        run_id,
+                        tenant_id,
+                        data={"collector_id": collector_id, "error": "timeout after 120s"},
+                    )
                     return (seed.value, collector_id, None)
                 except Exception as e:
                     logger.warning(
@@ -881,7 +898,40 @@ class RunExecutor:
                         "warn",
                         f"{collector_id} dispatch exception: {type(e).__name__}",
                     )
+                    await self._publish(
+                        "collector_failed",
+                        run_id,
+                        tenant_id,
+                        data={"collector_id": collector_id, "error": str(type(e).__name__)},
+                    )
                     return (seed.value, collector_id, None)
+
+                # Publish collector_completed or collector_failed based on result
+                if result.status == "success":
+                    await self._publish(
+                        "collector_completed",
+                        run_id,
+                        tenant_id,
+                        data={
+                            "collector_id": collector_id,
+                            "observation_count": len(result.observations),
+                            "duration_ms": result.duration_ms,
+                        },
+                    )
+                elif result.status in ("skipped", "health_check_failed", "denied"):
+                    # Not a failure per se — skip event publishing for these
+                    pass
+                else:
+                    await self._publish(
+                        "collector_failed",
+                        run_id,
+                        tenant_id,
+                        data={
+                            "collector_id": collector_id,
+                            "error": result.error_message or "unknown",
+                        },
+                    )
+
                 return (seed.value, collector_id, result)
 
         tasks = [
@@ -1065,6 +1115,10 @@ class RunExecutor:
         # --- Lead scoring (post-upsert, pre-relationship) -------------------
         if entity_map:
             from expose.pipeline.lead_scoring import LeadScoringEngine  # noqa: PLC0415
+            from expose.pipeline.environment_classifier import (  # noqa: PLC0415
+                EnvironmentClassification,
+                EnvironmentClassifier,
+            )
 
             # Pre-build O(M) lookup to avoid O(N*M) scan per entity
             obs_by_entity: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -1074,13 +1128,49 @@ class RunExecutor:
                 )
 
             scorer = LeadScoringEngine()
+            env_classifier = EnvironmentClassifier()
             for canonical_id, entity in entity_map.items():
                 try:
                     obs_for_entity = obs_by_entity.get(canonical_id, [])
-                    score_result = scorer.score_entity(
-                        entity_identifier=canonical_id,
-                        observations=obs_for_entity,
-                    )
+                    old_score = (entity.properties or {}).get("_lead_score")
+
+                    # --- Extract structured data from observations for full signal wiring ---
+                    scoring_kwargs: dict[str, Any] = {
+                        "entity_identifier": canonical_id,
+                        "observations": obs_for_entity,
+                    }
+
+                    # WAF detection: look for waf-detection collector observations
+                    for obs_dict in obs_for_entity:
+                        if obs_dict.get("_collector_id") == "waf-detection":
+                            scoring_kwargs["waf_detected"] = obs_dict.get("waf_detected", False)
+                            break
+
+                    # DNSBL listings: collect dns-blacklist observations
+                    dnsbl_obs = [
+                        obs_dict for obs_dict in obs_for_entity
+                        if obs_dict.get("_collector_id") == "dns-blacklist"
+                    ]
+                    if dnsbl_obs:
+                        scoring_kwargs["dnsbl_listings"] = dnsbl_obs
+
+                    # Environment classification from observations
+                    try:
+                        env_result = env_classifier.classify(
+                            entity_identifier=canonical_id,
+                            observations=obs_for_entity,
+                        )
+                        scoring_kwargs["environment"] = env_result
+                    except Exception:
+                        pass  # Non-critical — proceed without environment data
+
+                    # M&A transitive: check for ma-discovery collector
+                    for obs_dict in obs_for_entity:
+                        if obs_dict.get("_collector_id") == "ma-discovery":
+                            scoring_kwargs["is_transitive_ma"] = True
+                            break
+
+                    score_result = scorer.score_entity(**scoring_kwargs)
                     updated_props = dict(entity.properties or {})
                     updated_props["_lead_score"] = score_result.score
                     updated_props["_priority_tier"] = score_result.priority_tier.value
@@ -1092,8 +1182,66 @@ class RunExecutor:
                         attribution_status=entity.attribution_status,
                         attribution_confidence=entity.attribution_confidence,
                     )
+
+                    # Publish attribution_updated event when score changes
+                    if old_score is not None and old_score != score_result.score:
+                        await self._publish(
+                            "attribution_updated",
+                            run_id,
+                            tenant_id,
+                            data={
+                                "entity_id": canonical_id,
+                                "old_score": old_score,
+                                "new_score": score_result.score,
+                                "priority_tier": score_result.priority_tier.value,
+                            },
+                        )
                 except Exception:
                     logger.exception("Lead scoring failed for %s", canonical_id)
+
+            # --- Temporal analysis (post-lead-scoring) -------------------------
+            # Detect progression patterns from historical observations.
+            try:
+                from expose.pipeline.temporal_analysis import TemporalAnalyzer  # noqa: PLC0415
+
+                analyzer = TemporalAnalyzer()
+                for canonical_id, entity in entity_map.items():
+                    obs_for_entity = obs_by_entity.get(canonical_id, [])
+                    if len(obs_for_entity) >= 2:  # Need at least 2 snapshots
+                        try:
+                            result = analyzer.analyze(canonical_id, obs_for_entity)
+                            if result.patterns:
+                                updated_props = dict(entity.properties or {})
+                                updated_props["_temporal_patterns"] = [
+                                    {
+                                        "type": p.pattern_type,
+                                        "severity": p.severity,
+                                        "description": p.description,
+                                    }
+                                    for p in result.patterns
+                                ]
+                                updated_props["_temporal_score_delta"] = (
+                                    result.temporal_score_delta
+                                )
+                                # Add temporal delta to lead score
+                                current_score = updated_props.get("_lead_score", 0)
+                                updated_props["_lead_score"] = min(
+                                    100, current_score + result.temporal_score_delta
+                                )
+                                await self._entity_repo.create_or_update(
+                                    tenant_id=TenantId(tenant_id),
+                                    entity_type=entity.entity_type,
+                                    canonical_identifier=canonical_id,
+                                    properties=updated_props,
+                                    attribution_status=entity.attribution_status,
+                                    attribution_confidence=entity.attribution_confidence,
+                                )
+                        except Exception:
+                            logger.exception(
+                                "Temporal analysis failed for %s", canonical_id
+                            )
+            except Exception:
+                logger.exception("Temporal analysis setup failed")
 
         # --- Stage 4 (cont): Relationship extraction -------------------------
         if self._relationship_repo is not None:

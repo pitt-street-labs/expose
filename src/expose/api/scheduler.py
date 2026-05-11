@@ -22,7 +22,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from expose.api.auth import AuthDependency, TokenPayload, TokenStore
+from expose.api.auth import AuthDependency, TokenPayload, default_token_store
 from expose.pipeline.scheduler import CronExpression
 
 logger = logging.getLogger(__name__)
@@ -30,8 +30,17 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Authentication
 # ---------------------------------------------------------------------------
+# CSRF note (issue #157): These endpoints use Bearer token authentication,
+# not cookie-based sessions.  CSRF attacks rely on the browser automatically
+# attaching ambient credentials (cookies) to cross-origin requests; Bearer
+# tokens must be explicitly attached by client-side code, so CSRF is not
+# applicable here by design.  No CSRF middleware is needed.
+# ---------------------------------------------------------------------------
 
-token_store = TokenStore()
+#: Re-export the shared token store so tests can reach it at the same path
+#: they used before (``from expose.api.scheduler import token_store``).
+token_store = default_token_store
+
 _require_read = AuthDependency(token_store, required_scope="read")
 _require_write = AuthDependency(token_store, required_scope="write")
 

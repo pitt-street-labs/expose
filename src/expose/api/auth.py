@@ -95,6 +95,17 @@ class TokenStore:
 
 
 # ---------------------------------------------------------------------------
+# Module-level singleton
+# ---------------------------------------------------------------------------
+
+#: Canonical shared token store.  Every router that needs token auth MUST
+#: import this instance rather than creating its own ``TokenStore()`` —
+#: otherwise tokens issued through one router won't validate on another
+#: (CVSS 9.1 — see issue #127).
+default_token_store: TokenStore = TokenStore()
+
+
+# ---------------------------------------------------------------------------
 # FastAPI dependency
 # ---------------------------------------------------------------------------
 

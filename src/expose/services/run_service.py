@@ -23,6 +23,9 @@ from expose.db.models import Entity, Run, Tenant
 
 
 def _run_to_response(run: Run) -> RunResponse:
+    meta = getattr(run, "run_metadata", None) or {}
+    refusals = meta.get("enforcement_refusals")
+    refusal_count = len(refusals) if refusals is not None else None
     return RunResponse(
         id=run.id,
         tenant_id=run.tenant_id,
@@ -30,6 +33,7 @@ def _run_to_response(run: Run) -> RunResponse:
         started_at=run.started_at,
         completed_at=run.completed_at,
         pipeline_version=run.pipeline_version,
+        enforcement_refusal_count=refusal_count,
     )
 
 
@@ -132,6 +136,7 @@ class RunService:
             pipeline_version=__version__,
             state="pending",
             started_at=_datetime.now(UTC),
+            run_metadata={},
         )
         self._session.add(run)
         await self._session.flush()

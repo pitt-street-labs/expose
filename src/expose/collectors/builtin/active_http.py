@@ -182,25 +182,38 @@ class ActiveHttpCollector(Collector):
         all_failed = True
         warnings_list: list[str] = []
 
-        for url in urls:
-            try:
-                await self._rate_limiter.acquire(host)
-                observation = await self._probe_url(
-                    url=url,
-                    host=host,
-                    identifier_type=identifier_type,
-                    canonical_value=canonical_value,
-                )
-                all_failed = False
-                yield observation
-            except (httpx.ConnectError, httpx.ConnectTimeout, OSError) as exc:
-                msg = f"Connection failed for {url}: {exc}"
-                warnings_list.append(msg)
-                logger.debug(msg)
-            except httpx.TooManyRedirects as exc:
-                msg = f"Too many redirects for {url}: {exc}"
-                warnings_list.append(msg)
-                logger.debug(msg)
+        # Create a single AsyncClient for the entire expand() call so that
+        # TCP/TLS connections are reused across HTTP and HTTPS probes for
+        # the same host (issue #128).
+        egress_kwargs = self._egress_httpx_kwargs()
+        async with httpx.AsyncClient(
+            **egress_kwargs,
+            verify=False,  # noqa: S501
+            max_redirects=5,
+            timeout=self.config.request_timeout_seconds,
+            follow_redirects=True,
+        ) as client:
+            client.headers["User-Agent"] = self.config.user_agent
+            for url in urls:
+                try:
+                    await self._rate_limiter.acquire(host)
+                    observation = await self._probe_url(
+                        url=url,
+                        host=host,
+                        identifier_type=identifier_type,
+                        canonical_value=canonical_value,
+                        client=client,
+                    )
+                    all_failed = False
+                    yield observation
+                except (httpx.ConnectError, httpx.ConnectTimeout, OSError) as exc:
+                    msg = f"Connection failed for {url}: {exc}"
+                    warnings_list.append(msg)
+                    logger.debug(msg)
+                except httpx.TooManyRedirects as exc:
+                    msg = f"Too many redirects for {url}: {exc}"
+                    warnings_list.append(msg)
+                    logger.debug(msg)
 
         if all_failed:
             raise CollectorSourceUnreachableError(
@@ -219,11 +232,11 @@ class ActiveHttpCollector(Collector):
                 warnings.filterwarnings(
                     "ignore", message="Unverified HTTPS request"
                 )
-                async with httpx.AsyncClient(verify=False) as client:  # noqa: S501
-                    resp = await client.head(
-                        _HEALTH_CHECK_URL,
-                        timeout=self.config.request_timeout_seconds,
-                    )
+                async with httpx.AsyncClient(
+                    verify=False,  # noqa: S501
+                    timeout=self.config.request_timeout_seconds,
+                ) as client:
+                    resp = await client.head(_HEALTH_CHECK_URL)
             latency = (time.monotonic() - start) * 1000.0
             return CollectorHealthCheck(
                 collector_id=self.collector_id,
@@ -267,21 +280,13 @@ class ActiveHttpCollector(Collector):
         host: str,
         identifier_type: IdentifierType,
         canonical_value: str,
+        client: httpx.AsyncClient,
     ) -> Observation:
         """Issue a GET to ``url`` and build an Observation from the response."""
-        egress_kwargs = self._egress_httpx_kwargs()
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=DeprecationWarning)
             warnings.filterwarnings("ignore", message="Unverified HTTPS request")
-            async with httpx.AsyncClient(
-                **egress_kwargs,
-                verify=False,  # noqa: S501
-                max_redirects=5,
-                timeout=self.config.request_timeout_seconds,
-                follow_redirects=True,
-            ) as client:
-                client.headers["User-Agent"] = self.config.user_agent
-                response = await client.get(url)
+            response = await client.get(url)
 
         payload = _build_payload(response)
         evidence = _build_evidence_blob(response)

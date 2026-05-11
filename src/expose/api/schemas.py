@@ -80,6 +80,7 @@ class RunResponse(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
     pipeline_version: str | None
+    enforcement_refusal_count: int | None = None
 
 
 class RunList(BaseModel):

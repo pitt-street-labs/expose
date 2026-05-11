@@ -19,7 +19,7 @@ import asyncio
 import ipaddress
 import logging
 import re
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 from uuid import UUID
 
 if TYPE_CHECKING:
@@ -60,6 +60,9 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
 def _run_to_response(run: Run) -> RunResponse:
+    meta = getattr(run, "run_metadata", None) or {}
+    refusals = meta.get("enforcement_refusals")
+    refusal_count = len(refusals) if refusals is not None else None
     return RunResponse(
         id=run.id,
         tenant_id=run.tenant_id,
@@ -67,6 +70,7 @@ def _run_to_response(run: Run) -> RunResponse:
         started_at=run.started_at,
         completed_at=run.completed_at,
         pipeline_version=run.pipeline_version,
+        enforcement_refusal_count=refusal_count,
     )
 
 
@@ -325,6 +329,56 @@ async def _run_pipeline_background(
                             exc_info=True,
                         )
 
+                # --- Rule pack loading (issue #96) ---
+                rule_pack = None
+                scope_context = None
+                try:
+                    import pathlib  # noqa: PLC0415
+                    from expose.types.rulepack import RulePack  # noqa: PLC0415
+                    from expose.types.pipeline import ScopeContext  # noqa: PLC0415
+
+                    rule_pack_id = tenant_cfg.get("rule_pack_id")
+                    rulepacks_dir = (
+                        pathlib.Path(__file__).resolve().parent.parent.parent
+                        / "examples"
+                        / "rulepacks"
+                    )
+
+                    if rule_pack_id:
+                        pack_file = rulepacks_dir / f"{rule_pack_id}.json"
+                    else:
+                        pack_file = rulepacks_dir / "example-baseline.json"
+
+                    if pack_file.exists():
+                        rule_pack = RulePack.model_validate_json(
+                            pack_file.read_text()
+                        )
+                        logger.info(
+                            "Loaded rule pack %s from %s",
+                            rule_pack.pack_id,
+                            pack_file.name,
+                        )
+
+                    # Build ScopeContext from seeds
+                    seed_values_list = [s.value for s in seeds]
+                    apex_domains: list[str] = []
+                    for s in seeds:
+                        if s.seed_type.value == "domain":
+                            apex_domains.append(s.value)
+
+                    scope_context = ScopeContext(
+                        explicit_entity_identifiers=seed_values_list,
+                        apex_domains=apex_domains,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to load rule pack (run will proceed without "
+                        "rule-based attribution): run_id=%s tenant_id=%s",
+                        run_id,
+                        tenant_id,
+                        exc_info=True,
+                    )
+
                 executor = RunExecutor(
                     dispatcher=dispatcher,  # type: ignore[arg-type]
                     run_repo=run_repo,
@@ -333,6 +387,8 @@ async def _run_pipeline_background(
                     enrichment_pipeline=enrichment_pipeline,
                     log_sink=log_sink,
                     event_bus=event_bus,
+                    rule_pack=rule_pack,
+                    scope_context=scope_context,
                 )
 
                 await executor.execute(
@@ -343,6 +399,7 @@ async def _run_pipeline_background(
                 )
 
                 # --- Serialize enforcement refusals into run log ---
+                refusals_data: list[dict[str, Any]] = []
                 if enforcement_log.refusal_count > 0:
                     refusals_data = [
                         r.model_dump(mode="json")
@@ -360,6 +417,17 @@ async def _run_pipeline_background(
                             f"Enforcement: {enforcement_log.refusal_count} "
                             f"dispatch(es) denied by scope/tier gate",
                         )
+
+                # --- Persist enforcement refusals to run metadata ---
+                run = await run_repo.get_by_id(
+                    tenant_id=TenantId(tenant_id),
+                    run_id=RunId(run_id),
+                )
+                if run is not None:
+                    existing_meta = run.run_metadata or {}
+                    existing_meta["enforcement_refusals"] = refusals_data
+                    run.run_metadata = existing_meta
+                    await session.flush()
 
                 await session.commit()
             except Exception:
@@ -451,6 +519,7 @@ async def start_run(
         pipeline_version=__version__,
         state="pending",
         started_at=_datetime.now(UTC),
+        run_metadata={},
     )
     session.add(run)
     await session.flush()

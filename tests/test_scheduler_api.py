@@ -236,6 +236,7 @@ async def _seed_run(
             state=state,
             started_at=datetime.now(UTC),
             target_count=None,
+            run_metadata={},
         )
         session.add(run)
         await session.commit()

@@ -65,6 +65,7 @@ class RunRepository:
             pipeline_version=pipeline_version,
             state="pending",
             target_count=target_count,
+            run_metadata={},
         )
         self._session.add(run)
         await self._session.flush()
