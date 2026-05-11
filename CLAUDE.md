@@ -71,7 +71,7 @@ This repository (`pitt-street-labs/ff6k` on internal Gitea — repo path retains
 | Helm chart | `deploy/helm-chart/` (skeleton — full per-component manifests land Sprint 5+) |
 | CI workflow | `.github/workflows/ci.yml` (lint + test + schema-sync + FIPS gate + helm-lint + multi-arch container build + ci-gate aggregator) |
 | Pre-commit | `.pre-commit-config.yaml` (ruff + gitleaks + check-jsonschema + helm lint) |
-| Tests | `tests/` — **1059 tests passing as of d881c9a.** 61 test files, 111 source files. Conftest provides `pg_container` + `nats_container` shared session fixtures. aiosqlite for fast API unit tests. |
+| Tests | `tests/` — **1032/1033 tests passing as of cfcf188** (1 pre-existing failure: `test_findings_api::test_limit_parameter`, tracked in #73). 61 test files, 111 source files. Conftest provides `pg_container` + `nats_container` shared session fixtures. aiosqlite for fast API unit tests. |
 | Deploy artifacts | `deploy/helm-chart/` (NetworkPolicy + PodSecurity hardened), `deploy/cosign-keypair-setup.md`, `deploy/grafana/` (2 dashboards + README), `scripts/generate-sbom.sh` |
 | Strategy docs | `docs/strategy/` — postgres-deployment-guide, lab-to-production-runbook, network-security-guide, sbom-and-signing-guide, air-gap-deployment-guide, persona-analysis, competitive-analysis, framework-annotation, sdlp, federal-customer-deployment-guide, critical-path |
 | GitHub-launch docs | `README.md` (public-facing), `CHANGELOG.md`, `ROADMAP.md`, `GOVERNANCE.md`, `CONTRIBUTING.md` (rewritten for public), `docs/collectors.md` (14-collector catalog), `docs/quickstart.md`, `docs/why-expose.md`, `docs/use-cases.md` |
@@ -82,8 +82,10 @@ This repository (`pitt-street-labs/ff6k` on internal Gitea — repo path retains
 
 ## Issue tracker conventions
 
-- **30+ closed / 20+ open / 52 total.** v1-tagged: all closed. All original high-priority issues closed.
+- **30+ closed / 20+ open / 73 total.** v1-tagged: all closed. All original high-priority issues closed.
 - New issues from Pre-Push session: #48 (screenshot vision), #49 (trust degradation), #50 (WAF/origin discovery), #51 (dark web indicators), #52 (legal/social mentions).
+- #72 (UI stabilization) closed 2026-05-11: D3 graph, null guards, filter, split-pane, health checks.
+- #73 (test_findings_api failure) opened 2026-05-11: pre-existing, `test_limit_parameter` returns 0 findings.
 - Labels follow `epic:<slug>`, `area:<slug>`, `priority:<level>`, `type:<kind>`.
 - Reference issues by number in commits: `Closes #N` or `Refs #N`.
 - New work discovered during a session → file an issue immediately (Tier 3, pre-authorized) rather than letting it slip.
@@ -107,6 +109,10 @@ Following `~/CLAUDE.md` change control:
 - **Agent `isolation: worktree` parameter is broken in this lab session** because the Agent tool's "is git repo" check uses the env snapshot from session start (when `ff6k-handoff.tar.gz` was just extracted, before `git init`). Workaround: create worktrees manually with `git worktree add .claude/worktrees/<name> -b <branch> main`, then spawn agents WITHOUT `isolation: worktree` and have them `cd <worktree-path>` as their first action. Confirmed working in Wave 1 (6 parallel agents, zero conflicts on disjoint write scopes).
 - **testcontainers[nats] 4.14.2 emits `DeprecationWarning`s** for `@wait_container_is_ready` decorator + string-predicate `wait_for_logs`. Project-wide `filterwarnings = ["error"]` in pyproject would fail those tests. W1.A used a narrow per-file `pytestmark = [pytest.mark.filterwarnings("default::DeprecationWarning")]` in `tests/test_broker.py` to override. Strict default remains in force everywhere else.
 - **Multi-LLM activation pattern** for Gemini + ChatGPT MCP tools is in `~/.claude/projects/-home-jcarlson-projects-ff6k/memory/multi-llm-mcp-activation.md` — concrete symlink + json-patch commands, plus the vault-fetched wrapper that replaces plaintext key exports.
+- **D3 graph.js must be loaded before expose.js in base.html** — `ExposeGraph` is defined in `graph.js` but consumed by `expose.js`. Missing this caused silent graph failure (typeof check returned undefined, `_initGraphAndPoll` returned early).
+- **Alpine.js evaluates x-model bindings even on x-show=false elements.** Never null out objects used in x-model; reset to default empty objects and use separate `_loaded` flags for loading state detection.
+- **Docker-compose alembic config issue:** Container fails with "No 'script_location' key found" because WORKDIR is `/app` but `alembic.ini` references relative paths. Dev server (`uvicorn` direct) works; container needs alembic.ini path fix. Pre-existing, not introduced by #72.
+- **Dev server launch:** `EXPOSE_DB_HOST=localhost ... .venv/bin/python3 -c "from expose.api.app import create_app; import uvicorn; uvicorn.run(create_app(enable_otel=False), host='0.0.0.0', port=8090)"` — requires postgres running (docker-compose postgres service or local).
 
 ## Subsequent session order (recommended)
 
