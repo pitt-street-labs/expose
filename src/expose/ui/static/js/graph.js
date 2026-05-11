@@ -97,6 +97,18 @@ const ExposeGraph = (() => {
     let tooltip = null;
     let deruKuiTooltip = null;
 
+    // --- Filter state ----------------------------------------------------
+    /** Active filter criteria.  Updated by setFilters(). */
+    let activeFilters = {
+        entityTypes:     new Set(["domain", "ip", "cloud_resource_id", "certificate_fingerprint", "organization", "provider"]),
+        edgeTypes:       new Set(["resolves_to", "cname_for", "mx_for", "ns_for", "certificate_for", "hosts", "belongs_to", "acquired_by", "depends_on"]),
+        attributionTiers: new Set(["confirmed", "high", "medium", "unattributed"]),
+        minConfidence:   0.0,
+    };
+
+    /** Listeners notified when visible counts change after filtering. */
+    let filterChangeListeners = [];
+
     // --- Visual property helpers ------------------------------------------
 
     /** Base 6 px, +2 px per collector signal, capped at 10 signals.
@@ -141,6 +153,92 @@ const ExposeGraph = (() => {
 
     function linkColor(d) {
         return EDGE_COLORS[d.relationship_type] || EDGE_COLORS.default;
+    }
+
+    // --- Filter helpers ----------------------------------------------------
+
+    /**
+     * Determine whether a node passes the current filter criteria.
+     * A node is visible when its entity_type, attribution_status, and
+     * attribution_confidence all satisfy the active filters.
+     *
+     * @param {object} d  D3 node datum
+     * @returns {boolean}
+     */
+    function nodePassesFilter(d) {
+        if (!activeFilters.entityTypes.has(d.entity_type)) return false;
+
+        // Map attribution_status to the tier buckets used by the filter panel.
+        // "seed", "requires_review", and "not_yours" map to "unattributed".
+        const tier = (d.attribution_status === "confirmed" ||
+                      d.attribution_status === "high" ||
+                      d.attribution_status === "medium")
+            ? d.attribution_status
+            : "unattributed";
+        if (!activeFilters.attributionTiers.has(tier)) return false;
+
+        if ((d.attribution_confidence || 0) < activeFilters.minConfidence) return false;
+
+        return true;
+    }
+
+    /**
+     * Determine whether an edge passes the current filter criteria.
+     * An edge is visible when its relationship_type is enabled AND both
+     * its source and target nodes are themselves visible.
+     *
+     * @param {object} d  D3 link datum (source/target may be objects or ids)
+     * @returns {boolean}
+     */
+    function edgePassesFilter(d) {
+        if (!activeFilters.edgeTypes.has(d.relationship_type)) return false;
+
+        // D3 resolves source/target to objects after the first tick.
+        const srcId = typeof d.source === "object" ? d.source.id : d.source;
+        const tgtId = typeof d.target === "object" ? d.target.id : d.target;
+
+        const srcNode = nodeMap.get(srcId);
+        const tgtNode = nodeMap.get(tgtId);
+
+        if (srcNode && !nodePassesFilter(srcNode)) return false;
+        if (tgtNode && !nodePassesFilter(tgtNode)) return false;
+
+        return true;
+    }
+
+    /**
+     * Apply current filters to all rendered nodes, edges, and labels.
+     * Uses CSS display to hide/show rather than removing DOM elements,
+     * so the force simulation is unaffected and positions are preserved.
+     *
+     * After applying, notifies listeners with the visible node/edge counts.
+     */
+    function applyFilters() {
+        if (!svg) return;
+
+        let visibleNodes = 0;
+        let visibleEdges = 0;
+
+        nodeGroup.selectAll("circle").each(function (d) {
+            const visible = nodePassesFilter(d);
+            d3.select(this).style("display", visible ? null : "none");
+            if (visible) visibleNodes++;
+        });
+
+        labelGroup.selectAll("text").each(function (d) {
+            d3.select(this).style("display", nodePassesFilter(d) ? null : "none");
+        });
+
+        linkGroup.selectAll("line").each(function (d) {
+            const visible = edgePassesFilter(d);
+            d3.select(this).style("display", visible ? null : "none");
+            if (visible) visibleEdges++;
+        });
+
+        // Notify listeners
+        for (let i = 0; i < filterChangeListeners.length; i++) {
+            filterChangeListeners[i](visibleNodes, visibleEdges);
+        }
     }
 
     // --- SVG scaffold — defs, filters, groups ------------------------------
@@ -566,6 +664,9 @@ const ExposeGraph = (() => {
 
         // ---- Render ----
         render(nodes, edgeData, isInit);
+
+        // Re-apply any active filters to newly rendered elements.
+        applyFilters();
     }
 
     /** Tear down graph, stop simulation, remove DOM elements. */
@@ -576,8 +677,70 @@ const ExposeGraph = (() => {
         if (deruKuiTooltip) { deruKuiTooltip.remove(); deruKuiTooltip = null; }
         nodeMap.clear();
         edgeData = [];
+        filterChangeListeners = [];
         container = linkGroup = nodeGroup = labelGroup = null;
     }
 
-    return Object.freeze({ init, updateData, destroy });
+    // --- Public filter API --------------------------------------------------
+
+    /**
+     * Update one or more filter dimensions and re-apply visibility.
+     * Accepts a partial filter object — only the provided keys are merged.
+     *
+     * @param {object} filters  Partial filter update:
+     *   - entityTypes:      string[]  (replaces the set)
+     *   - edgeTypes:        string[]  (replaces the set)
+     *   - attributionTiers: string[]  (replaces the set)
+     *   - minConfidence:    number    (0.0 – 1.0)
+     */
+    function setFilters(filters) {
+        if (filters.entityTypes != null) {
+            activeFilters.entityTypes = new Set(filters.entityTypes);
+        }
+        if (filters.edgeTypes != null) {
+            activeFilters.edgeTypes = new Set(filters.edgeTypes);
+        }
+        if (filters.attributionTiers != null) {
+            activeFilters.attributionTiers = new Set(filters.attributionTiers);
+        }
+        if (filters.minConfidence != null) {
+            activeFilters.minConfidence = filters.minConfidence;
+        }
+        applyFilters();
+    }
+
+    /**
+     * Read the current filter state (returns a plain-object snapshot).
+     * @returns {object}
+     */
+    function getFilters() {
+        return {
+            entityTypes:      Array.from(activeFilters.entityTypes),
+            edgeTypes:        Array.from(activeFilters.edgeTypes),
+            attributionTiers: Array.from(activeFilters.attributionTiers),
+            minConfidence:    activeFilters.minConfidence,
+        };
+    }
+
+    /**
+     * Register a callback invoked after every filter application.
+     * Signature: callback(visibleNodeCount, visibleEdgeCount)
+     *
+     * @param {function} fn
+     */
+    function onFilterChange(fn) {
+        if (typeof fn === "function") {
+            filterChangeListeners.push(fn);
+        }
+    }
+
+    return Object.freeze({
+        init,
+        updateData,
+        destroy,
+        setFilters,
+        getFilters,
+        onFilterChange,
+        applyFilters,
+    });
 })();

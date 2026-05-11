@@ -27,6 +27,7 @@ import logging
 import socket
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Protocol, runtime_checkable
@@ -214,6 +215,7 @@ class RunExecutor:
         self._enrichment = enrichment_pipeline
         self._log_sink = log_sink
         self._event_bus = event_bus
+        self._dns_executor: ThreadPoolExecutor | None = None
 
     def _log(self, level: str, msg: str) -> None:
         """Emit a structured log entry to the log sink, if configured."""
@@ -280,7 +282,7 @@ class RunExecutor:
             try:
                 result = await asyncio.wait_for(
                     asyncio.get_event_loop().run_in_executor(
-                        None,
+                        self._dns_executor,
                         socket.getaddrinfo,
                         seed.value,
                         None,
@@ -327,7 +329,7 @@ class RunExecutor:
 
         return non_domain_seeds + resolved
 
-    async def execute(  # noqa: PLR0912, PLR0915
+    async def execute(
         self,
         *,
         run_id: UUID,
@@ -357,6 +359,39 @@ class RunExecutor:
         Returns a ``RunResult`` summarizing the run.
         """
         start_ns = time.monotonic_ns()
+
+        # Dedicated thread pool for DNS lookups so they don't exhaust the
+        # default asyncio executor (issue #155).  Created per-run and shut
+        # down in the finally block to prevent thread leaks.
+        self._dns_executor = ThreadPoolExecutor(
+            max_workers=8,
+            thread_name_prefix="expose-dns",
+        )
+
+        try:
+            return await self._execute_inner(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                seeds=seeds,
+                collector_ids=collector_ids,
+                max_passes=max_passes,
+                start_ns=start_ns,
+            )
+        finally:
+            self._dns_executor.shutdown(wait=False)
+            self._dns_executor = None
+
+    async def _execute_inner(  # noqa: PLR0912, PLR0915
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        seeds: list[Seed],
+        collector_ids: list[str],
+        max_passes: int,
+        start_ns: int,
+    ) -> RunResult:
+        """Inner execution body, separated so execute() can wrap with try/finally."""
 
         # Clear the health-check cache so the first dispatch of each collector
         # in this run gets a fresh probe.

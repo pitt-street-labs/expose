@@ -16,7 +16,8 @@ AU-11 retention mapping is supported via ``retention_category``.
 The ``AuditEventType`` enumeration covers the AU-2 auditable event catalog
 required for EASI platform operation: run lifecycle, entity CRUD, scope
 enforcement, tenant management, credential operations, data lifecycle,
-configuration changes, authentication, artifact signing, and scheduling.
+configuration changes, authentication, authorization, artifact signing,
+scheduling, SIEM delivery, and credential resolution.
 
 This module intentionally avoids ``hashlib`` and ``secrets`` (FIPS gate per
 ADR-010).  UUIDs come from the stdlib ``uuid`` module which does not route
@@ -25,6 +26,7 @@ through Python's ``hashlib``.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
@@ -72,12 +74,23 @@ class AuditEventType(StrEnum):
     AUTH_SUCCESS = "auth_success"
     AUTH_FAILURE = "auth_failure"
 
+    # --- Authorization ---
+    AUTHORIZATION_DENIED = "authorization_denied"
+
     # --- Artifact signing ---
     ARTIFACT_SIGNED = "artifact_signed"
+    SIGNATURE_VERIFICATION_FAILED = "signature_verification_failed"
 
     # --- Scheduling ---
     SCHEDULE_CREATED = "schedule_created"
     SCHEDULE_DELETED = "schedule_deleted"
+    SCHEDULE_UPDATED = "schedule_updated"
+
+    # --- SIEM delivery ---
+    SIEM_DELIVERY_FAILED = "siem_delivery_failed"
+
+    # --- Credential resolution ---
+    CREDENTIAL_RESOLUTION_FAILED = "credential_resolution_failed"
 
 
 class AuditEvent(BaseModel):
@@ -117,7 +130,53 @@ class AuditEvent(BaseModel):
     retention_category: str = "standard"
 
 
+# ---------------------------------------------------------------------------
+# Sensitive-key sanitization (issue #150)
+# ---------------------------------------------------------------------------
+
+# Compiled regex matching key names that may contain sensitive data.
+# Case-insensitive matching against patterns: password, secret, token,
+# api_key, credential.
+_SENSITIVE_KEY_RE = re.compile(
+    r"(password|secret|token|api_key|credential)",
+    re.IGNORECASE,
+)
+
+_REDACTED = "[REDACTED]"
+
+
+def sanitize_details(details: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of *details* with sensitive values replaced.
+
+    Keys whose names contain ``password``, ``secret``, ``token``,
+    ``api_key``, or ``credential`` (case-insensitive, substring match)
+    have their values replaced with ``"[REDACTED]"``.  Nested dicts are
+    sanitized recursively.
+
+    This function is called by :func:`~expose.observability.logging.emit_audit_event`
+    before serialization to prevent accidental credential leakage into the
+    audit log.
+
+    Args:
+        details: The free-form key-value dict from an ``AuditEvent``.
+
+    Returns:
+        A new dict with sensitive values redacted.  The original dict is
+        never mutated.
+    """
+    sanitized: dict[str, Any] = {}
+    for key, value in details.items():
+        if _SENSITIVE_KEY_RE.search(key):
+            sanitized[key] = _REDACTED
+        elif isinstance(value, dict):
+            sanitized[key] = sanitize_details(value)
+        else:
+            sanitized[key] = value
+    return sanitized
+
+
 __all__ = [
     "AuditEvent",
     "AuditEventType",
+    "sanitize_details",
 ]

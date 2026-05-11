@@ -3,7 +3,7 @@
 Coverage:
 
 1. ``AuditEvent`` model validation — all fields accepted, types enforced.
-2. ``AuditEventType`` — all 18 enum members are valid ``StrEnum`` values.
+2. ``AuditEventType`` — all 23 enum members are valid ``StrEnum`` values.
 3. Audit log append-only — write, verify, write again, verify both records.
 4. Serialization round-trip — model_dump → JSON → parse → reconstruct.
 5. ``retention_category`` present on every event (default + explicit).
@@ -12,6 +12,9 @@ Coverage:
 8. Unconfigured logger silently drops events (no crash).
 9. Optional fields accept ``None`` and non-``None`` values.
 10. Invalid ``event_type`` rejected by Pydantic validation.
+11. ``sanitize_details`` redacts sensitive keys (passwords, secrets, tokens,
+    api_keys, credentials) including nested dicts.
+12. ``emit_audit_event`` applies ``sanitize_details`` before writing.
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from expose.observability.audit_schema import AuditEvent, AuditEventType
+from expose.observability.audit_schema import AuditEvent, AuditEventType, sanitize_details
 from expose.observability.logging import (
     _AUDIT_LOGGER_NAME,
     configure_audit_logging,
@@ -82,9 +85,14 @@ _EXPECTED_EVENT_TYPES = [
     ("CONFIG_CHANGED", "config_changed"),
     ("AUTH_SUCCESS", "auth_success"),
     ("AUTH_FAILURE", "auth_failure"),
+    ("AUTHORIZATION_DENIED", "authorization_denied"),
     ("ARTIFACT_SIGNED", "artifact_signed"),
+    ("SIGNATURE_VERIFICATION_FAILED", "signature_verification_failed"),
     ("SCHEDULE_CREATED", "schedule_created"),
     ("SCHEDULE_DELETED", "schedule_deleted"),
+    ("SCHEDULE_UPDATED", "schedule_updated"),
+    ("SIEM_DELIVERY_FAILED", "siem_delivery_failed"),
+    ("CREDENTIAL_RESOLUTION_FAILED", "credential_resolution_failed"),
 ]
 
 
@@ -98,8 +106,8 @@ class TestAuditEventType:
             assert isinstance(member.value, str)
 
     def test_member_count(self) -> None:
-        """Exactly 18 event types in the AU-2 catalog."""
-        assert len(AuditEventType) == 18
+        """Exactly 23 event types in the AU-2 catalog."""
+        assert len(AuditEventType) == 23
 
     @pytest.mark.parametrize(("name", "value"), _EXPECTED_EVENT_TYPES)
     def test_expected_member(self, name: str, value: str) -> None:
@@ -412,3 +420,172 @@ class TestEmitAuditEvent:
             "run_id", "correlation_id", "retention_category",
         }
         assert required_keys.issubset(record.keys())
+
+
+# ---------------------------------------------------------------------------
+# sanitize_details tests (issue #150)
+# ---------------------------------------------------------------------------
+
+
+class TestSanitizeDetails:
+    """Verify sensitive key patterns are redacted from details dicts."""
+
+    def test_password_key_redacted(self) -> None:
+        """Keys containing 'password' are redacted."""
+        result = sanitize_details({"db_password": "s3cret", "host": "db.local"})
+        assert result["db_password"] == "[REDACTED]"
+        assert result["host"] == "db.local"
+
+    def test_secret_key_redacted(self) -> None:
+        """Keys containing 'secret' are redacted."""
+        result = sanitize_details({"client_secret": "abc123"})
+        assert result["client_secret"] == "[REDACTED]"
+
+    def test_token_key_redacted(self) -> None:
+        """Keys containing 'token' are redacted."""
+        result = sanitize_details({"auth_token": "tok_xyz", "scope": "read"})
+        assert result["auth_token"] == "[REDACTED]"
+        assert result["scope"] == "read"
+
+    def test_api_key_redacted(self) -> None:
+        """Keys containing 'api_key' are redacted."""
+        result = sanitize_details({"shodan_api_key": "ABCDEF"})
+        assert result["shodan_api_key"] == "[REDACTED]"
+
+    def test_credential_key_redacted(self) -> None:
+        """Keys containing 'credential' are redacted."""
+        result = sanitize_details({"credential_data": "vault:xyz"})
+        assert result["credential_data"] == "[REDACTED]"
+
+    def test_case_insensitive(self) -> None:
+        """Matching is case-insensitive."""
+        result = sanitize_details({
+            "API_KEY": "k1",
+            "Password": "p1",
+            "SECRET_VALUE": "s1",
+        })
+        assert result["API_KEY"] == "[REDACTED]"
+        assert result["Password"] == "[REDACTED]"
+        assert result["SECRET_VALUE"] == "[REDACTED]"
+
+    def test_non_sensitive_keys_preserved(self) -> None:
+        """Keys that don't match sensitive patterns are left unchanged."""
+        details = {"domain": "example.com", "count": 42, "status": "ok"}
+        result = sanitize_details(details)
+        assert result == details
+
+    def test_nested_dict_sanitized(self) -> None:
+        """Nested dicts are sanitized recursively."""
+        result = sanitize_details({
+            "config": {
+                "api_key": "nested-key",
+                "endpoint": "https://api.example.com",
+            },
+            "name": "test",
+        })
+        assert result["config"]["api_key"] == "[REDACTED]"
+        assert result["config"]["endpoint"] == "https://api.example.com"
+        assert result["name"] == "test"
+
+    def test_deeply_nested_sanitization(self) -> None:
+        """Sanitization works at arbitrary nesting depth."""
+        result = sanitize_details({
+            "level1": {
+                "level2": {
+                    "secret_key": "deep-secret",
+                    "value": "ok",
+                },
+            },
+        })
+        assert result["level1"]["level2"]["secret_key"] == "[REDACTED]"
+        assert result["level1"]["level2"]["value"] == "ok"
+
+    def test_empty_dict(self) -> None:
+        """Empty dict returns empty dict."""
+        assert sanitize_details({}) == {}
+
+    def test_original_not_mutated(self) -> None:
+        """The original dict is never mutated."""
+        original = {"password": "secret123", "host": "db.local"}
+        _ = sanitize_details(original)
+        assert original["password"] == "secret123"
+
+    def test_multiple_sensitive_keys(self) -> None:
+        """Multiple sensitive keys in the same dict are all redacted."""
+        result = sanitize_details({
+            "db_password": "p1",
+            "api_token": "t1",
+            "client_secret": "s1",
+            "shodan_api_key": "k1",
+            "ssh_credential": "c1",
+            "host": "safe-value",
+        })
+        assert result["db_password"] == "[REDACTED]"
+        assert result["api_token"] == "[REDACTED]"
+        assert result["client_secret"] == "[REDACTED]"
+        assert result["shodan_api_key"] == "[REDACTED]"
+        assert result["ssh_credential"] == "[REDACTED]"
+        assert result["host"] == "safe-value"
+
+
+class TestEmitSanitizesDetails:
+    """Verify emit_audit_event applies sanitize_details before writing."""
+
+    def setup_method(self) -> None:
+        _reset_audit_logger()
+
+    def teardown_method(self) -> None:
+        _reset_audit_logger()
+
+    def test_emit_redacts_password_in_details(self, tmp_path: Path) -> None:
+        """Passwords in the details dict are redacted in the log output."""
+        log_path = tmp_path / "audit.log"
+        configure_audit_logging(path=str(log_path))
+
+        event = _make_event(details={"db_password": "supersecret", "host": "db.local"})
+        emit_audit_event(event)
+
+        logger = logging.getLogger(_AUDIT_LOGGER_NAME)
+        for h in logger.handlers:
+            h.flush()
+
+        record = json.loads(log_path.read_text().strip())
+        assert record["details"]["db_password"] == "[REDACTED]"
+        assert record["details"]["host"] == "db.local"
+
+    def test_emit_redacts_nested_sensitive_keys(self, tmp_path: Path) -> None:
+        """Nested sensitive keys are redacted in the log output."""
+        log_path = tmp_path / "audit.log"
+        configure_audit_logging(path=str(log_path))
+
+        event = _make_event(details={
+            "collector_config": {
+                "api_key": "SHODAN_KEY_123",
+                "endpoint": "https://api.shodan.io",
+            },
+        })
+        emit_audit_event(event)
+
+        logger = logging.getLogger(_AUDIT_LOGGER_NAME)
+        for h in logger.handlers:
+            h.flush()
+
+        record = json.loads(log_path.read_text().strip())
+        assert record["details"]["collector_config"]["api_key"] == "[REDACTED]"
+        assert record["details"]["collector_config"]["endpoint"] == "https://api.shodan.io"
+
+    def test_emit_preserves_non_sensitive_details(self, tmp_path: Path) -> None:
+        """Non-sensitive details pass through unchanged."""
+        log_path = tmp_path / "audit.log"
+        configure_audit_logging(path=str(log_path))
+
+        event = _make_event(details={"domain": "example.com", "count": 5})
+        emit_audit_event(event)
+
+        logger = logging.getLogger(_AUDIT_LOGGER_NAME)
+        for h in logger.handlers:
+            h.flush()
+
+        record = json.loads(log_path.read_text().strip())
+        assert record["details"]["domain"] == "example.com"
+        assert record["details"]["count"] == 5

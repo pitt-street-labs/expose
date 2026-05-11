@@ -156,12 +156,21 @@ def emit_audit_event(event: Any) -> None:
     silently dropped rather than crashing — audit failures must never take down
     the pipeline.  The ``mode="json"`` serialization ensures UUIDs and
     datetimes are rendered as ISO-8601 strings.
+
+    Before serialization, the ``details`` dict is passed through
+    :func:`~expose.observability.audit_schema.sanitize_details` to strip
+    known sensitive key patterns (passwords, secrets, tokens, API keys,
+    credentials).
     """
+    from expose.observability.audit_schema import sanitize_details  # noqa: PLC0415
+
     logger = stdlib_logging.getLogger(_AUDIT_LOGGER_NAME)
     if not logger.handlers:
         return
     try:
         record = event.model_dump(mode="json")
+        if "details" in record and isinstance(record["details"], dict):
+            record["details"] = sanitize_details(record["details"])
         logger.info(json.dumps(record, separators=(",", ":")))
     except Exception:  # noqa: BLE001 — audit must never crash the pipeline
         logger.error("audit_serialization_failure")

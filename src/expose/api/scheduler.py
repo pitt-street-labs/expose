@@ -143,6 +143,28 @@ async def create_schedule(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    # Validate collector_ids against the registry (issue #149).
+    if body.collector_ids:
+        from expose.api.runs import _validate_collector_ids  # noqa: PLC0415
+
+        collector_errors = _validate_collector_ids(body.collector_ids)
+        if collector_errors:
+            raise HTTPException(status_code=422, detail=collector_errors)
+
+    # Validate seed formats (issue #149).
+    if body.seeds:
+        from expose.api.runs import _validate_seed  # noqa: PLC0415
+
+        seed_errors: list[str] = []
+        for seed_dict in body.seeds:
+            seed_value = seed_dict.get("value", "") if isinstance(seed_dict, dict) else str(seed_dict)
+            if seed_value:
+                err = _validate_seed(seed_value)
+                if err is not None:
+                    seed_errors.append(err)
+        if seed_errors:
+            raise HTTPException(status_code=422, detail=seed_errors)
+
     scheduler = _get_scheduler(request)
 
     entry = scheduler.add_schedule(

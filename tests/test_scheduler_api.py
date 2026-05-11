@@ -263,7 +263,7 @@ async def test_create_schedule(
         json={
             "tenant_id": str(tid),
             "cron_expression": "0 2 * * *",
-            "collector_ids": ["dns-basic", "whois"],
+            "collector_ids": ["active-dns-resolve", "rdap-whois"],
             "seeds": [{"value": "example.com", "seed_type": "DOMAIN"}],
         },
         headers=headers,
@@ -272,7 +272,7 @@ async def test_create_schedule(
     data = resp.json()
     assert data["tenant_id"] == str(tid)
     assert data["cron_expression"] == "0 2 * * *"
-    assert data["collector_ids"] == ["dns-basic", "whois"]
+    assert data["collector_ids"] == ["active-dns-resolve", "rdap-whois"]
     assert data["enabled"] is True
     assert data["consecutive_failures"] == 0
     assert data["next_run_at"] is not None
@@ -488,7 +488,7 @@ async def test_create_replaces_existing(
         json={
             "tenant_id": str(tid),
             "cron_expression": "0 2 * * *",
-            "collector_ids": ["dns-basic"],
+            "collector_ids": ["active-dns-resolve"],
         },
         headers=headers,
     )
@@ -500,7 +500,7 @@ async def test_create_replaces_existing(
         json={
             "tenant_id": str(tid),
             "cron_expression": "0 4 * * *",
-            "collector_ids": ["whois"],
+            "collector_ids": ["rdap-whois"],
         },
         headers=headers,
     )
@@ -511,7 +511,7 @@ async def test_create_replaces_existing(
     assert resp.status_code == 200
     data = resp.json()
     assert data["cron_expression"] == "0 4 * * *"
-    assert data["collector_ids"] == ["whois"]
+    assert data["collector_ids"] == ["rdap-whois"]
 
     # Total count should be 1, not 2.
     list_resp = await client.get("/v1/scheduler/schedules", headers=headers)
@@ -544,7 +544,7 @@ async def test_concurrent_run_limit(
     # Call the trigger directly -- it should skip due to the active run.
     await _scheduler_run_trigger(
         tenant_id=tid,
-        collector_ids=["dns-basic"],
+        collector_ids=["active-dns-resolve"],
         seeds=[{"value": "example.com", "seed_type": "DOMAIN"}],
     )
 
@@ -582,7 +582,7 @@ async def test_concurrent_run_limit_allows_after_completion(
     # row creation proves the limit check passed.
     await _scheduler_run_trigger(
         tenant_id=tid,
-        collector_ids=["dns-basic"],
+        collector_ids=["active-dns-resolve"],
         seeds=[{"value": "example.com", "seed_type": "DOMAIN"}],
     )
 
@@ -644,7 +644,7 @@ async def test_scheduler_no_run_without_app_ref(
     # Should not raise -- just logs and returns.
     await _scheduler_run_trigger(
         tenant_id=tid,
-        collector_ids=["dns-basic"],
+        collector_ids=["active-dns-resolve"],
         seeds=[],
     )
 
@@ -818,3 +818,81 @@ async def test_read_only_token_can_list(
 
     resp = await client.get("/v1/scheduler/schedules", headers=headers)
     assert resp.status_code == 200
+
+
+# ===================================================================
+# 16. Validation: unknown collector_ids → 422
+# ===================================================================
+
+
+async def test_create_schedule_unknown_collector_ids(
+    client: AsyncClient,
+) -> None:
+    """Unknown collector IDs in a schedule create request are rejected."""
+    tid = uuid4()
+    headers = _auth_header(tid)
+    resp = await client.post(
+        "/v1/scheduler/schedules",
+        json={
+            "tenant_id": str(tid),
+            "cron_expression": "0 2 * * *",
+            "collector_ids": ["nonexistent-collector-xyz"],
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert isinstance(detail, list)
+    assert any("Unknown collector_id" in err for err in detail)
+
+
+# ===================================================================
+# 17. Validation: invalid seed format → 422
+# ===================================================================
+
+
+async def test_create_schedule_invalid_seed_format(
+    client: AsyncClient,
+) -> None:
+    """Invalid seed formats in a schedule create request are rejected."""
+    tid = uuid4()
+    headers = _auth_header(tid)
+    resp = await client.post(
+        "/v1/scheduler/schedules",
+        json={
+            "tenant_id": str(tid),
+            "cron_expression": "0 2 * * *",
+            "seeds": [{"value": "not valid!!", "seed_type": "DOMAIN"}],
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert isinstance(detail, list)
+    assert any("Invalid seed format" in err for err in detail)
+
+
+# ===================================================================
+# 18. Validation: valid seeds pass through
+# ===================================================================
+
+
+async def test_create_schedule_valid_seeds_accepted(
+    client: AsyncClient,
+) -> None:
+    """Valid seeds in a schedule create request are accepted."""
+    tid = uuid4()
+    headers = _auth_header(tid)
+    resp = await client.post(
+        "/v1/scheduler/schedules",
+        json={
+            "tenant_id": str(tid),
+            "cron_expression": "0 2 * * *",
+            "seeds": [
+                {"value": "example.com", "seed_type": "DOMAIN"},
+                {"value": "10.0.0.0/24", "seed_type": "CIDR"},
+            ],
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201

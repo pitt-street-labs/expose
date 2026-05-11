@@ -58,6 +58,7 @@ from expose.pipeline.dispatcher import (
     DispatchResult,
     DispatchStatus,
     PipelineDispatcher,
+    _health_locks,
     clear_health_cache,
     current_tenant_id,
 )
@@ -1760,3 +1761,104 @@ class TestEgressProfileImmutability:
             assert snap is original_egress, (
                 "self._egress_profile was mutated during fallback dispatch"
             )
+
+
+# === Health cache thundering herd tests (issue #156) ===========================
+
+
+class MockSlowHealthCollector(Collector):
+    """Collector with a slow health check that counts invocations.
+
+    Used to verify that concurrent dispatches for the same collector_id
+    only trigger one health check (the rest wait on the lock and read the
+    cached result).
+    """
+
+    collector_id = "mock-slow-counted"
+    collector_version = "1.0.0"
+    requires_credentials = False
+    rate_limit_per_minute = None
+    tier = CollectorTier.TIER_1
+
+    health_check_count: int = 0
+
+    def __init__(self, config: CollectorConfig) -> None:
+        super().__init__(config)
+
+    async def expand(self, seed: Seed) -> AsyncIterator[Observation]:
+        yield _make_observation(
+            self.collector_id,
+            self.collector_version,
+            self.config.tenant_id,
+            seed.value,
+        )
+
+    async def health_check(self) -> CollectorHealthCheck:
+        MockSlowHealthCollector.health_check_count += 1
+        # Small delay to simulate network latency and widen the race window
+        await asyncio.sleep(0.05)
+        return CollectorHealthCheck(
+            collector_id=self.collector_id,
+            collector_version=self.collector_version,
+            status=CollectorStatus.SUCCESS,
+            checked_at=_NOW,
+            latency_ms=50.0,
+        )
+
+
+class TestHealthCacheThunderingHerd:
+    """Tests for per-collector-ID asyncio.Lock preventing thundering herd."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_health_checks_coalesced(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """Concurrent dispatches for the same collector only run one health check.
+
+        When multiple dispatches for the same collector_id arrive
+        concurrently, the per-collector lock ensures only the first task
+        performs the actual health probe.  Subsequent tasks acquire the
+        lock and find the cached result.
+        """
+        registry.register(MockSlowHealthCollector)
+        MockSlowHealthCollector.health_check_count = 0
+
+        dispatcher = PipelineDispatcher(registry, scope_empty, TENANT_ID)
+
+        # Fire 5 concurrent dispatches for the same collector
+        jobs = [_make_job("mock-slow-counted", seed) for _ in range(5)]
+        results = await asyncio.gather(
+            *[dispatcher.dispatch(job) for job in jobs],
+        )
+
+        # All should succeed
+        assert all(r.status == DispatchStatus.SUCCESS for r in results)
+        assert all(len(r.observations) == 1 for r in results)
+
+        # Only one health check should have been executed (the rest
+        # hit the cache after the lock was released).
+        assert MockSlowHealthCollector.health_check_count == 1
+
+    @pytest.mark.asyncio
+    async def test_health_lock_created_per_collector_id(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """Each collector_id gets its own lock in _health_locks."""
+        dispatcher = PipelineDispatcher(registry, scope_empty, TENANT_ID)
+
+        await dispatcher.dispatch(_make_job("mock-tier1", seed))
+        assert "mock-tier1" in _health_locks
+        assert isinstance(_health_locks["mock-tier1"], asyncio.Lock)
+
+    @pytest.mark.asyncio
+    async def test_clear_health_cache_clears_locks(self) -> None:
+        """clear_health_cache() also clears the per-collector lock map."""
+        _health_locks["test-collector"] = asyncio.Lock()
+        clear_health_cache()
+        assert _health_locks == {}

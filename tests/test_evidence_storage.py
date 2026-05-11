@@ -39,7 +39,9 @@ from expose.storage.evidence import (
     EvidenceIntegrityError,
     EvidenceManager,
     EvidenceRef,
+    _BATCH_SIZE,
     _DEFAULT_RETENTION_SECONDS,
+    _META_FETCH_BATCH_SIZE,
 )
 from expose.storage.local import LocalStorageBackend
 from expose.storage.s3 import S3StorageBackend
@@ -626,3 +628,115 @@ async def test_store_empty_content(manager: EvidenceManager) -> None:
     assert retrieved == b""
     # The hash of empty bytes is deterministic.
     assert ref.content_hash == compute_sha256_hex(b"")
+
+
+# ---------------------------------------------------------------------------
+# 19. Batched list_for_entity and expire (issue #154)
+# ---------------------------------------------------------------------------
+
+
+async def test_list_for_entity_batched_across_many_keys(
+    backend: LocalStorageBackend,
+) -> None:
+    """list_for_entity processes keys in batches when count exceeds _BATCH_SIZE.
+
+    Stores more evidence items than _BATCH_SIZE and verifies all matching
+    refs are still returned correctly.
+    """
+    manager = EvidenceManager(backend)
+    entity_id = uuid4()
+    count = _BATCH_SIZE + 20  # exceed one full batch
+
+    for i in range(count):
+        await manager.store(
+            f"evidence-{i}".encode(),
+            {"entity_id": str(entity_id)},
+        )
+
+    refs = await manager.list_for_entity(entity_id)
+    assert len(refs) == count
+    assert all(r.metadata["entity_id"] == str(entity_id) for r in refs)
+
+
+async def test_list_for_entity_batched_filters_correctly(
+    backend: LocalStorageBackend,
+) -> None:
+    """list_for_entity still filters by entity_id when batching."""
+    manager = EvidenceManager(backend)
+    target = uuid4()
+    other = uuid4()
+
+    # Store items for two entities, exceeding batch size total
+    for i in range(_META_FETCH_BATCH_SIZE + 10):
+        await manager.store(
+            f"target-{i}".encode(),
+            {"entity_id": str(target)},
+        )
+    for i in range(5):
+        await manager.store(
+            f"other-{i}".encode(),
+            {"entity_id": str(other)},
+        )
+
+    target_refs = await manager.list_for_entity(target)
+    other_refs = await manager.list_for_entity(other)
+
+    assert len(target_refs) == _META_FETCH_BATCH_SIZE + 10
+    assert len(other_refs) == 5
+
+
+async def test_expire_batched_across_many_keys(
+    backend: LocalStorageBackend,
+) -> None:
+    """expire() processes keys in batches when count exceeds _BATCH_SIZE.
+
+    Stores more expired blobs than _BATCH_SIZE and verifies all are expired.
+    """
+    manager = EvidenceManager(backend, default_retention_seconds=0)
+    count = _BATCH_SIZE + 15
+    stored_hashes: list[str] = []
+
+    for i in range(count):
+        ref = await manager.store(f"expire-batch-{i}".encode(), {})
+        stored_hashes.append(ref.content_hash)
+
+    expired = await manager.expire()
+    assert len(expired) == count
+    assert set(expired) == set(stored_hashes)
+
+    # All blobs should be gone
+    for h in stored_hashes:
+        assert await manager.exists(h) is False
+
+
+async def test_expire_batched_preserves_fresh(
+    backend: LocalStorageBackend,
+) -> None:
+    """expire() in batched mode still preserves non-expired blobs."""
+    manager = EvidenceManager(backend, default_retention_seconds=86400)
+
+    # Store some expired (retention=0) and some fresh
+    expired_hashes: list[str] = []
+    for i in range(_META_FETCH_BATCH_SIZE + 5):
+        ref = await manager.store(
+            f"expired-{i}".encode(), {}, retention_seconds=0,
+        )
+        expired_hashes.append(ref.content_hash)
+
+    fresh_hashes: list[str] = []
+    for i in range(3):
+        ref = await manager.store(f"fresh-{i}".encode(), {})
+        fresh_hashes.append(ref.content_hash)
+
+    expired = await manager.expire()
+    assert set(expired) == set(expired_hashes)
+
+    # Fresh blobs survive
+    for h in fresh_hashes:
+        assert await manager.exists(h) is True
+
+
+def test_batch_size_constants() -> None:
+    """Verify batch size constants are set correctly (issue #154)."""
+    assert _BATCH_SIZE == 100
+    assert _META_FETCH_BATCH_SIZE == 50

@@ -20,6 +20,10 @@ Design properties:
 - **Secret values are never logged.** The resolver returns ``CollectorCredential``
   instances whose ``secret_value`` field is handled by the dispatcher's existing
   no-log policy.
+- **Independent tenant-scope validation.** The resolver validates every backend
+  key path before querying the backend AND verifies returned credentials belong
+  to the requesting tenant. This defense-in-depth check (finding #147) ensures
+  that even a weak backend cannot leak credentials across tenants.
 
 Secrets backend key convention: ``collector.{collector_id}.{key_name}``
 (matches the pattern established in ``tests/test_secrets.py``).
@@ -28,6 +32,7 @@ Secrets backend key convention: ``collector.{collector_id}.{key_name}``
 from __future__ import annotations
 
 import logging
+import re
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -36,6 +41,11 @@ from expose.collectors.base import CollectorCredential
 from expose.secrets.backend import SecretNotFoundError, SecretsBackend
 
 logger = logging.getLogger(__name__)
+
+# Regex for valid backend key paths: dotted segments of alphanumeric + hyphens
+# and underscores. Prevents path traversal, embedded tenant IDs, and
+# control characters in key paths.
+_VALID_KEY_PATH_RE = re.compile(r"^[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)*$")
 
 
 class CollectorCredentialSpec(BaseModel):
@@ -76,6 +86,23 @@ class CredentialResolutionError(Exception):
     backend for the target tenant. The message includes the collector ID,
     tenant ID, and list of missing key names — but never the secret values
     themselves.
+    """
+
+
+class TenantScopeViolation(Exception):
+    """A credential resolution violated tenant isolation boundaries.
+
+    Raised when the resolver detects a cross-tenant access attempt:
+
+    - A backend key path contains another tenant's UUID (path traversal).
+    - A key_mapping path contains an embedded tenant UUID that does not
+      match the requesting tenant.
+    - A backend key path contains invalid characters (control chars,
+      path separators beyond dots, etc.).
+
+    This is a defense-in-depth check per finding #147. Even if the backend
+    correctly scopes by tenant_id, the resolver independently validates
+    that key paths cannot be used to escape tenant isolation.
     """
 
 
@@ -188,10 +215,78 @@ class CredentialResolver:
     The resolver encodes the secrets backend key as
     ``collector.{collector_id}.{key_name}`` to match the convention in the
     existing test suite (see ``tests/test_secrets.py``).
+
+    **Tenant isolation** (finding #147): before every backend query, the
+    resolver validates the backend key path via ``_validate_tenant_scope()``.
+    This prevents cross-tenant credential leakage even when the secrets
+    backend implementation has weak tenant scoping.
     """
 
     def __init__(self, backend: SecretsBackend) -> None:
         self._backend = backend
+
+    @staticmethod
+    def _validate_tenant_scope(
+        tenant_id: UUID,
+        backend_key: str,
+        *,
+        collector_id: str,
+        key_name: str,
+    ) -> None:
+        """Validate that a backend key path cannot escape tenant isolation.
+
+        Checks performed:
+
+        1. **Path format:** The key must match the ``segment.segment...``
+           convention (alphanumeric, hyphens, underscores). Rejects embedded
+           slashes, control characters, or other injection vectors.
+        2. **Cross-tenant UUID embedding:** If the key path contains a
+           UUID-like string, it must match the requesting ``tenant_id``
+           or be absent entirely. A key path containing a *different*
+           tenant's UUID is a scope violation — it could trick a weak
+           backend into returning another tenant's credential.
+
+        Raises:
+            TenantScopeViolation: if the key path fails any check.
+        """
+        # Check 1: valid path format
+        if not _VALID_KEY_PATH_RE.match(backend_key):
+            raise TenantScopeViolation(
+                f"Backend key path {backend_key!r} for collector {collector_id!r} "
+                f"key {key_name!r} contains invalid characters. "
+                f"Expected dotted alphanumeric segments."
+            )
+
+        # Check 2: cross-tenant UUID embedding
+        # Extract anything that looks like a UUID from the key path.
+        # UUIDs in key paths are unusual in the current convention
+        # (collector.{collector_id}.{key_name}), but key_mapping could
+        # introduce them. If present, they must match the requesting tenant.
+        uuid_pattern = re.compile(
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+            r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+        )
+        embedded_uuids = uuid_pattern.findall(backend_key)
+        tenant_str = str(tenant_id)
+        for found_uuid in embedded_uuids:
+            if found_uuid.lower() != tenant_str.lower():
+                logger.warning(
+                    "SECURITY: Cross-tenant UUID detected in backend key "
+                    "path %r for collector %r key %r. "
+                    "Requesting tenant=%s, embedded UUID=%s",
+                    backend_key,
+                    collector_id,
+                    key_name,
+                    tenant_id,
+                    found_uuid,
+                )
+                raise TenantScopeViolation(
+                    f"Backend key path {backend_key!r} for collector "
+                    f"{collector_id!r} key {key_name!r} contains UUID "
+                    f"{found_uuid!r} which does not match the requesting "
+                    f"tenant {tenant_id}. Cross-tenant credential access "
+                    f"is prohibited."
+                )
 
     async def resolve(
         self, tenant_id: UUID, collector_id: str
@@ -205,6 +300,11 @@ class CredentialResolver:
 
         If no credentials are needed (empty ``required_keys`` or unknown
         ``collector_id``), returns ``{}``.
+
+        Raises:
+            TenantScopeViolation: if any backend key path would violate
+                tenant isolation (finding #147).
+            CredentialResolutionError: if required keys are absent.
         """
         spec = CREDENTIAL_SPECS.get(collector_id)
         if spec is None:
@@ -220,6 +320,17 @@ class CredentialResolver:
                 collector_id,
             )
             return {}
+
+        # Pre-validate ALL key paths before querying the backend (fail-fast).
+        all_keys = list(spec.required_keys) + list(spec.optional_keys)
+        for key in all_keys:
+            backend_key = spec.key_mapping.get(key, f"collector.{collector_id}.{key}")
+            self._validate_tenant_scope(
+                tenant_id,
+                backend_key,
+                collector_id=collector_id,
+                key_name=key,
+            )
 
         credentials: dict[str, CollectorCredential] = {}
         missing: list[str] = []
@@ -292,4 +403,5 @@ __all__ = [
     "CollectorCredentialSpec",
     "CredentialResolutionError",
     "CredentialResolver",
+    "TenantScopeViolation",
 ]

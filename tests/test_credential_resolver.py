@@ -31,6 +31,7 @@ from expose.pipeline.credential_resolver import (
     CollectorCredentialSpec,
     CredentialResolutionError,
     CredentialResolver,
+    TenantScopeViolation,
 )
 from expose.secrets.memory_backend import InMemoryBackend
 
@@ -703,3 +704,294 @@ class TestRealCollectorCredentialChain:
                 f"Key mismatch for {collector_id}: "
                 f"expected {keys}, got {set(result.keys())}"
             )
+
+
+# ============================================================================
+# Tenant scope violation tests (finding #147)
+# ============================================================================
+#
+# These tests verify that the CredentialResolver performs independent
+# cross-tenant access checks, preventing credential theft even if the
+# secrets backend has weak tenant scoping.
+
+
+class TestTenantScopeValidation:
+    """Tests for _validate_tenant_scope() and its integration into resolve()."""
+
+    # ---- Direct _validate_tenant_scope() unit tests -------------------------
+
+    def test_valid_key_path_accepted(self) -> None:
+        """Standard dotted key paths pass validation."""
+        # Should not raise for normal key paths.
+        CredentialResolver._validate_tenant_scope(
+            TENANT_A,
+            "collector.scan-shodan.api_key",
+            collector_id="scan-shodan",
+            key_name="api_key",
+        )
+
+    def test_valid_key_path_with_underscores(self) -> None:
+        """Key paths with underscores are valid."""
+        CredentialResolver._validate_tenant_scope(
+            TENANT_A,
+            "unmapped.sfp_virustotal.api_key",
+            collector_id="dns-passive-history",
+            key_name="virustotal_api_key",
+        )
+
+    def test_key_path_with_slashes_rejected(self) -> None:
+        """Key paths containing forward slashes are rejected."""
+        with pytest.raises(TenantScopeViolation, match="invalid characters"):
+            CredentialResolver._validate_tenant_scope(
+                TENANT_A,
+                "collector/../../etc/passwd",
+                collector_id="evil",
+                key_name="api_key",
+            )
+
+    def test_key_path_with_spaces_rejected(self) -> None:
+        """Key paths containing spaces are rejected."""
+        with pytest.raises(TenantScopeViolation, match="invalid characters"):
+            CredentialResolver._validate_tenant_scope(
+                TENANT_A,
+                "collector. .api_key",
+                collector_id="evil",
+                key_name="api_key",
+            )
+
+    def test_empty_key_path_rejected(self) -> None:
+        """Empty key paths are rejected."""
+        with pytest.raises(TenantScopeViolation, match="invalid characters"):
+            CredentialResolver._validate_tenant_scope(
+                TENANT_A,
+                "",
+                collector_id="evil",
+                key_name="api_key",
+            )
+
+    def test_key_path_with_own_tenant_uuid_accepted(self) -> None:
+        """A key path embedding the requesting tenant's own UUID is allowed."""
+        tenant_str = str(TENANT_A)
+        key_path = f"collector.{tenant_str}.api_key"
+        # Should not raise — the embedded UUID matches the requesting tenant.
+        CredentialResolver._validate_tenant_scope(
+            TENANT_A,
+            key_path,
+            collector_id="test",
+            key_name="api_key",
+        )
+
+    def test_key_path_with_other_tenant_uuid_rejected(self) -> None:
+        """A key path embedding a DIFFERENT tenant's UUID is rejected."""
+        other_tenant_str = str(TENANT_B)
+        key_path = f"collector.{other_tenant_str}.api_key"
+        with pytest.raises(TenantScopeViolation, match="Cross-tenant"):
+            CredentialResolver._validate_tenant_scope(
+                TENANT_A,
+                key_path,
+                collector_id="evil",
+                key_name="api_key",
+            )
+
+    def test_key_path_with_control_characters_rejected(self) -> None:
+        """Key paths with control characters (newline, null) are rejected."""
+        with pytest.raises(TenantScopeViolation, match="invalid characters"):
+            CredentialResolver._validate_tenant_scope(
+                TENANT_A,
+                "collector.evil\x00.api_key",
+                collector_id="evil",
+                key_name="api_key",
+            )
+
+    def test_key_path_with_colon_rejected(self) -> None:
+        """Key paths with colons are rejected (prevents URI-style injection)."""
+        with pytest.raises(TenantScopeViolation, match="invalid characters"):
+            CredentialResolver._validate_tenant_scope(
+                TENANT_A,
+                "vault:secret/data/other-tenant",
+                collector_id="evil",
+                key_name="api_key",
+            )
+
+    # ---- Integration: resolve() blocks cross-tenant key_mapping -------------
+
+    async def test_resolve_blocks_cross_tenant_key_mapping(
+        self,
+        backend: InMemoryBackend,
+        resolver: CredentialResolver,
+    ) -> None:
+        """resolve() raises TenantScopeViolation when key_mapping
+        contains another tenant's UUID."""
+        other_tenant_str = str(TENANT_B)
+        CREDENTIAL_SPECS["test-xss-mapping"] = CollectorCredentialSpec(
+            collector_id="test-xss-mapping",
+            required_keys=["api_key"],
+            key_mapping={
+                "api_key": f"collector.{other_tenant_str}.stolen_key",
+            },
+        )
+        try:
+            # Store a credential for TENANT_B under that path.
+            await backend.set(
+                tenant_id=TENANT_B,
+                key=f"collector.{other_tenant_str}.stolen_key",
+                value="TENANT_B_SECRET",
+            )
+            # TENANT_A tries to resolve — should be blocked before
+            # the backend is even queried.
+            with pytest.raises(TenantScopeViolation, match="Cross-tenant"):
+                await resolver.resolve(TENANT_A, "test-xss-mapping")
+        finally:
+            del CREDENTIAL_SPECS["test-xss-mapping"]
+
+    async def test_resolve_blocks_invalid_key_mapping_path(
+        self,
+        resolver: CredentialResolver,
+    ) -> None:
+        """resolve() raises TenantScopeViolation for key_mapping with
+        path traversal characters."""
+        CREDENTIAL_SPECS["test-path-traversal"] = CollectorCredentialSpec(
+            collector_id="test-path-traversal",
+            required_keys=["api_key"],
+            key_mapping={
+                "api_key": "../../etc/shadow",
+            },
+        )
+        try:
+            with pytest.raises(TenantScopeViolation, match="invalid characters"):
+                await resolver.resolve(TENANT_A, "test-path-traversal")
+        finally:
+            del CREDENTIAL_SPECS["test-path-traversal"]
+
+    async def test_resolve_blocks_cross_tenant_optional_key_mapping(
+        self,
+        backend: InMemoryBackend,
+        resolver: CredentialResolver,
+    ) -> None:
+        """resolve() validates optional key paths too, not just required."""
+        other_tenant_str = str(TENANT_B)
+        CREDENTIAL_SPECS["test-xss-optional"] = CollectorCredentialSpec(
+            collector_id="test-xss-optional",
+            required_keys=[],
+            optional_keys=["bonus_key"],
+            key_mapping={
+                "bonus_key": f"collector.{other_tenant_str}.bonus",
+            },
+        )
+        try:
+            with pytest.raises(TenantScopeViolation, match="Cross-tenant"):
+                await resolver.resolve(TENANT_A, "test-xss-optional")
+        finally:
+            del CREDENTIAL_SPECS["test-xss-optional"]
+
+    async def test_resolve_validates_before_backend_query(
+        self,
+        backend: InMemoryBackend,
+        resolver: CredentialResolver,
+    ) -> None:
+        """Validation happens before any backend.get() call — fail-fast."""
+        other_tenant_str = str(TENANT_B)
+        CREDENTIAL_SPECS["test-failfast"] = CollectorCredentialSpec(
+            collector_id="test-failfast",
+            required_keys=["good_key", "bad_key"],
+            key_mapping={
+                "good_key": "collector.test-failfast.good",
+                "bad_key": f"collector.{other_tenant_str}.stolen",
+            },
+        )
+        try:
+            # Store the "good" key for TENANT_A.
+            await backend.set(
+                tenant_id=TENANT_A,
+                key="collector.test-failfast.good",
+                value="GOOD_VALUE",
+            )
+            # The bad key path should cause TenantScopeViolation BEFORE
+            # the backend is queried for even the good key.
+            with pytest.raises(TenantScopeViolation, match="Cross-tenant"):
+                await resolver.resolve(TENANT_A, "test-failfast")
+        finally:
+            del CREDENTIAL_SPECS["test-failfast"]
+
+    async def test_all_builtin_specs_pass_tenant_scope_validation(
+        self,
+        resolver: CredentialResolver,
+    ) -> None:
+        """All CREDENTIAL_SPECS entries have key_mapping paths that pass
+        tenant scope validation. Regression guard for the registry."""
+        for collector_id, spec in CREDENTIAL_SPECS.items():
+            all_keys = list(spec.required_keys) + list(spec.optional_keys)
+            for key in all_keys:
+                backend_key = spec.key_mapping.get(
+                    key, f"collector.{collector_id}.{key}"
+                )
+                # Should not raise for any builtin spec.
+                CredentialResolver._validate_tenant_scope(
+                    TENANT_A,
+                    backend_key,
+                    collector_id=collector_id,
+                    key_name=key,
+                )
+
+    async def test_tenant_b_cannot_access_tenant_a_credentials_via_resolver(
+        self,
+        backend: InMemoryBackend,
+        resolver: CredentialResolver,
+    ) -> None:
+        """End-to-end: TENANT_B resolving a collector only sees its own
+        credentials, never TENANT_A's — even when both tenants have
+        credentials stored for the same collector."""
+        CREDENTIAL_SPECS["test-isolation-e2e"] = CollectorCredentialSpec(
+            collector_id="test-isolation-e2e",
+            required_keys=["api_key"],
+        )
+        try:
+            await backend.set(
+                tenant_id=TENANT_A,
+                key="collector.test-isolation-e2e.api_key",
+                value="TENANT_A_SECRET",
+            )
+            await backend.set(
+                tenant_id=TENANT_B,
+                key="collector.test-isolation-e2e.api_key",
+                value="TENANT_B_SECRET",
+            )
+
+            result_a = await resolver.resolve(TENANT_A, "test-isolation-e2e")
+            result_b = await resolver.resolve(TENANT_B, "test-isolation-e2e")
+
+            assert result_a["api_key"].secret_value == "TENANT_A_SECRET"  # noqa: S105
+            assert result_b["api_key"].secret_value == "TENANT_B_SECRET"  # noqa: S105
+            # Confirm they are different.
+            assert (
+                result_a["api_key"].secret_value != result_b["api_key"].secret_value
+            )
+        finally:
+            del CREDENTIAL_SPECS["test-isolation-e2e"]
+
+    async def test_tenant_b_cannot_resolve_tenant_a_only_credential(
+        self,
+        backend: InMemoryBackend,
+        resolver: CredentialResolver,
+    ) -> None:
+        """If TENANT_A has a credential but TENANT_B does not, TENANT_B
+        gets CredentialResolutionError — not TENANT_A's value."""
+        CREDENTIAL_SPECS["test-isolation-miss"] = CollectorCredentialSpec(
+            collector_id="test-isolation-miss",
+            required_keys=["api_key"],
+        )
+        try:
+            await backend.set(
+                tenant_id=TENANT_A,
+                key="collector.test-isolation-miss.api_key",
+                value="ONLY_TENANT_A_HAS_THIS",
+            )
+            # TENANT_A succeeds.
+            result_a = await resolver.resolve(TENANT_A, "test-isolation-miss")
+            assert result_a["api_key"].secret_value == "ONLY_TENANT_A_HAS_THIS"  # noqa: S105
+
+            # TENANT_B fails — must not get TENANT_A's value.
+            with pytest.raises(CredentialResolutionError, match="Missing credentials"):
+                await resolver.resolve(TENANT_B, "test-isolation-miss")
+        finally:
+            del CREDENTIAL_SPECS["test-isolation-miss"]

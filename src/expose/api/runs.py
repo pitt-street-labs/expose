@@ -2,11 +2,12 @@
 
 Implements the run results API described in issue #10 plus the run trigger:
 
-* **Start run**     — ``POST /v1/tenants/{tenant_id}/runs``    → 202
-* **List runs**     — ``GET /v1/tenants/{tenant_id}/runs``     → 200
-* **Get run**       — ``GET /v1/tenants/{tenant_id}/runs/{run_id}`` → 200 | 404
-* **List entities** — ``GET /v1/tenants/{tenant_id}/entities`` → 200
-* **Get entity**    — ``GET /v1/tenants/{tenant_id}/entities/{entity_id}`` → 200 | 404
+* **Start run**       — ``POST /v1/tenants/{tenant_id}/runs``    → 202
+* **List runs**       — ``GET /v1/tenants/{tenant_id}/runs``     → 200
+* **Get run**         — ``GET /v1/tenants/{tenant_id}/runs/{run_id}`` → 200 | 404
+* **Download artifact** — ``GET /v1/tenants/{tenant_id}/runs/{run_id}/artifact`` → 200 | 404 | 409
+* **List entities**   — ``GET /v1/tenants/{tenant_id}/entities`` → 200
+* **Get entity**      — ``GET /v1/tenants/{tenant_id}/entities/{entity_id}`` → 200 | 404
 
 All endpoints are tenant-scoped per ADR-007. The ``get_session`` dependency
 is shared with the tenants router (imported from :mod:`expose.api.tenants`).
@@ -15,7 +16,9 @@ is shared with the tenants router (imported from :mod:`expose.api.tenants`).
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
+import re
 from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
@@ -27,7 +30,7 @@ if TYPE_CHECKING:
 
 from expose.types.shared import RunId, TenantId
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -78,6 +81,72 @@ def _entity_to_response(entity: Entity) -> EntityResponse:
         first_observed_at=entity.first_observed_at,
         last_observed_at=entity.last_observed_at,
     )
+
+
+# ---------------------------------------------------------------------------
+# Input validation helpers (issue #149)
+# ---------------------------------------------------------------------------
+
+# Domain label: letters, digits, hyphens; cannot start/end with hyphen.
+# Full domain: 1+ labels separated by dots.
+_DOMAIN_RE = re.compile(
+    r"^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.[A-Za-z0-9-]{1,63})*$"
+)
+
+
+def _validate_seed(raw_seed: str) -> str | None:
+    """Validate a single seed value (domain, IP, or CIDR).
+
+    Returns ``None`` if valid, or an error message string if invalid.
+    """
+    raw_seed = raw_seed.strip()
+    if not raw_seed:
+        return "Seed value must not be empty."
+
+    # Try IP address.
+    try:
+        ipaddress.ip_address(raw_seed)
+        return None
+    except ValueError:
+        pass
+
+    # Try CIDR network.
+    try:
+        ipaddress.ip_network(raw_seed, strict=False)
+        return None
+    except ValueError:
+        pass
+
+    # Try domain.
+    if _DOMAIN_RE.match(raw_seed):
+        return None
+
+    return (
+        f"Invalid seed format: {raw_seed!r}. "
+        "Expected a domain name (e.g. example.com), "
+        "IP address (e.g. 192.168.1.1), "
+        "or CIDR notation (e.g. 10.0.0.0/24)."
+    )
+
+
+def _validate_collector_ids(collector_ids: list[str]) -> list[str]:
+    """Validate collector IDs against the registry.
+
+    Returns a list of error messages for unknown collector IDs.
+    Returns an empty list if all IDs are valid.
+    """
+    import expose.collectors.builtin  # noqa: F401, PLC0415
+    from expose.collectors.registry import DEFAULT_REGISTRY  # noqa: PLC0415
+
+    errors: list[str] = []
+    registered = set(DEFAULT_REGISTRY.all_ids())
+    for cid in collector_ids:
+        if cid not in registered:
+            errors.append(
+                f"Unknown collector_id: {cid!r}. "
+                f"Registered collectors: {sorted(registered)}"
+            )
+    return errors
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +413,21 @@ async def start_run(
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant not found")
 
+    # 1b. Validate seed formats (issue #149)
+    seed_errors: list[str] = []
+    for raw_seed in body.seeds:
+        err = _validate_seed(raw_seed)
+        if err is not None:
+            seed_errors.append(err)
+    if seed_errors:
+        raise HTTPException(status_code=422, detail=seed_errors)
+
+    # 1c. Validate collector_ids against the registry (issue #149)
+    if body.collector_ids:
+        collector_errors = _validate_collector_ids(body.collector_ids)
+        if collector_errors:
+            raise HTTPException(status_code=422, detail=collector_errors)
+
     # 2. Auto-detect seed types
     seed_objects: list[Seed] = []
     for raw_seed in body.seeds:
@@ -445,6 +529,69 @@ async def get_run(
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
     return _run_to_response(run)
+
+
+@router.get("/tenants/{tenant_id}/runs/{run_id}/artifact")
+async def download_artifact(
+    tenant_id: UUID,
+    run_id: UUID,
+    session: SessionDep,
+) -> Response:
+    """Download the canonical artifact for a completed run.
+
+    Returns the JSON artifact with ``Content-Disposition: attachment`` so
+    clients receive a downloadable file.
+
+    * **404** — run does not exist or belongs to another tenant.
+    * **409** — run exists but has not reached a terminal state yet
+      (still ``pending`` or ``running``).
+    """
+    from expose.pipeline.artifact_generator import ArtifactGenerator  # noqa: PLC0415
+    from expose.repositories.entity_repo import EntityRepository  # noqa: PLC0415
+    from expose.repositories.relationship_repo import RelationshipRepository  # noqa: PLC0415
+    from expose.repositories.run_repo import RunRepository  # noqa: PLC0415
+
+    # 1. Verify the run exists and belongs to the tenant
+    stmt = select(Run).where(Run.id == run_id, Run.tenant_id == tenant_id)
+    result = await session.execute(stmt)
+    run = result.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    # 2. Reject non-terminal runs (pending/running)
+    _terminal_states = {"completed", "failed", "partial"}
+    if run.state not in _terminal_states:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Run is still {run.state}; artifact is only available "
+            f"for completed runs",
+        )
+
+    # 3. Generate the canonical artifact
+    run_repo = RunRepository(session)
+    entity_repo = EntityRepository(session)
+    relationship_repo = RelationshipRepository(session)
+
+    generator = ArtifactGenerator(
+        entity_repo=entity_repo,
+        relationship_repo=relationship_repo,
+        run_repo=run_repo,
+    )
+
+    artifact_result = await generator.generate(
+        run_id=run_id,
+        tenant_id=tenant_id,
+    )
+
+    # 4. Return the JSON artifact as a downloadable file
+    filename = f"expose-artifact-{run_id}.json"
+    return Response(
+        content=artifact_result.json_bytes,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
 
 
 @router.get("/tenants/{tenant_id}/entities", response_model=EntityList)

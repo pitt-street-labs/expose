@@ -39,6 +39,13 @@ from collections.abc import Callable
 _HEALTH_CACHE_TTL = 60.0
 _health_cache: dict[str, tuple[float, "CollectorHealthCheck"]] = {}
 
+# Per-collector-ID asyncio.Lock to prevent thundering-herd on concurrent
+# health checks for the same collector (issue #156).  When multiple
+# dispatches for the same collector_id arrive concurrently, only the first
+# performs the actual health probe; the rest wait on the lock and read the
+# now-cached result.
+_health_locks: dict[str, asyncio.Lock] = {}
+
 # Timeout constants for wait_for wrappers (seconds).
 HEALTH_CHECK_TIMEOUT = 30.0
 EXPAND_TIMEOUT = 120.0
@@ -367,29 +374,35 @@ class PipelineDispatcher:
         collector: Collector = collector_cls(config)
 
         try:
-            # Health check with TTL cache + 30-second timeout
-            now = time.monotonic()
-            cached = _health_cache.get(job.collector_id)
-            if cached is not None and (now - cached[0]) < _HEALTH_CACHE_TTL:
-                health = cached[1]
-            else:
-                try:
-                    health = await asyncio.wait_for(
-                        collector.health_check(),
-                        timeout=HEALTH_CHECK_TIMEOUT,
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "Health check for collector %s timed out after %ss",
-                        job.collector_id,
-                        HEALTH_CHECK_TIMEOUT,
-                    )
-                    return DispatchResult(
-                        status=DispatchStatus.HEALTH_CHECK_FAILED,
-                        error_message=f"Health check timed out after {HEALTH_CHECK_TIMEOUT}s",
-                        duration_ms=_elapsed_ms(start_ns),
-                    )
-                _health_cache[job.collector_id] = (now, health)
+            # Health check with TTL cache + per-collector lock to prevent
+            # thundering-herd (issue #156) + 30-second timeout.
+            if job.collector_id not in _health_locks:
+                _health_locks[job.collector_id] = asyncio.Lock()
+            health_lock = _health_locks[job.collector_id]
+
+            async with health_lock:
+                now = time.monotonic()
+                cached = _health_cache.get(job.collector_id)
+                if cached is not None and (now - cached[0]) < _HEALTH_CACHE_TTL:
+                    health = cached[1]
+                else:
+                    try:
+                        health = await asyncio.wait_for(
+                            collector.health_check(),
+                            timeout=HEALTH_CHECK_TIMEOUT,
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "Health check for collector %s timed out after %ss",
+                            job.collector_id,
+                            HEALTH_CHECK_TIMEOUT,
+                        )
+                        return DispatchResult(
+                            status=DispatchStatus.HEALTH_CHECK_FAILED,
+                            error_message=f"Health check timed out after {HEALTH_CHECK_TIMEOUT}s",
+                            duration_ms=_elapsed_ms(start_ns),
+                        )
+                    _health_cache[job.collector_id] = (now, health)
 
             if health.status not in (
                 CollectorStatus.SUCCESS,
@@ -595,12 +608,13 @@ def _elapsed_ms(start_ns: int) -> float:
 
 
 def clear_health_cache() -> None:
-    """Clear the module-level health-check cache.
+    """Clear the module-level health-check cache and lock map.
 
     Call at the start of each pipeline run to ensure fresh health probes
     for the first dispatch of each collector.
     """
     _health_cache.clear()
+    _health_locks.clear()
 
 
 __all__ = [
@@ -610,6 +624,7 @@ __all__ = [
     "EXPAND_TIMEOUT",
     "HEALTH_CHECK_TIMEOUT",
     "PipelineDispatcher",
+    "_health_locks",
     "clear_health_cache",
     "current_tenant_id",
 ]

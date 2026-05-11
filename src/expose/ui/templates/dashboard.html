@@ -386,10 +386,20 @@
     <main class="split-pane">
 
         <!-- Left pane: observation graph -->
-        <section class="pane pane-left" aria-label="Observation graph">
+        <section class="pane pane-left" aria-label="Observation graph"
+                 x-data="graphFilters()">
             <div class="pane-header">
                 <h2 class="pane-title">Observation Graph <span class="help-tip" data-tip="Force-directed graph showing discovered entities and their relationships. Nodes = entities (domains, IPs, orgs). Edges = relationships (DNS resolution, CNAME chains, M&amp;A ownership). Click nodes for details.">i</span></h2>
-                <div class="pane-actions">
+                <div class="pane-actions" style="display: flex; gap: 0.5rem; align-items: center;">
+                    <span class="graph-filter-counts"
+                          style="font-size: 0.7rem; font-family: var(--font-mono); color: var(--text-dim);"
+                          x-show="selectedTenantId" x-cloak
+                          x-text="visibleNodes + 'N / ' + visibleEdges + 'E'"></span>
+                    <button class="btn btn-ghost"
+                            @click="showGraphFilters = !showGraphFilters"
+                            :style="showGraphFilters ? 'color: var(--accent);' : ''">
+                        Filters
+                    </button>
                     <button class="btn btn-ghost"
                             @click="graphLayout = graphLayout === 'force' ? 'radial' : 'force'"
                             x-text="graphLayout === 'force' ? 'Radial' : 'Force'">
@@ -397,6 +407,90 @@
                     </button>
                 </div>
             </div>
+
+            <!-- ===== Graph Filter Panel ===== -->
+            <div class="graph-filter-panel" x-show="showGraphFilters" x-cloak x-transition>
+                <div class="graph-filter-grid">
+                    <!-- Entity Types -->
+                    <div class="graph-filter-section">
+                        <div class="graph-filter-section-title">Entity Types</div>
+                        <div class="graph-filter-checkboxes">
+                            <template x-for="et in entityTypeOptions" :key="et.value">
+                                <label class="graph-filter-checkbox">
+                                    <input type="checkbox"
+                                           :value="et.value"
+                                           :checked="selectedEntityTypes.includes(et.value)"
+                                           @change="toggleEntityType(et.value)">
+                                    <span x-text="et.label"></span>
+                                </label>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Edge Types -->
+                    <div class="graph-filter-section">
+                        <div class="graph-filter-section-title">Edge Types</div>
+                        <div class="graph-filter-checkboxes">
+                            <template x-for="edge in edgeTypeOptions" :key="edge.value">
+                                <label class="graph-filter-checkbox">
+                                    <input type="checkbox"
+                                           :value="edge.value"
+                                           :checked="selectedEdgeTypes.includes(edge.value)"
+                                           @change="toggleEdgeType(edge.value)">
+                                    <span class="graph-filter-edge-swatch"
+                                          :style="'background:' + edgeColor(edge.value)"></span>
+                                    <span x-text="edge.label"></span>
+                                </label>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Attribution Tiers -->
+                    <div class="graph-filter-section">
+                        <div class="graph-filter-section-title">Attribution Tier</div>
+                        <div class="graph-filter-checkboxes">
+                            <template x-for="tier in tierOptions" :key="tier.value">
+                                <label class="graph-filter-checkbox">
+                                    <input type="checkbox"
+                                           :value="tier.value"
+                                           :checked="selectedTiers.includes(tier.value)"
+                                           @change="toggleTier(tier.value)">
+                                    <span class="graph-filter-tier-dot"
+                                          :style="'background:' + tierColor(tier.value)"></span>
+                                    <span x-text="tier.label"></span>
+                                </label>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Confidence Slider -->
+                    <div class="graph-filter-section">
+                        <div class="graph-filter-section-title">
+                            Min Confidence
+                            <span style="font-family: var(--font-mono); font-weight: 600; margin-left: 0.5rem;"
+                                  x-text="minConfidence.toFixed(2)"></span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <span style="font-size: 0.65rem; color: var(--text-dim);">0.0</span>
+                            <input type="range" min="0" max="1" step="0.05"
+                                   x-model.number="minConfidence"
+                                   @input="pushFilters()"
+                                   class="graph-filter-slider">
+                            <span style="font-size: 0.65rem; color: var(--text-dim);">1.0</span>
+                        </div>
+                    </div>
+                </div>
+                <!-- Quick actions -->
+                <div class="graph-filter-actions">
+                    <button class="btn btn-ghost" style="font-size: 0.7rem; padding: 2px 8px;"
+                            @click="selectAll()">All</button>
+                    <button class="btn btn-ghost" style="font-size: 0.7rem; padding: 2px 8px;"
+                            @click="selectNone()">None</button>
+                    <button class="btn btn-ghost" style="font-size: 0.7rem; padding: 2px 8px;"
+                            @click="resetFilters()">Reset</button>
+                </div>
+            </div>
+
             <div id="observation-graph" class="graph-container">
                 <!-- D3 renders here -->
                 <noscript>
@@ -992,9 +1086,288 @@
     border-radius: 4px;
     background: var(--border);
 }
+
+/* ===== Graph Filter Panel ===== */
+.graph-filter-panel {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: var(--space-sm) var(--space-md);
+    animation: emerge 0.15s ease-out;
+}
+.graph-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: var(--space-sm) var(--space-md);
+}
+.graph-filter-section {
+    min-width: 0;
+}
+.graph-filter-section-title {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+}
+.graph-filter-checkboxes {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.graph-filter-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: var(--text-secondary, #cbd5e1);
+    cursor: pointer;
+    padding: 1px 0;
+    transition: color var(--transition-fast);
+}
+.graph-filter-checkbox:hover {
+    color: var(--text-primary);
+}
+.graph-filter-checkbox input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--surface-raised);
+    cursor: pointer;
+    position: relative;
+    flex-shrink: 0;
+    transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+.graph-filter-checkbox input[type="checkbox"]:checked {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+.graph-filter-checkbox input[type="checkbox"]:checked::after {
+    content: "";
+    position: absolute;
+    top: 1px;
+    left: 4px;
+    width: 4px;
+    height: 8px;
+    border: solid var(--bg-primary, #0a0a0f);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+.graph-filter-edge-swatch {
+    display: inline-block;
+    width: 12px;
+    height: 3px;
+    border-radius: 1px;
+    flex-shrink: 0;
+}
+.graph-filter-tier-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.graph-filter-slider {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+}
+.graph-filter-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--surface);
+    cursor: pointer;
+    box-shadow: 0 0 4px rgba(99, 102, 241, 0.3);
+}
+.graph-filter-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--surface);
+    cursor: pointer;
+    box-shadow: 0 0 4px rgba(99, 102, 241, 0.3);
+}
+.graph-filter-actions {
+    display: flex;
+    gap: 4px;
+    margin-top: var(--space-xs);
+    padding-top: var(--space-xs);
+    border-top: 1px solid var(--border-subtle);
+}
 </style>
 
 <script>
+/**
+ * Alpine.js component for the graph filter panel.
+ * Manages checkbox state for entity types, edge types, and attribution
+ * tiers plus a confidence slider.  Pushes filter changes to
+ * ExposeGraph.setFilters() which hides/shows D3 elements in-place
+ * without re-fetching data.
+ */
+function graphFilters() {
+    return {
+        showGraphFilters: false,
+
+        // Visible counts (updated by ExposeGraph callback)
+        visibleNodes: 0,
+        visibleEdges: 0,
+
+        // Entity type filter
+        entityTypeOptions: [
+            { value: "domain",                   label: "Domain" },
+            { value: "ip",                       label: "IP" },
+            { value: "cloud_resource_id",        label: "Cloud Resource" },
+            { value: "certificate_fingerprint",  label: "Certificate" },
+            { value: "organization",             label: "Organization" },
+            { value: "provider",                 label: "Provider" },
+        ],
+        selectedEntityTypes: ["domain", "ip", "cloud_resource_id", "certificate_fingerprint", "organization", "provider"],
+
+        // Edge type filter
+        edgeTypeOptions: [
+            { value: "resolves_to",     label: "resolves_to" },
+            { value: "cname_for",       label: "cname_for" },
+            { value: "mx_for",          label: "mx_for" },
+            { value: "ns_for",          label: "ns_for" },
+            { value: "certificate_for", label: "certificate_for" },
+            { value: "hosts",           label: "hosts" },
+            { value: "belongs_to",      label: "belongs_to" },
+            { value: "acquired_by",     label: "acquired_by" },
+            { value: "depends_on",      label: "depends_on" },
+        ],
+        selectedEdgeTypes: ["resolves_to", "cname_for", "mx_for", "ns_for", "certificate_for", "hosts", "belongs_to", "acquired_by", "depends_on"],
+
+        // Attribution tier filter
+        tierOptions: [
+            { value: "confirmed",    label: "Confirmed" },
+            { value: "high",         label: "High" },
+            { value: "medium",       label: "Medium" },
+            { value: "unattributed", label: "Unattributed" },
+        ],
+        selectedTiers: ["confirmed", "high", "medium", "unattributed"],
+
+        // Confidence slider
+        minConfidence: 0.0,
+
+        /** Edge color lookup for the filter swatch. */
+        edgeColor(type) {
+            var colors = {
+                resolves_to:     "#4CAF50",
+                cname_for:       "#2196F3",
+                mx_for:          "#FF9800",
+                ns_for:          "#9C27B0",
+                acquired_by:     "#F44336",
+                depends_on:      "#795548",
+                certificate_for: "#00BCD4",
+                hosts:           "#607D8B",
+                belongs_to:      "#FFEB3B",
+            };
+            return colors[type] || "#5b7ca3";
+        },
+
+        /** Tier color lookup for the filter dot. */
+        tierColor(tier) {
+            var colors = {
+                confirmed:    "#f5deb3",
+                high:         "#d4a020",
+                medium:       "#5b7ca3",
+                unattributed: "#4a5568",
+            };
+            return colors[tier] || "#4a5568";
+        },
+
+        toggleEntityType(val) {
+            var idx = this.selectedEntityTypes.indexOf(val);
+            if (idx >= 0) {
+                this.selectedEntityTypes.splice(idx, 1);
+            } else {
+                this.selectedEntityTypes.push(val);
+            }
+            this.pushFilters();
+        },
+
+        toggleEdgeType(val) {
+            var idx = this.selectedEdgeTypes.indexOf(val);
+            if (idx >= 0) {
+                this.selectedEdgeTypes.splice(idx, 1);
+            } else {
+                this.selectedEdgeTypes.push(val);
+            }
+            this.pushFilters();
+        },
+
+        toggleTier(val) {
+            var idx = this.selectedTiers.indexOf(val);
+            if (idx >= 0) {
+                this.selectedTiers.splice(idx, 1);
+            } else {
+                this.selectedTiers.push(val);
+            }
+            this.pushFilters();
+        },
+
+        /** Push current filter state to the D3 graph renderer. */
+        pushFilters() {
+            if (typeof ExposeGraph !== "undefined") {
+                ExposeGraph.setFilters({
+                    entityTypes:      this.selectedEntityTypes.slice(),
+                    edgeTypes:        this.selectedEdgeTypes.slice(),
+                    attributionTiers: this.selectedTiers.slice(),
+                    minConfidence:    this.minConfidence,
+                });
+            }
+        },
+
+        /** Select all checkboxes in all groups. */
+        selectAll() {
+            this.selectedEntityTypes = this.entityTypeOptions.map(function (o) { return o.value; });
+            this.selectedEdgeTypes   = this.edgeTypeOptions.map(function (o) { return o.value; });
+            this.selectedTiers       = this.tierOptions.map(function (o) { return o.value; });
+            this.minConfidence       = 0.0;
+            this.pushFilters();
+        },
+
+        /** Deselect all checkboxes (graph will hide everything). */
+        selectNone() {
+            this.selectedEntityTypes = [];
+            this.selectedEdgeTypes   = [];
+            this.selectedTiers       = [];
+            this.pushFilters();
+        },
+
+        /** Reset to default state (everything visible, slider at 0). */
+        resetFilters() {
+            this.selectAll();
+        },
+
+        init() {
+            var self = this;
+            // Register for count updates from ExposeGraph.
+            if (typeof ExposeGraph !== "undefined") {
+                ExposeGraph.onFilterChange(function (nodes, edges) {
+                    self.visibleNodes = nodes;
+                    self.visibleEdges = edges;
+                });
+            }
+        },
+    };
+}
+
 function aiInsights() {
     return {
         insights: [],

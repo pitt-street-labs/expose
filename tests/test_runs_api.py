@@ -1,4 +1,4 @@
-"""Tests for the run results API (issue #10).
+"""Tests for the run results API (issue #10) and artifact download (issue #112).
 
 Uses an in-memory SQLite database via ``aiosqlite`` for speed — no Docker or
 testcontainers required.  The FastAPI ``get_session`` dependency is overridden
@@ -17,10 +17,18 @@ Covers:
 10. Entities are tenant-scoped (tenant A can't see tenant B's entities)
 11. Get run with wrong tenant → 404 (cross-tenant invisibility)
 12. Get entity with wrong tenant → 404 (cross-tenant invisibility)
+20. Download artifact for completed run → 200
+21. Download artifact for nonexistent run → 404
+22. Download artifact for pending run → 409
+23. Download artifact for running run → 409
+24. Download artifact for failed run → 200 (failed is terminal)
+25. Download artifact for wrong tenant → 404 (cross-tenant invisibility)
+26. Downloaded artifact contains valid JSON with expected schema fields
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -507,12 +515,12 @@ async def test_start_run_specific_collectors(
         f"/v1/tenants/{tid}/runs",
         json={
             "seeds": ["example.com"],
-            "collector_ids": ["ct-crtsh", "cloud-aws-ranges"],
+            "collector_ids": ["ct-crtsh", "cloud-ranges"],
         },
     )
     assert resp.status_code == 202
     data = resp.json()
-    assert data["collector_ids"] == ["ct-crtsh", "cloud-aws-ranges"]
+    assert data["collector_ids"] == ["ct-crtsh", "cloud-ranges"]
 
 
 # === 17. POST with auto-detected seed types (domain + IP mix) =================
@@ -592,3 +600,321 @@ async def test_start_run_creates_db_row(
     assert data["id"] == run_id
     assert data["tenant_id"] == str(tid)
     assert data["state"] == "pending"
+
+
+# === 20. Download artifact for completed run → 200 ==========================
+
+
+async def test_download_artifact_completed_run(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    tid = await _seed_tenant(session_factory, "artifact-completed-tenant")
+    rid = await _seed_run(
+        session_factory, tenant_id=tid, state="completed", pipeline_version="1.0.0"
+    )
+    # Seed an entity so the artifact has content
+    await _seed_entity(
+        session_factory, tenant_id=tid, canonical_identifier="artifact-test.example.com"
+    )
+
+    resp = await client.get(f"/v1/tenants/{tid}/runs/{rid}/artifact")
+    assert resp.status_code == 200
+
+    # Verify response headers
+    assert resp.headers["content-type"] == "application/json"
+    content_disp = resp.headers["content-disposition"]
+    assert "attachment" in content_disp
+    assert f"expose-artifact-{rid}.json" in content_disp
+
+    # Verify response body is valid JSON with expected top-level keys
+    body = json.loads(resp.content)
+    assert "schema_version" in body
+    assert body["schema_version"] == "expose/v1"
+    assert "run" in body
+    assert "tenant" in body
+    assert "targets" in body
+    assert body["run"]["run_id"] == str(rid)
+    assert body["tenant"]["tenant_id"] == str(tid)
+    # The seeded entity should appear as a target
+    assert len(body["targets"]) >= 1
+
+
+# === 21. Download artifact for nonexistent run → 404 ========================
+
+
+async def test_download_artifact_nonexistent_run(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    tid = await _seed_tenant(session_factory, "artifact-no-run-tenant")
+    fake_id = uuid4()
+    resp = await client.get(f"/v1/tenants/{tid}/runs/{fake_id}/artifact")
+    assert resp.status_code == 404
+
+
+# === 22. Download artifact for pending run → 409 ============================
+
+
+async def test_download_artifact_pending_run(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    tid = await _seed_tenant(session_factory, "artifact-pending-tenant")
+    rid = await _seed_run(session_factory, tenant_id=tid, state="pending")
+
+    resp = await client.get(f"/v1/tenants/{tid}/runs/{rid}/artifact")
+    assert resp.status_code == 409
+    data = resp.json()
+    assert "pending" in data["detail"]
+
+
+# === 23. Download artifact for running run → 409 ============================
+
+
+async def test_download_artifact_running_run(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    tid = await _seed_tenant(session_factory, "artifact-running-tenant")
+    rid = await _seed_run(session_factory, tenant_id=tid, state="running")
+
+    resp = await client.get(f"/v1/tenants/{tid}/runs/{rid}/artifact")
+    assert resp.status_code == 409
+    data = resp.json()
+    assert "running" in data["detail"]
+
+
+# === 24. Download artifact for failed run → 200 (failed is terminal) ========
+
+
+async def test_download_artifact_failed_run(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    tid = await _seed_tenant(session_factory, "artifact-failed-tenant")
+    rid = await _seed_run(session_factory, tenant_id=tid, state="failed")
+
+    resp = await client.get(f"/v1/tenants/{tid}/runs/{rid}/artifact")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/json"
+    body = json.loads(resp.content)
+    assert body["schema_version"] == "expose/v1"
+
+
+# === 25. Download artifact for wrong tenant → 404 (cross-tenant) ============
+
+
+async def test_download_artifact_wrong_tenant(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    tid_a = await _seed_tenant(session_factory, "artifact-cross-a")
+    tid_b = await _seed_tenant(session_factory, "artifact-cross-b")
+    rid = await _seed_run(session_factory, tenant_id=tid_a, state="completed")
+
+    # Trying to download tenant A's artifact via tenant B's path → 404
+    resp = await client.get(f"/v1/tenants/{tid_b}/runs/{rid}/artifact")
+    assert resp.status_code == 404
+
+
+# === 26. Downloaded artifact contains valid JSON with schema fields ==========
+
+
+async def test_download_artifact_json_structure(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    tid = await _seed_tenant(session_factory, "artifact-structure-tenant")
+    rid = await _seed_run(
+        session_factory, tenant_id=tid, state="completed", pipeline_version="1.0.0"
+    )
+    # Seed two entities for a richer artifact
+    await _seed_entity(
+        session_factory, tenant_id=tid, canonical_identifier="alpha.example.com"
+    )
+    await _seed_entity(
+        session_factory,
+        tenant_id=tid,
+        entity_type="IP",
+        canonical_identifier="192.0.2.42",
+    )
+
+    resp = await client.get(f"/v1/tenants/{tid}/runs/{rid}/artifact")
+    assert resp.status_code == 200
+
+    body = json.loads(resp.content)
+
+    # Verify full structure
+    assert body["schema_version"] == "expose/v1"
+
+    # Run metadata
+    run_data = body["run"]
+    assert run_data["run_id"] == str(rid)
+    assert "started_at" in run_data
+    assert "completed_at" in run_data
+    assert "pipeline_version" in run_data
+
+    # Tenant metadata
+    tenant_data = body["tenant"]
+    assert tenant_data["tenant_id"] == str(tid)
+
+    # Targets — should have both seeded entities
+    assert len(body["targets"]) == 2
+    target_identifiers = {t["primary_identifier"]["value"] for t in body["targets"]}
+    assert "alpha.example.com" in target_identifiers
+    assert "192.0.2.42" in target_identifiers
+
+    # Each target should have required fields
+    for target in body["targets"]:
+        assert "target_id" in target
+        assert "primary_identifier" in target
+        assert "attribution" in target
+        assert "provenance" in target
+        assert "lead_score" in target
+
+    # Delta and collector health are present
+    assert "delta_from_previous_run" in body
+    assert "collector_health" in body
+
+
+# === 27. POST with invalid seed format → 422 =================================
+
+
+async def test_start_run_invalid_seed_format(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Seeds that are not valid domains, IPs, or CIDRs are rejected with 422."""
+    tid = await _seed_tenant(session_factory, "invalid-seed-tenant")
+    resp = await client.post(
+        f"/v1/tenants/{tid}/runs",
+        json={"seeds": ["not a valid seed!!"]},
+    )
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert isinstance(detail, list)
+    assert any("Invalid seed format" in err for err in detail)
+
+
+# === 28. POST with multiple invalid seeds → 422 with all errors ==============
+
+
+async def test_start_run_multiple_invalid_seeds(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Multiple invalid seeds produce multiple error messages."""
+    tid = await _seed_tenant(session_factory, "multi-invalid-seed-tenant")
+    resp = await client.post(
+        f"/v1/tenants/{tid}/runs",
+        json={"seeds": ["bad seed 1!", "bad seed @#$"]},
+    )
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert len(detail) == 2
+
+
+# === 29. POST with valid domain seed → 202 ===================================
+
+
+async def test_start_run_valid_domain_seed(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A valid domain seed is accepted."""
+    tid = await _seed_tenant(session_factory, "valid-domain-seed-tenant")
+    resp = await client.post(
+        f"/v1/tenants/{tid}/runs",
+        json={"seeds": ["sub.example.com"]},
+    )
+    assert resp.status_code == 202
+
+
+# === 30. POST with valid IP seed → 202 =======================================
+
+
+async def test_start_run_valid_ip_seed(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A valid IPv4 address seed is accepted."""
+    tid = await _seed_tenant(session_factory, "valid-ip-seed-tenant")
+    resp = await client.post(
+        f"/v1/tenants/{tid}/runs",
+        json={"seeds": ["192.168.1.1"]},
+    )
+    assert resp.status_code == 202
+
+
+# === 31. POST with valid CIDR seed → 202 =====================================
+
+
+async def test_start_run_valid_cidr_seed(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A valid CIDR notation seed is accepted."""
+    tid = await _seed_tenant(session_factory, "valid-cidr-seed-tenant")
+    resp = await client.post(
+        f"/v1/tenants/{tid}/runs",
+        json={"seeds": ["10.0.0.0/24"]},
+    )
+    assert resp.status_code == 202
+
+
+# === 32. POST with valid IPv6 seed → 202 =====================================
+
+
+async def test_start_run_valid_ipv6_seed(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A valid IPv6 address seed is accepted."""
+    tid = await _seed_tenant(session_factory, "valid-ipv6-seed-tenant")
+    resp = await client.post(
+        f"/v1/tenants/{tid}/runs",
+        json={"seeds": ["2001:db8::1"]},
+    )
+    assert resp.status_code == 202
+
+
+# === 33. POST with unknown collector_ids → 422 ===============================
+
+
+async def test_start_run_unknown_collector_ids(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Unknown collector IDs are rejected with 422."""
+    tid = await _seed_tenant(session_factory, "unknown-collector-tenant")
+    resp = await client.post(
+        f"/v1/tenants/{tid}/runs",
+        json={
+            "seeds": ["example.com"],
+            "collector_ids": ["nonexistent-collector-xyz"],
+        },
+    )
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert isinstance(detail, list)
+    assert any("Unknown collector_id" in err for err in detail)
+
+
+# === 34. POST with no collector_ids (default) → 202 ==========================
+
+
+async def test_start_run_no_collector_ids_defaults(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """When collector_ids is not provided, Tier-1 defaults are used (no 422)."""
+    tid = await _seed_tenant(session_factory, "default-collectors-tenant")
+    resp = await client.post(
+        f"/v1/tenants/{tid}/runs",
+        json={"seeds": ["example.com"]},
+    )
+    assert resp.status_code == 202
+    data = resp.json()
+    assert isinstance(data["collector_ids"], list)
+    assert len(data["collector_ids"]) > 0

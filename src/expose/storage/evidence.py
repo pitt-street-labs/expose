@@ -36,6 +36,7 @@ module tenant-agnostic and testable without tenant fixtures.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from uuid import UUID
@@ -53,6 +54,8 @@ from expose.storage.base import StorageBackend, StorageKeyNotFoundError
 _EVIDENCE_PREFIX = "evidence"
 _META_PREFIX = "evidence/meta"
 _DEFAULT_RETENTION_SECONDS = 90 * 24 * 3600  # 90 days
+_BATCH_SIZE = 100
+_META_FETCH_BATCH_SIZE = 50
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +295,11 @@ class EvidenceManager:
         by ``metadata.entity_id``.  For production scale this would be
         backed by a database index; the storage-scan approach is acceptable
         for lab/dev deployments.
+
+        Keys are processed in batches of ``_BATCH_SIZE`` to avoid loading
+        all metadata into memory at once.  Within each batch, metadata
+        fetches are parallelised in sub-batches of ``_META_FETCH_BATCH_SIZE``
+        via ``asyncio.gather`` (issue #154).
         """
         meta_prefix = (
             f"{self._key_prefix}/{_META_PREFIX}"
@@ -302,16 +310,29 @@ class EvidenceManager:
         results: list[EvidenceRef] = []
         entity_str = str(entity_id)
 
-        for key in keys:
-            try:
-                meta_bytes = await self._backend.get(key)
-                ref = EvidenceRef.model_validate_json(meta_bytes)
-                # Match on entity_id in the metadata dict.
-                if ref.metadata.get("entity_id") == entity_str:
-                    results.append(ref)
-            except (StorageKeyNotFoundError, Exception):
-                # Skip corrupt or deleted sidecars.
-                continue
+        for batch_start in range(0, len(keys), _BATCH_SIZE):
+            batch_keys = keys[batch_start : batch_start + _BATCH_SIZE]
+
+            # Fetch metadata in sub-batches of _META_FETCH_BATCH_SIZE
+            for fetch_start in range(0, len(batch_keys), _META_FETCH_BATCH_SIZE):
+                fetch_keys = batch_keys[
+                    fetch_start : fetch_start + _META_FETCH_BATCH_SIZE
+                ]
+
+                async def _fetch_ref(key: str) -> EvidenceRef | None:
+                    try:
+                        meta_bytes = await self._backend.get(key)
+                        ref = EvidenceRef.model_validate_json(meta_bytes)
+                        if ref.metadata.get("entity_id") == entity_str:
+                            return ref
+                    except (StorageKeyNotFoundError, Exception):
+                        pass
+                    return None
+
+                refs = await asyncio.gather(
+                    *[_fetch_ref(k) for k in fetch_keys],
+                )
+                results.extend(r for r in refs if r is not None)
 
         return results
 
@@ -321,6 +342,10 @@ class EvidenceManager:
         Scans all metadata sidecars, computes expiry from
         ``stored_at + retention_seconds``, and deletes expired blobs
         along with their metadata.
+
+        Keys are processed in batches of ``_BATCH_SIZE`` with metadata
+        fetches parallelised in sub-batches of ``_META_FETCH_BATCH_SIZE``
+        via ``asyncio.gather`` (issue #154).
 
         Returns:
             List of content hashes that were expired and deleted.
@@ -334,16 +359,33 @@ class EvidenceManager:
         now = datetime.now(tz=UTC)
         expired: list[str] = []
 
-        for key in keys:
-            try:
-                meta_bytes = await self._backend.get(key)
-                ref = EvidenceRef.model_validate_json(meta_bytes)
-                expiry = ref.stored_at.timestamp() + ref.retention_seconds
-                if now.timestamp() >= expiry:
-                    await self.delete(ref.content_hash)
-                    expired.append(ref.content_hash)
-            except (StorageKeyNotFoundError, Exception):
-                continue
+        for batch_start in range(0, len(keys), _BATCH_SIZE):
+            batch_keys = keys[batch_start : batch_start + _BATCH_SIZE]
+
+            # Fetch metadata in sub-batches of _META_FETCH_BATCH_SIZE
+            for fetch_start in range(0, len(batch_keys), _META_FETCH_BATCH_SIZE):
+                fetch_keys = batch_keys[
+                    fetch_start : fetch_start + _META_FETCH_BATCH_SIZE
+                ]
+
+                async def _fetch_ref(key: str) -> EvidenceRef | None:
+                    try:
+                        meta_bytes = await self._backend.get(key)
+                        return EvidenceRef.model_validate_json(meta_bytes)
+                    except (StorageKeyNotFoundError, Exception):
+                        return None
+
+                refs = await asyncio.gather(
+                    *[_fetch_ref(k) for k in fetch_keys],
+                )
+
+                for ref in refs:
+                    if ref is None:
+                        continue
+                    expiry = ref.stored_at.timestamp() + ref.retention_seconds
+                    if now.timestamp() >= expiry:
+                        await self.delete(ref.content_hash)
+                        expired.append(ref.content_hash)
 
         return expired
 
