@@ -66,7 +66,7 @@ def _dns_resolve_all(monkeypatch: pytest.MonkeyPatch) -> None:
     wins because pytest processes fixtures before test-level patches).
     """
     def _fake_getaddrinfo(host, port, family=0, type_=0):
-        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0))]
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
 
     monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo)
 
@@ -1340,7 +1340,7 @@ async def test_dns_filter_org_expansion_filters_nonexistent_tlds(
 
     def _selective_getaddrinfo(host, port, family=0, type_=0):
         if host in _resolving:
-            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.1", 0))]
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
         raise socket.gaierror("NXDOMAIN")
 
     monkeypatch.setattr(socket, "getaddrinfo", _selective_getaddrinfo)

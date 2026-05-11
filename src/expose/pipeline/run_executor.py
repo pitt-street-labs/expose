@@ -221,7 +221,7 @@ class RunExecutor:
             return seeds
 
         async def _check_domain(seed: Seed) -> Seed | None:
-            """Return the seed if it resolves, None otherwise."""
+            """Return the seed if it resolves to a non-private IP, None otherwise."""
             try:
                 result = await asyncio.wait_for(
                     asyncio.get_event_loop().run_in_executor(
@@ -235,6 +235,17 @@ class RunExecutor:
                     timeout=3.0,
                 )
                 if result:
+                    # SSRF check: reject domains that resolve to private IPs
+                    from expose.egress.ip_guard import is_private_ip
+
+                    for entry in result:
+                        if is_private_ip(entry[4][0]):
+                            self._log(
+                                "warn",
+                                f"SSRF blocked: {seed.value} resolves to "
+                                f"private IP {entry[4][0]}",
+                            )
+                            return None
                     return seed
             except (TimeoutError, socket.gaierror, OSError):
                 pass
@@ -597,15 +608,16 @@ class RunExecutor:
             async with semaphore:
                 try:
                     result = await self._dispatcher.dispatch(job)
-                except Exception:
-                    logger.exception(
-                        "Dispatch raised for collector=%s seed=%s",
+                except Exception as e:
+                    logger.warning(
+                        "Dispatch exception for %s on %s",
                         collector_id,
                         seed.value,
+                        exc_info=True,
                     )
                     self._log(
-                        "error",
-                        f"{collector_id} raised exception for {seed.value}",
+                        "warn",
+                        f"{collector_id} dispatch exception: {type(e).__name__}",
                     )
                     return (seed.value, collector_id, None)
                 return (seed.value, collector_id, result)

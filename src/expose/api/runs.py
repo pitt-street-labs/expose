@@ -25,6 +25,8 @@ if TYPE_CHECKING:
     from expose.api.events import RunEventBus
     from expose.collectors.base import Seed
 
+from expose.types.shared import RunId, TenantId
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -277,6 +279,21 @@ async def _run_pipeline_background(
             run_id,
             tenant_id,
         )
+        # Update run state to 'failed' so it doesn't stay 'pending' forever.
+        # Use a fresh session because the original may be in a broken state.
+        try:
+            async with session_factory() as error_session:
+                from expose.repositories.run_repo import RunRepository  # noqa: PLC0415
+
+                error_repo = RunRepository(error_session)
+                await error_repo.update_state(
+                    tenant_id=TenantId(tenant_id),
+                    run_id=RunId(run_id),
+                    new_state="failed",
+                )
+                await error_session.commit()
+        except Exception:
+            logger.exception("Failed to update run state to 'failed'")
 
 
 @router.post("/tenants/{tenant_id}/runs", status_code=202, response_model=RunStarted)

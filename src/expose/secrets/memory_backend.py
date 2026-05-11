@@ -10,8 +10,10 @@ rather than allowing tenant A queries to ever see tenant B's storage.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import os
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Final
@@ -53,15 +55,21 @@ class InMemoryBackend(SecretsBackend):
         except Exception:
             logger.warning("Failed to load credentials from %s", self._persist_path, exc_info=True)
 
-    def _save_to_disk(self) -> None:
+    async def _save_to_disk(self) -> None:
         if not self._persist_path:
             return
         try:
-            data = [{"t": t, "k": k, "v": v} for (t, k), v in self._store.items()]
-            self._persist_path.write_text(json.dumps(data))
-            self._persist_path.chmod(0o600)
+            data = json.dumps([{"t": t, "k": k, "v": v} for (t, k), v in self._store.items()])
+            await asyncio.to_thread(self._write_file, data)
         except Exception:
             logger.warning("Failed to save credentials to %s", self._persist_path, exc_info=True)
+
+    def _write_file(self, data: str) -> None:
+        fd = os.open(str(self._persist_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, data.encode())
+        finally:
+            os.close(fd)
 
     async def get(self, *, tenant_id: UUID, key: str) -> str:
         try:
@@ -73,11 +81,11 @@ class InMemoryBackend(SecretsBackend):
 
     async def set(self, *, tenant_id: UUID, key: str, value: str) -> None:
         self._store[(str(tenant_id), key)] = value
-        self._save_to_disk()
+        await self._save_to_disk()
 
     async def delete(self, *, tenant_id: UUID, key: str) -> None:
         self._store.pop((str(tenant_id), key), None)
-        self._save_to_disk()
+        await self._save_to_disk()
 
     async def list_keys(self, *, tenant_id: UUID) -> Sequence[str]:
         target = str(tenant_id)
