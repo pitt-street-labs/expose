@@ -359,7 +359,11 @@ class EntityRepository:
                 attribution_confidence=bindparam("new_confidence"),
             )
         )
-        await self._session.execute(bulk_update, values_params)
+        await self._session.execute(
+            bulk_update,
+            values_params,
+            execution_options={"synchronize_session": False},
+        )
         await self._session.flush()
         return len(updates)
 
