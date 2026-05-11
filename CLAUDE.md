@@ -71,7 +71,7 @@ This repository (`pitt-street-labs/ff6k` on internal Gitea — repo path retains
 | Helm chart | `deploy/helm-chart/` (skeleton — full per-component manifests land Sprint 5+) |
 | CI workflow | `.github/workflows/ci.yml` (lint + test + schema-sync + FIPS gate + helm-lint + multi-arch container build + ci-gate aggregator) |
 | Pre-commit | `.pre-commit-config.yaml` (ruff + gitleaks + check-jsonschema + helm lint) |
-| Tests | `tests/` — **4357+ tests as of e74e8e6.** 130+ test files. Conftest provides `pg_container` + `nats_container` shared session fixtures. aiosqlite for fast API unit tests. #73 fixed. |
+| Tests | `tests/` — **4651+ tests as of 92e5c65.** 145+ test files. Conftest provides `pg_container` + `nats_container` shared session fixtures. aiosqlite for fast API unit tests. #73 fixed. |
 | Deploy artifacts | `deploy/helm-chart/` (NetworkPolicy + PodSecurity hardened), `deploy/cosign-keypair-setup.md`, `deploy/grafana/` (2 dashboards + README), `scripts/generate-sbom.sh` |
 | Strategy docs | `docs/strategy/` — postgres-deployment-guide, lab-to-production-runbook, network-security-guide, sbom-and-signing-guide, air-gap-deployment-guide, persona-analysis, competitive-analysis, framework-annotation, sdlp, federal-customer-deployment-guide, critical-path, commercial-moat-and-revenue, framework-mapping |
 | GitHub-launch docs | `README.md` (public-facing), `CHANGELOG.md` (v0.2.0), `ROADMAP.md`, `GOVERNANCE.md`, `CONTRIBUTING.md` (rewritten for public), `docs/collectors.md` (41-collector catalog), `docs/quickstart.md` (full API catalog), `docs/why-expose.md` (12-axis comparison), `docs/use-cases.md` (8 persona workflows), `docs/user-guide.md` (1298-line feature walkthrough) |
@@ -89,11 +89,17 @@ This repository (`pitt-street-labs/ff6k` on internal Gitea — repo path retains
 | Temporal analysis | `src/expose/pipeline/temporal_analysis.py` — historical banner progression detection (5 pattern types) |
 | Enforcement API | `src/expose/api/enforcement.py` — scope refusal audit trail query |
 | SOC/Reports API | `src/expose/api/soc.py` (STIX/MISP/IoC/suspicious), `src/expose/api/reports.py` (CISO report), `src/expose/api/timeline.py` (temporal analysis) |
-| Tests | `tests/` — **4357+ tests as of e74e8e6.** 130+ test files. |
+| Identity API | `src/expose/api/identity.py` — registrant pivot + org-graph query endpoints |
+| Evidence storage | `src/expose/storage/s3.py` — full S3/MinIO backend with content-addressed keys + integrity verification |
+| Typed payloads | `src/expose/types/collector_payloads.py` — DnsPayload, HttpPayload, TlsPayload, PortScanPayload models |
+| Eval harness | `src/expose/eval/` — runner, metrics, CLI; `examples/eval-datasets/` — 60 reference cases across 4 categories |
+| Legal/social collector | `src/expose/collectors/builtin/legal_social_mentions.py` — WIPO UDRP + NIST NVD + urlscan.io |
+| Observability subchart | `deploy/helm-chart/charts/observability/` — optional Prometheus + Grafana bundle |
+| Tests | `tests/` — **4651+ tests as of 92e5c65.** 145+ test files. |
 
 ## Issue tracker conventions
 
-- **85+ closed / 26 open / 172 total.** v1-tagged: all closed. All original high-priority issues closed. All critical issues closed as of 2026-05-11 production readiness sprint.
+- **139+ closed / 13 open / 172 total.** v1-tagged: all closed. All original high-priority issues closed. All critical issues closed as of 2026-05-11 production readiness sprint.
 - New issues from Pre-Push session: #48 (screenshot vision), #49 (trust degradation), #50 (WAF/origin discovery), #51 (dark web indicators), #52 (legal/social mentions).
 - **Session 2026-05-11 (marathon):** 17 issues closed (#72–#90), 30+ commits. D3 graph fix, iterative multi-pass expansion, M&A org search, egress fallback with SOCKS5/tor, 15 new collectors (29 total), relationship creation, multi-TLD expansion with DNS pre-check, credential persistence, admin panel, scan log panel, entity click-to-expand, target profiling + AI-guided collector selection, supply chain inference with 50-provider fingerprint database, SSRF protection, batch DB writes, parallel dispatch, attribution engine. Security review by ChatGPT + Gemini cross-review.
 - **Session 2026-05-11 (prep):** 8-agent deep audit (spec, ADRs, roadmap, session history). 16 new issues filed (#96–#111). M&A pipeline wiring, 38-collector UI (was 13), Gemini LLM provider, help tooltips on all sections, scan form UX fixes. Implementation strategy written for 19-agent 5-wave next session (`~/.claude/plans/expose-tier-abcd-strategy.md`).
