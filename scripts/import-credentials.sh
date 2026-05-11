@@ -46,6 +46,9 @@ mapping = {
     'greynoise': {'greynoise_api_key': None},
 }
 
+def is_email(v):
+    return '@' in v and '.' in v.split('@')[-1]
+
 lines = text.strip().split('\n')
 i = 0
 result = {}
@@ -57,7 +60,7 @@ while i < len(lines):
             j = i + 1
             while j < len(lines) and lines[j].strip() and lines[j][0] in ' \t':
                 val = lines[j].strip()
-                if val and not val.startswith('key:') and not val.startswith('api name'):
+                if val and not val.startswith('key:') and not val.startswith('api name') and not is_email(val):
                     values.append(val)
                 j += 1
             slot_names = list(slots.keys())
@@ -66,6 +69,15 @@ while i < len(lines):
                     result[slot_name] = values[idx]
             break
     i += 1
+
+# Tokens not in spiderfoot-creds.txt — managed separately
+import os
+gh = os.environ.get('EXPOSE_GITHUB_TOKEN', '')
+us = os.environ.get('EXPOSE_URLSCAN_KEY', '')
+if gh:
+    result['github_token'] = gh
+if us:
+    result['urlscan_api_key'] = us
 
 print(json.dumps({'format_version': '1.0', 'credentials': result}))
 " "$CREDS_FILE")
