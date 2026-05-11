@@ -1,0 +1,35 @@
+[
+  {
+    "issuer_ca_id": 16418,
+    "issuer_name": "C=US, O=Let's Encrypt, CN=R3",
+    "common_name": "dup.example.com",
+    "name_value": "dup.example.com\nwww.dup.example.com",
+    "id": 8881112222,
+    "entry_timestamp": "RECENT_PLACEHOLDER",
+    "not_before": "RECENT_PLACEHOLDER",
+    "not_after": "FUTURE_PLACEHOLDER",
+    "serial_number": "ff00aa11bb22cc33dd44ee5500667788"
+  },
+  {
+    "issuer_ca_id": 16418,
+    "issuer_name": "C=US, O=Let's Encrypt, CN=R3",
+    "common_name": "dup.example.com",
+    "name_value": "dup.example.com\nwww.dup.example.com",
+    "id": 8881112223,
+    "entry_timestamp": "RECENT_PLACEHOLDER",
+    "not_before": "RECENT_PLACEHOLDER",
+    "not_after": "FUTURE_PLACEHOLDER",
+    "serial_number": "ff00aa11bb22cc33dd44ee5500667788"
+  },
+  {
+    "issuer_ca_id": 185756,
+    "issuer_name": "C=US, O=Amazon, CN=Amazon RSA 2048 M01",
+    "common_name": "unique.example.com",
+    "name_value": "unique.example.com",
+    "id": 8881112224,
+    "entry_timestamp": "RECENT_PLACEHOLDER",
+    "not_before": "RECENT_PLACEHOLDER",
+    "not_after": "FUTURE_PLACEHOLDER",
+    "serial_number": "1100aa22bb33cc44dd55ee6677889900"
+  }
+]

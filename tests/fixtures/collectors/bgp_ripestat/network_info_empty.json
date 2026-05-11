@@ -1,0 +1,9 @@
+{
+  "status": "ok",
+  "data": {
+    "asns": [],
+    "prefix": "",
+    "resource": "192.0.2.99"
+  },
+  "status_code": 200
+}

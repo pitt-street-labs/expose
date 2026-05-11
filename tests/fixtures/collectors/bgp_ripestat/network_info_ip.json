@@ -1,0 +1,14 @@
+{
+  "status": "ok",
+  "data": {
+    "asns": [
+      {
+        "asn": 13335,
+        "holder": "CLOUDFLARENET"
+      }
+    ],
+    "prefix": "1.1.1.0/24",
+    "resource": "1.1.1.1"
+  },
+  "status_code": 200
+}

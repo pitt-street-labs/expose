@@ -1,0 +1,25 @@
+{
+  "status": "ok",
+  "data": {
+    "resource": "13335",
+    "prefixes": [
+      {
+        "prefix": "1.1.1.0/24",
+        "timelines": [{"starttime": "2025-01-01T00:00:00"}]
+      },
+      {
+        "prefix": "104.16.0.0/13",
+        "timelines": [{"starttime": "2025-01-01T00:00:00"}]
+      },
+      {
+        "prefix": "2606:4700::/32",
+        "timelines": [{"starttime": "2025-01-01T00:00:00"}]
+      }
+    ],
+    "query_starttime": "2025-05-01T00:00:00",
+    "query_endtime": "2025-05-10T00:00:00",
+    "earliest_time": "2025-01-01T00:00:00",
+    "latest_time": "2025-05-10T00:00:00"
+  },
+  "status_code": 200
+}

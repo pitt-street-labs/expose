@@ -134,3 +134,4 @@ desktop.ini
 *.backup
 *.orig
 .playwright-mcp/
+spiderfoot-creds.txt

@@ -1,0 +1,24 @@
+[
+  {
+    "issuer_ca_id": 16418,
+    "issuer_name": "C=US, O=Let's Encrypt, CN=R3",
+    "common_name": "old.example.com",
+    "name_value": "old.example.com\nwww.old.example.com",
+    "id": 7771112222,
+    "entry_timestamp": "2024-01-01T00:00:00.000",
+    "not_before": "2024-01-01T00:00:00",
+    "not_after": "2024-04-01T00:00:00",
+    "serial_number": "dd00ee11ff22aa33bb44cc5500667788"
+  },
+  {
+    "issuer_ca_id": 185756,
+    "issuer_name": "C=US, O=DigiCert, CN=DigiCert SHA2",
+    "common_name": "legacy.example.com",
+    "name_value": "legacy.example.com",
+    "id": 7771112223,
+    "entry_timestamp": "2023-06-15T12:00:00.000",
+    "not_before": "2023-06-15T00:00:00",
+    "not_after": "2023-09-15T00:00:00",
+    "serial_number": "ee11ff22aa33bb44cc55dd6600778899"
+  }
+]
