@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
 import pytest
@@ -460,7 +460,8 @@ async def test_egress_profile_factory() -> None:
 # === 11. Egress SOCKS5 DNS through proxy ======================================
 
 
-async def test_egress_socks5_dns_rewriting() -> None:
+@patch("expose.egress.socks5._socksio_available", return_value=True)
+async def test_egress_socks5_dns_rewriting(_mock_socksio: Any) -> None:
     """Verify socks5:// is rewritten to socks5h:// when dns_through_proxy=True."""
     profile = Socks5EgressProfile(
         proxy_url="socks5://10.0.0.1:1080",

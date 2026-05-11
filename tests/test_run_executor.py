@@ -609,3 +609,257 @@ async def test_misuse_detector_not_called_when_none() -> None:
     )
 
     assert result.misuse_alerts == []
+
+
+# === Multi-pass expansion tests =============================================
+
+
+def _make_entity_mock(
+    entity_type: str = "domain",
+    canonical_identifier: str = "sub.example.com",
+    properties: dict | None = None,
+) -> MagicMock:
+    """Build a mock Entity ORM row for multi-pass tests."""
+    entity = MagicMock()
+    entity.entity_type = entity_type
+    entity.canonical_identifier = canonical_identifier
+    entity.properties = properties or {}
+    return entity
+
+
+async def test_single_pass_no_new_entities() -> None:
+    """When no new entities are discovered, only 1 pass executes."""
+    obs = _make_observation()
+    executor, disp, _r_repo, e_repo = _build_executor()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+    # list_for_tenant returns empty -> no new seeds -> single pass
+    e_repo.list_for_tenant = AsyncMock(return_value=[])
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    assert result.passes_completed == 1
+    assert len(result.entities_discovered_per_pass) == 1
+    assert result.final_state == "completed"
+
+
+async def test_multi_pass_entities_feed_back_as_seeds() -> None:
+    """Entities discovered in pass 1 feed back as seeds for pass 2."""
+    obs_pass1 = _make_observation(identifier_value="10.0.0.1")
+    obs_pass2 = _make_observation(identifier_value="sub.example.com")
+
+    executor, disp, _r_repo, e_repo = _build_executor()
+
+    # Use a default return value so all dispatches succeed.
+    # Pass 1: IP seed (1 dispatch), Pass 2: domain seed + www. expansion
+    # (2 dispatches). Use return_value for unlimited success responses.
+    disp.dispatch = AsyncMock(return_value=_success_result(obs_pass1))
+
+    # After pass 1, list_for_tenant returns a new entity; after pass 2, empty
+    new_entity = _make_entity_mock(
+        entity_type="domain",
+        canonical_identifier="sub.example.com",
+    )
+    e_repo.list_for_tenant = AsyncMock(side_effect=[[new_entity], []])
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+        max_passes=3,
+    )
+
+    assert result.passes_completed == 2
+    assert len(result.entities_discovered_per_pass) == 2
+    # Pass 1: 1 dispatch (IP), Pass 2: 2 dispatches (domain + www.domain)
+    assert result.successful_dispatches == 3
+    assert result.final_state == "completed"
+    # list_for_tenant should have been called (once after pass 1, once after 2)
+    assert e_repo.list_for_tenant.call_count >= 1
+
+
+async def test_max_passes_limit_reached() -> None:
+    """When max_passes is reached, the loop stops even if new entities exist."""
+    obs = _make_observation()
+    executor, disp, _r_repo, e_repo = _build_executor()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    # Always return a new entity (simulating infinite expansion)
+    call_count = 0
+
+    async def _list_for_tenant_side_effect(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        return [
+            _make_entity_mock(
+                entity_type="domain",
+                canonical_identifier=f"pass{call_count}.example.com",
+            )
+        ]
+
+    e_repo.list_for_tenant = AsyncMock(side_effect=_list_for_tenant_side_effect)
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+        max_passes=2,
+    )
+
+    assert result.passes_completed == 2
+    assert len(result.entities_discovered_per_pass) == 2
+
+
+async def test_max_passes_default_is_three() -> None:
+    """Verify the default max_passes is 3 (no kwarg needed)."""
+    obs = _make_observation()
+    executor, disp, _r_repo, e_repo = _build_executor()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    call_count = 0
+
+    async def _list_for_tenant_always_new(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        return [
+            _make_entity_mock(
+                entity_type="ip",
+                canonical_identifier=f"10.0.0.{call_count}",
+            )
+        ]
+
+    e_repo.list_for_tenant = AsyncMock(side_effect=_list_for_tenant_always_new)
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.100")],
+        collector_ids=["scanner"],
+    )
+
+    # Default max_passes=3 means exactly 3 passes
+    assert result.passes_completed == 3
+
+
+async def test_duplicate_seed_collector_pair_not_redispatched() -> None:
+    """Same (seed, collector) pair is not dispatched again across passes."""
+    obs = _make_observation()
+    executor, disp, _r_repo, e_repo = _build_executor()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    # Return the SAME entity (same canonical_identifier) after pass 1.
+    # Because it matches the original seed, it should be skipped by
+    # already_scanned, resulting in no new seeds and a single pass.
+    same_entity = _make_entity_mock(
+        entity_type="ip",
+        canonical_identifier="10.0.0.1",
+    )
+    e_repo.list_for_tenant = AsyncMock(return_value=[same_entity])
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+        max_passes=3,
+    )
+
+    # Entity matches the original seed -> no new seeds -> single pass
+    assert result.passes_completed == 1
+
+
+async def test_multi_pass_org_seeds_from_properties() -> None:
+    """Organization seeds extracted from entity properties drive pass 2."""
+    obs = _make_observation()
+    executor, disp, _r_repo, e_repo = _build_executor()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    # After pass 1, return an entity with registrant_org in properties
+    entity_with_org = _make_entity_mock(
+        entity_type="domain",
+        canonical_identifier="10.0.0.1",  # same as original seed type
+        properties={"registrant_org": "Acme Corp"},
+    )
+    # First call returns entity with org, second call returns empty
+    e_repo.list_for_tenant = AsyncMock(
+        side_effect=[[entity_with_org], []]
+    )
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+        max_passes=3,
+    )
+
+    # The org seed "Acme Corp" should trigger pass 2
+    assert result.passes_completed == 2
+    assert result.successful_dispatches >= 2
+
+
+async def test_entities_discovered_per_pass_tracks_counts() -> None:
+    """entities_discovered_per_pass has one entry per pass with entity counts."""
+    obs1 = _make_observation(identifier_value="a.example.com")
+    obs2 = _make_observation(identifier_value="b.example.com")
+    obs3 = _make_observation(identifier_value="c.example.com")
+
+    executor, disp, _r_repo, e_repo = _build_executor()
+
+    # Pass 1: 2 observations, Pass 2: 1 observation
+    disp.dispatch = AsyncMock(
+        side_effect=[
+            _success_result(obs1, obs2),
+            _success_result(obs3),
+        ]
+    )
+
+    new_entity = _make_entity_mock(
+        entity_type="domain",
+        canonical_identifier="new.example.com",
+    )
+    e_repo.list_for_tenant = AsyncMock(side_effect=[[new_entity], []])
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+        max_passes=3,
+    )
+
+    assert result.passes_completed == 2
+    assert len(result.entities_discovered_per_pass) == 2
+    # Pass 1: 2 entities (2 obs, 0 upsert failures)
+    assert result.entities_discovered_per_pass[0] == 2
+    # Pass 2: 1 entity (1 obs, 0 upsert failures)
+    assert result.entities_discovered_per_pass[1] == 1
+
+
+async def test_run_result_backward_compat_defaults() -> None:
+    """RunResult's new fields have backward-compatible defaults."""
+    from expose.pipeline.run_executor import RunResult
+
+    # Construct a RunResult without the new fields (simulating old callers)
+    result = RunResult(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        final_state="completed",
+        total_seeds=1,
+        expanded_seeds=2,
+        total_dispatches=2,
+        successful_dispatches=2,
+        failed_dispatches=0,
+        denied_dispatches=0,
+        total_observations=3,
+        duration_ms=100.0,
+    )
+
+    assert result.passes_completed == 1
+    assert result.entities_discovered_per_pass == []

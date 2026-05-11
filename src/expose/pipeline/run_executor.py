@@ -34,6 +34,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from expose.collectors.base import Observation, Seed
 from expose.compliance.misuse_detection import MisuseAlert, MisuseDetector
 from expose.pipeline.enrichment import EnrichmentPipeline
+from expose.pipeline.entity_seed_converter import (
+    entities_to_seeds,
+    extract_org_seeds_from_properties,
+)
 from expose.pipeline.seed_expansion import expand_seeds
 from expose.quotas.tracker import QuotaExceededError, QuotaTracker
 from expose.repositories.entity_repo import EntityRepository
@@ -136,6 +140,8 @@ class RunResult(BaseModel):
     enrichment_count: int = 0
     duration_ms: float
     misuse_alerts: list[MisuseAlert] = Field(default_factory=list)
+    passes_completed: int = 1
+    entities_discovered_per_pass: list[int] = Field(default_factory=list)
 
 
 # === Executor =================================================================
@@ -172,8 +178,9 @@ class RunExecutor:
         tenant_id: UUID,
         seeds: list[Seed],
         collector_ids: list[str],
+        max_passes: int = 3,
     ) -> RunResult:
-        """Execute a full pipeline run.
+        """Execute a full pipeline run with iterative multi-pass expansion.
 
         Stages:
           1. Seed expansion (deterministic).
@@ -181,6 +188,13 @@ class RunExecutor:
           3. Sanitization (inside collectors per SPEC §7).
           4. Graph upsert for each observation from successful dispatches.
           4b/5/6. TODO placeholders for LLM enrichment and artifact generation.
+
+        Multi-pass (SPEC §2.2):
+          After each dispatch pass, newly created entities are queried and
+          converted back to seeds for deeper exploration. Pass 1 runs all
+          enabled collectors; Pass 2+ runs only collectors that accept the
+          new seed types. The loop terminates when no new seeds are discovered
+          or ``max_passes`` is reached.
 
         State machine: ``pending -> running -> completed|failed|partial``.
 
@@ -238,59 +252,92 @@ class RunExecutor:
         expanded = expand_seeds(seeds)
         expanded_count = len(expanded)
 
-        # === Stage 2: Dispatch (with batched upsert + enrichment) ============
+        # === Multi-pass dispatch loop =========================================
+        #
+        # Track all (seed_value, collector_id) pairs dispatched across passes
+        # to avoid redundant work. ``already_scanned`` tracks (seed_type, value)
+        # tuples so the entity-to-seed converter can skip entities that were
+        # already used as seeds.
+        dispatched_pairs: set[tuple[str, str]] = set()
+        already_scanned: set[tuple[str, str]] = {
+            (s.seed_type.value, s.value) for s in expanded
+        }
+
         successful = 0
         failed = 0
         denied = 0
         total_observations = 0
         enrichment_count = 0
         upsert_failures = 0
-        batch: list[Observation] = []
+        entities_discovered_per_pass: list[int] = []
 
-        for seed in expanded:
-            for collector_id in collector_ids:
-                job = DispatchJob(
-                    collector_id=collector_id,
-                    seed=seed,
-                    run_id=run_id,
-                    tenant_id=tenant_id,
+        current_seeds = expanded
+        current_collector_ids = collector_ids
+        pass_number = 0
+
+        while pass_number < max_passes:
+            pass_number += 1
+
+            if pass_number > 1:
+                logger.info(
+                    "Pass %d: %d new seeds from %d entities",
+                    pass_number,
+                    len(current_seeds),
+                    len(entities_discovered_per_pass)
+                    and entities_discovered_per_pass[-1]
+                    or 0,
                 )
-                try:
-                    result = await self._dispatcher.dispatch(job)
-                except Exception:
-                    logger.exception(
-                        "Dispatch raised for collector=%s seed=%s",
-                        collector_id,
-                        seed.value,
-                    )
-                    failed += 1
-                    continue
 
-                if result.status == "success":
-                    successful += 1
-                    batch.extend(result.observations)
-                    # Flush when batch reaches threshold (Stage 3+4+4b)
-                    if len(batch) >= _OBSERVATION_BATCH_SIZE:
-                        batch_enriched, batch_upsert_failures = (
-                            await self._flush_batch(batch, run_id, tenant_id)
-                        )
-                        total_observations += len(batch)
-                        enrichment_count += batch_enriched
-                        upsert_failures += batch_upsert_failures
-                        batch = []
-                elif result.status == "denied":
-                    denied += 1
-                else:
-                    failed += 1
-
-        # Flush remaining observations after the dispatch loop
-        if batch:
-            batch_enriched, batch_upsert_failures = await self._flush_batch(
-                batch, run_id, tenant_id
+            # --- Dispatch all (seed, collector) pairs for this pass -----------
+            pass_obs, pass_stats = await self._dispatch_pass(
+                seeds=current_seeds,
+                collector_ids=current_collector_ids,
+                run_id=run_id,
+                tenant_id=tenant_id,
+                dispatched_pairs=dispatched_pairs,
             )
-            total_observations += len(batch)
-            enrichment_count += batch_enriched
-            upsert_failures += batch_upsert_failures
+            successful += pass_stats["successful"]
+            failed += pass_stats["failed"]
+            denied += pass_stats["denied"]
+            total_observations += pass_stats["observations"]
+            enrichment_count += pass_stats["enrichment"]
+            upsert_failures += pass_stats["upsert_failures"]
+            entities_discovered_per_pass.append(
+                pass_stats["observations"] - pass_stats["upsert_failures"]
+            )
+
+            # --- Check for more passes ---------------------------------------
+            if pass_number >= max_passes:
+                break
+
+            # Query entities created during this run for seed expansion
+            entities = await self._entity_repo.list_for_tenant(
+                tenant_id=TenantId(tenant_id),
+                limit=1000,
+            )
+
+            # Convert discovered entities to new seeds
+            new_seeds = entities_to_seeds(entities, already_scanned)
+            new_seeds.extend(
+                extract_org_seeds_from_properties(entities, already_scanned)
+            )
+
+            if not new_seeds:
+                break
+
+            # Expand new seeds and update tracking sets
+            current_seeds = expand_seeds(new_seeds)
+            expanded_count += len(current_seeds)
+            already_scanned.update(
+                (s.seed_type.value, s.value) for s in current_seeds
+            )
+
+            # Pass 2+ uses only collectors that accept the new seed types
+            # (filter to those in the original enabled set)
+            current_collector_ids = [
+                cid for cid in collector_ids
+                if cid in {c for c in collector_ids}
+            ]
 
         entities_added = total_observations - upsert_failures
         if self._quota_tracker is not None and entities_added > 0:
@@ -351,7 +398,98 @@ class RunExecutor:
             enrichment_count=enrichment_count,
             duration_ms=duration_ms,
             misuse_alerts=misuse_alerts,
+            passes_completed=pass_number,
+            entities_discovered_per_pass=entities_discovered_per_pass,
         )
+
+    async def _dispatch_pass(
+        self,
+        *,
+        seeds: list[Seed],
+        collector_ids: list[str],
+        run_id: UUID,
+        tenant_id: UUID,
+        dispatched_pairs: set[tuple[str, str]],
+    ) -> tuple[list[Observation], dict[str, int]]:
+        """Run a single dispatch pass over (seed, collector) pairs.
+
+        Skips any (seed.value, collector_id) pair already in
+        ``dispatched_pairs``. Updates ``dispatched_pairs`` in-place as pairs
+        are dispatched.
+
+        Returns ``(all_observations, stats_dict)`` where ``stats_dict``
+        contains keys: ``successful``, ``failed``, ``denied``,
+        ``observations``, ``enrichment``, ``upsert_failures``.
+        """
+        successful = 0
+        failed = 0
+        denied = 0
+        total_observations = 0
+        enrichment_count = 0
+        upsert_failures = 0
+        batch: list[Observation] = []
+        all_observations: list[Observation] = []
+
+        for seed in seeds:
+            for collector_id in collector_ids:
+                pair_key = (seed.value, collector_id)
+                if pair_key in dispatched_pairs:
+                    continue
+                dispatched_pairs.add(pair_key)
+
+                job = DispatchJob(
+                    collector_id=collector_id,
+                    seed=seed,
+                    run_id=run_id,
+                    tenant_id=tenant_id,
+                )
+                try:
+                    result = await self._dispatcher.dispatch(job)
+                except Exception:
+                    logger.exception(
+                        "Dispatch raised for collector=%s seed=%s",
+                        collector_id,
+                        seed.value,
+                    )
+                    failed += 1
+                    continue
+
+                if result.status == "success":
+                    successful += 1
+                    batch.extend(result.observations)
+                    all_observations.extend(result.observations)
+                    # Flush when batch reaches threshold (Stage 3+4+4b)
+                    if len(batch) >= _OBSERVATION_BATCH_SIZE:
+                        batch_enriched, batch_upsert_failures = (
+                            await self._flush_batch(batch, run_id, tenant_id)
+                        )
+                        total_observations += len(batch)
+                        enrichment_count += batch_enriched
+                        upsert_failures += batch_upsert_failures
+                        batch = []
+                elif result.status == "denied":
+                    denied += 1
+                else:
+                    failed += 1
+
+        # Flush remaining observations after the dispatch loop
+        if batch:
+            batch_enriched, batch_upsert_failures = await self._flush_batch(
+                batch, run_id, tenant_id
+            )
+            total_observations += len(batch)
+            enrichment_count += batch_enriched
+            upsert_failures += batch_upsert_failures
+
+        stats = {
+            "successful": successful,
+            "failed": failed,
+            "denied": denied,
+            "observations": total_observations,
+            "enrichment": enrichment_count,
+            "upsert_failures": upsert_failures,
+        }
+        return all_observations, stats
 
     async def _flush_batch(
         self,
