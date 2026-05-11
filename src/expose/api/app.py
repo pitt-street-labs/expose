@@ -147,9 +147,7 @@ async def _scheduler_run_trigger(
     if hasattr(app.state, "event_bus"):
         event_bus = get_event_bus(app)
 
-    _bg_tasks: dict[str, asyncio.Task[None]] = getattr(
-        app.state, "_bg_tasks", {}
-    )
+    bg_tasks: dict[str, asyncio.Task[None]] = app.state._bg_tasks
     task = asyncio.create_task(
         _run_pipeline_background(
             run_id=run_id,
@@ -161,9 +159,8 @@ async def _scheduler_run_trigger(
         )
     )
     task_key = str(run_id)
-    _bg_tasks[task_key] = task
-    task.add_done_callback(lambda _t: _bg_tasks.pop(task_key, None))
-    app.state._bg_tasks = _bg_tasks
+    bg_tasks[task_key] = task
+    task.add_done_callback(lambda _t: bg_tasks.pop(task_key, None))
 
     logger.info(
         "Scheduler triggered run %s for tenant %s",
@@ -209,6 +206,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     app.state.session_factory = factory
     app.state.server_started_at = datetime.now(UTC)
+    app.state._bg_tasks: dict[str, asyncio.Task[None]] = {}
     app.dependency_overrides[get_session] = _make_session_dependency(factory)
 
     _set_app_ref(app)
@@ -237,6 +235,27 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     except (TimeoutError, asyncio.CancelledError):
         scheduler_task.cancel()
         logger.warning("Scheduler task did not stop cleanly within timeout")
+
+    # -- Cancel and drain background pipeline tasks ----------------------------
+    bg_tasks: dict[str, asyncio.Task[None]] = app.state._bg_tasks
+    if bg_tasks:
+        logger.info("Shutting down %d background task(s)...", len(bg_tasks))
+        # Snapshot values — done callbacks may mutate the dict during iteration.
+        pending = list(bg_tasks.values())
+        # Grace period: wait up to 10s for tasks to finish naturally.
+        _done, still_running = await asyncio.wait(
+            pending, timeout=10.0, return_when=asyncio.ALL_COMPLETED,
+        )
+        for task in still_running:
+            task.cancel()
+        if still_running:
+            await asyncio.gather(*still_running, return_exceptions=True)
+            logger.warning(
+                "Force-cancelled %d background task(s) that did not finish "
+                "within the 10s grace period",
+                len(still_running),
+            )
+        bg_tasks.clear()
 
     await engine.dispose()
 

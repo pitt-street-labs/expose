@@ -19,12 +19,21 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from expose.api.auth import AuthDependency, TokenPayload, TokenStore
 from expose.pipeline.scheduler import CronExpression
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Authentication
+# ---------------------------------------------------------------------------
+
+token_store = TokenStore()
+_require_read = AuthDependency(token_store, required_scope="read")
+_require_write = AuthDependency(token_store, required_scope="write")
 
 # ---------------------------------------------------------------------------
 # Request / Response models
@@ -114,11 +123,20 @@ def _get_scheduler(request: Request) -> Any:
 async def create_schedule(
     body: ScheduleCreateRequest,
     request: Request,
+    auth: TokenPayload = Depends(_require_write),
 ) -> ScheduleResponse:
     """Create (or replace) a cron schedule for a tenant.
 
     Validates the cron expression eagerly -- returns 422 if invalid.
+    The caller's token must carry ``write`` scope and must match the
+    ``tenant_id`` in the request body.
     """
+    if auth.tenant_id != body.tenant_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Token tenant_id does not match schedule tenant_id",
+        )
+
     # Validate cron expression before touching the scheduler.
     try:
         CronExpression(body.cron_expression)
@@ -148,13 +166,18 @@ async def create_schedule(
 
 
 @router.get("/schedules", response_model=ScheduleListResponse)
-async def list_schedules(request: Request) -> ScheduleListResponse:
-    """Return all registered schedules."""
+async def list_schedules(
+    request: Request,
+    auth: TokenPayload = Depends(_require_read),
+) -> ScheduleListResponse:
+    """Return schedules visible to the authenticated tenant."""
     scheduler = _get_scheduler(request)
     entries = scheduler.list_schedules()
+    # Tenant-scope: only return schedules belonging to the caller.
+    visible = [e for e in entries if e.tenant_id == auth.tenant_id]
     return ScheduleListResponse(
-        schedules=[_entry_to_response(e) for e in entries],
-        total=len(entries),
+        schedules=[_entry_to_response(e) for e in visible],
+        total=len(visible),
     )
 
 
@@ -167,8 +190,17 @@ async def list_schedules(request: Request) -> ScheduleListResponse:
 async def get_schedule(
     tenant_id: UUID,
     request: Request,
+    auth: TokenPayload = Depends(_require_read),
 ) -> ScheduleResponse:
-    """Return the schedule for a specific tenant, or 404."""
+    """Return the schedule for a specific tenant, or 404.
+
+    The caller can only retrieve their own tenant's schedule.
+    """
+    if auth.tenant_id != tenant_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Token tenant_id does not match requested tenant_id",
+        )
     scheduler = _get_scheduler(request)
     entry = scheduler.get_schedule(tenant_id)
     if entry is None:
@@ -185,8 +217,17 @@ async def get_schedule(
 async def delete_schedule(
     tenant_id: UUID,
     request: Request,
+    auth: TokenPayload = Depends(_require_write),
 ) -> None:
-    """Remove the schedule for a tenant. Returns 404 if none exists."""
+    """Remove the schedule for a tenant. Returns 404 if none exists.
+
+    The caller can only delete their own tenant's schedule.
+    """
+    if auth.tenant_id != tenant_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Token tenant_id does not match requested tenant_id",
+        )
     scheduler = _get_scheduler(request)
     removed = scheduler.remove_schedule(tenant_id)
     if not removed:

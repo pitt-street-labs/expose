@@ -41,6 +41,7 @@ from expose.integrations.siem import (
     DeliveryResult,
     SIEMAdapter,
     SIEMConfig,
+    TenantMismatchError,
 )
 
 __all__ = ["SplunkHECAdapter"]
@@ -63,8 +64,14 @@ class SplunkHECAdapter(SIEMAdapter):
     adapter_id = "splunk"
     display_name = "Splunk HTTP Event Collector"
 
-    def __init__(self, config: SIEMConfig, *, index: str = "main") -> None:
-        super().__init__(config)
+    def __init__(
+        self,
+        config: SIEMConfig,
+        *,
+        index: str = "main",
+        tenant_id: UUID | None = None,
+    ) -> None:
+        super().__init__(config, tenant_id=tenant_id)
         self._index = index
 
     # ----- public interface ---------------------------------------------------
@@ -75,6 +82,7 @@ class SplunkHECAdapter(SIEMAdapter):
         tenant_id: UUID,
     ) -> DeliveryResult:
         """Batch-deliver observations as CIM-mapped HEC events."""
+        self._validate_tenant(tenant_id)
         if not self._config.enabled:
             return DeliveryResult(
                 adapter_id=self.adapter_id,
@@ -123,6 +131,7 @@ class SplunkHECAdapter(SIEMAdapter):
         tenant_id: UUID,
     ) -> DeliveryResult:
         """Deliver a single finding as an HEC event."""
+        self._validate_tenant(tenant_id)
         if not self._config.enabled:
             return DeliveryResult(
                 adapter_id=self.adapter_id,
@@ -162,12 +171,11 @@ class SplunkHECAdapter(SIEMAdapter):
     async def health_check(self) -> bool:
         """Check HEC reachability with a GET to the health endpoint."""
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{self._config.endpoint.rstrip('/')}/services/collector/health/1.0",
-                    headers=self._auth_headers,
-                    timeout=5.0,
-                )
+            response = await self._http_client.get(
+                f"{self._config.endpoint.rstrip('/')}/services/collector/health/1.0",
+                headers=self._auth_headers,
+                timeout=5.0,
+            )
             return 200 <= response.status_code < 300  # noqa: PLR2004
         except httpx.HTTPError:
             return False

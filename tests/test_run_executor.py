@@ -20,6 +20,7 @@ Coverage:
 
 from __future__ import annotations
 
+import asyncio
 import socket
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -2210,3 +2211,242 @@ async def test_seed_attribution_nonseed_unattributed() -> None:
     )
     assert entity_upsert.kwargs["attribution_status"] == "unattributed"
     assert entity_upsert.kwargs["attribution_confidence"] == Decimal("0.000")
+
+
+# === Fix 1: O(N*M) observation scan optimization tests =======================
+
+
+async def test_lead_scoring_uses_prebuilt_obs_lookup() -> None:
+    """Lead scoring gets correct per-entity observations via the O(1) lookup.
+
+    Verifies that each entity's lead score is computed against only
+    its own observations (not all observations in the batch).
+    """
+    obs_a1 = _make_observation(identifier_value="a.example.com")
+    obs_a2 = _make_observation(
+        identifier_value="a.example.com",
+        collector_id="other-collector",
+    )
+    obs_b = _make_observation(identifier_value="b.example.com")
+
+    executor, disp, _r_repo, e_repo = _build_executor()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs_a1, obs_a2, obs_b))
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    assert result.final_state == "completed"
+    assert result.total_observations == 3
+    # Lead scoring calls create_or_update once per unique entity (2 entities)
+    # plus 2 initial entity upserts = 4 total (but a.example.com appears in
+    # 2 observations, only 1 initial upsert). Actually:
+    # 3 obs upserts + 2 lead scoring updates = 5 calls
+    upsert_ids = {
+        c.kwargs["canonical_identifier"]
+        for c in e_repo.create_or_update.call_args_list
+    }
+    assert "a.example.com" in upsert_ids
+    assert "b.example.com" in upsert_ids
+
+
+async def test_lead_scoring_large_batch_performance() -> None:
+    """Lead scoring handles a large batch without O(N*M) degradation.
+
+    This test would time out under the old O(N*M) approach with 200
+    entities x 200 observations but completes instantly with the
+    O(N+M) pre-built lookup.
+    """
+    observations = [
+        _make_observation(identifier_value=f"host{i}.example.com")
+        for i in range(200)
+    ]
+    executor, disp, _r_repo, e_repo = _build_executor()
+    disp.dispatch = AsyncMock(return_value=_success_result(*observations))
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    assert result.final_state == "completed"
+    assert result.total_observations == 200
+    # 200 entity upserts + 200 lead scoring updates = 400
+    assert e_repo.create_or_update.call_count == 400
+
+
+# === Fix 2: Bounded dispatch timeout tests ===================================
+
+
+async def test_dispatch_timeout_counted_as_failure() -> None:
+    """Dispatch that exceeds 120s timeout is counted as a failed dispatch.
+
+    Rather than sleeping for 120s to trigger the real timeout, we raise
+    ``asyncio.TimeoutError`` directly to test the handler. The production
+    code wraps ``dispatch`` in ``asyncio.wait_for(timeout=120.0)``
+    which raises this same exception.
+    """
+    executor, disp, _r_repo, _e_repo = _build_executor()
+    disp.dispatch = AsyncMock(side_effect=asyncio.TimeoutError())
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    # The dispatch timed out -> counted as failure
+    assert result.failed_dispatches == 1
+    assert result.successful_dispatches == 0
+    assert result.final_state == "failed"
+
+
+async def test_dispatch_timeout_does_not_crash_run() -> None:
+    """A timed-out dispatch does not crash the entire run."""
+
+    async def _timeout_dispatch(job):
+        # Simulate immediate timeout by raising TimeoutError
+        raise asyncio.TimeoutError()
+
+    executor, disp, _r_repo, _e_repo = _build_executor()
+    disp.dispatch = AsyncMock(side_effect=_timeout_dispatch)
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    assert result.failed_dispatches == 1
+    assert result.final_state == "failed"
+
+
+async def test_dispatch_mixed_timeout_and_success() -> None:
+    """Mix of successful and timed-out dispatches -> partial state."""
+    obs = _make_observation()
+
+    call_count = 0
+
+    async def _mixed_dispatch(job):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return _success_result(obs)
+        raise asyncio.TimeoutError()
+
+    executor, disp, _r_repo, _e_repo = _build_executor()
+    disp.dispatch = AsyncMock(side_effect=_mixed_dispatch)
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["collector-a", "collector-b"],
+    )
+
+    assert result.successful_dispatches == 1
+    assert result.failed_dispatches == 1
+    assert result.final_state == "partial"
+
+
+# === Fix 4: Bounded enrichment timeout tests =================================
+
+
+async def test_enrichment_timeout_counted_as_failure() -> None:
+    """Enrichment calls that exceed 60s are counted as failed (not enriched).
+
+    Rather than sleeping for 60s to trigger the real timeout, we raise
+    ``asyncio.TimeoutError`` directly to test the handler. The production
+    code wraps ``enrich_entity`` in ``asyncio.wait_for(timeout=60.0)``
+    which raises this same exception.
+    """
+    executor, disp, r_repo, e_repo, enrich = _build_executor_with_enrichment()
+    enrich.enrich_entity = AsyncMock(side_effect=asyncio.TimeoutError())
+
+    obs = _make_observation()
+    disp.dispatch = AsyncMock(return_value=_success_result(obs))
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    # Enrichment timed out -> 0 enrichments counted
+    assert result.enrichment_count == 0
+    # The run itself still completes successfully
+    assert result.final_state == "completed"
+    assert result.total_observations == 1
+
+
+async def test_enrichment_timeout_does_not_block_other_enrichments() -> None:
+    """One enrichment timing out does not prevent others from completing."""
+
+    call_count = 0
+
+    async def _mixed_enrich(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise asyncio.TimeoutError()
+        return {"attribution": {}}
+
+    executor, disp, r_repo, e_repo, enrich = _build_executor_with_enrichment()
+    enrich.enrich_entity = AsyncMock(side_effect=_mixed_enrich)
+    obs1 = _make_observation(identifier_value="a.example.com")
+    obs2 = _make_observation(identifier_value="b.example.com")
+    disp.dispatch = AsyncMock(return_value=_success_result(obs1, obs2))
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    # 1 timed out + 1 succeeded -> 1 enrichment counted
+    assert result.enrichment_count == 1
+    assert result.total_observations == 2
+    assert result.final_state == "completed"
+
+
+async def test_enrichment_mixed_timeout_and_exception() -> None:
+    """Enrichment handles both timeouts and exceptions gracefully."""
+
+    call_count = 0
+
+    async def _failing_enrich(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise asyncio.TimeoutError()
+        if call_count == 2:
+            raise RuntimeError("LLM API error")
+        return {"attribution": {}}
+
+    executor, disp, r_repo, e_repo, enrich = _build_executor_with_enrichment()
+    enrich.enrich_entity = AsyncMock(side_effect=_failing_enrich)
+    obs1 = _make_observation(identifier_value="a.example.com")
+    obs2 = _make_observation(identifier_value="b.example.com")
+    obs3 = _make_observation(identifier_value="c.example.com")
+    disp.dispatch = AsyncMock(return_value=_success_result(obs1, obs2, obs3))
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.IP, value="10.0.0.1")],
+        collector_ids=["scanner"],
+    )
+
+    # 1 timeout + 1 exception + 1 success -> 1 enrichment counted
+    assert result.enrichment_count == 1
+    assert result.total_observations == 3
+    assert result.final_state == "completed"

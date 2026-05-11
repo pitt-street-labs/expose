@@ -25,6 +25,7 @@ Key design properties:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from enum import StrEnum
@@ -37,6 +38,10 @@ from collections.abc import Callable
 # (monotonic_timestamp, CollectorHealthCheck).  TTL is 60 seconds.
 _HEALTH_CACHE_TTL = 60.0
 _health_cache: dict[str, tuple[float, "CollectorHealthCheck"]] = {}
+
+# Timeout constants for wait_for wrappers (seconds).
+HEALTH_CHECK_TIMEOUT = 30.0
+EXPAND_TIMEOUT = 120.0
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -326,6 +331,7 @@ class PipelineDispatcher:
         job: DispatchJob,
         cred_result: dict[str, CollectorCredential],
         start_ns: int,
+        egress_profile: EgressProfile | None = None,
     ) -> DispatchResult:
         """Build a collector instance, health-check it, and run expand.
 
@@ -337,6 +343,13 @@ class PipelineDispatcher:
         Health-check results are cached for 60 seconds per collector_id to
         avoid redundant probes when the same collector is dispatched many
         times within a single run.
+
+        Parameters
+        ----------
+        egress_profile:
+            The egress profile to use for this specific expand attempt.
+            Passed explicitly to avoid mutating ``self._egress_profile``
+            during fallback retries (race-condition fix).
         """
         config = CollectorConfig(
             tenant_id=job.tenant_id,
@@ -345,70 +358,117 @@ class PipelineDispatcher:
         )
         collector: Collector = collector_cls(config)
 
-        # Health check with TTL cache
-        now = time.monotonic()
-        cached = _health_cache.get(job.collector_id)
-        if cached is not None and (now - cached[0]) < _HEALTH_CACHE_TTL:
-            health = cached[1]
-        else:
-            health = await collector.health_check()
-            _health_cache[job.collector_id] = (now, health)
-
-        if health.status not in (
-            CollectorStatus.SUCCESS,
-            CollectorStatus.PARTIAL_SUCCESS,
-        ):
-            return DispatchResult(
-                status=DispatchStatus.HEALTH_CHECK_FAILED,
-                collector_health=health,
-                error_message=health.error_message,
-                duration_ms=_elapsed_ms(start_ns),
-            )
-
-        # Run expand and collect observations
         try:
-            observations: list[Observation] = []
-            async for obs in collector.expand(job.seed):
-                observations.append(obs)
-        except CollectorSourceUnreachableError:
-            # Re-raise so the caller (_dispatch_inner) can attempt fallback
-            raise
-        except CollectorError as exc:
-            logger.warning(
-                "Collector %s raised CollectorError",
-                job.collector_id,
-                exc_info=True,
-            )
-            return DispatchResult(
-                status=DispatchStatus.COLLECTOR_ERROR,
-                collector_health=health,
-                error_message=str(exc),
-                duration_ms=_elapsed_ms(start_ns),
-            )
-        except Exception as exc:
-            logger.exception(
-                "Unexpected error in collector %s",
-                job.collector_id,
-            )
-            return DispatchResult(
-                status=DispatchStatus.COLLECTOR_ERROR,
-                collector_health=health,
-                error_message=f"{type(exc).__name__}: {exc}",
-                duration_ms=_elapsed_ms(start_ns),
-            )
+            # Health check with TTL cache + 30-second timeout
+            now = time.monotonic()
+            cached = _health_cache.get(job.collector_id)
+            if cached is not None and (now - cached[0]) < _HEALTH_CACHE_TTL:
+                health = cached[1]
+            else:
+                try:
+                    health = await asyncio.wait_for(
+                        collector.health_check(),
+                        timeout=HEALTH_CHECK_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Health check for collector %s timed out after %ss",
+                        job.collector_id,
+                        HEALTH_CHECK_TIMEOUT,
+                    )
+                    return DispatchResult(
+                        status=DispatchStatus.HEALTH_CHECK_FAILED,
+                        error_message=f"Health check timed out after {HEALTH_CHECK_TIMEOUT}s",
+                        duration_ms=_elapsed_ms(start_ns),
+                    )
+                _health_cache[job.collector_id] = (now, health)
 
-        egress_anon = (
-            self._egress_profile.is_anonymizing
-            if self._egress_profile is not None
-            else False
-        )
-        return DispatchResult(
-            status=DispatchStatus.SUCCESS,
-            observations=observations,
-            collector_health=health,
-            duration_ms=_elapsed_ms(start_ns),
-            egress_anonymized=egress_anon,
-        )
+            if health.status not in (
+                CollectorStatus.SUCCESS,
+                CollectorStatus.PARTIAL_SUCCESS,
+            ):
+                return DispatchResult(
+                    status=DispatchStatus.HEALTH_CHECK_FAILED,
+                    collector_health=health,
+                    error_message=health.error_message,
+                    duration_ms=_elapsed_ms(start_ns),
+                )
+
+            # Run expand and collect observations with 120-second timeout
+            try:
+                async def _collect_observations() -> list[Observation]:
+                    observations: list[Observation] = []
+                    async for obs in collector.expand(job.seed):
+                        observations.append(obs)
+                    return observations
+
+                observations = await asyncio.wait_for(
+                    _collect_observations(),
+                    timeout=EXPAND_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Collector %s expand timed out after %ss",
+                    job.collector_id,
+                    EXPAND_TIMEOUT,
+                )
+                return DispatchResult(
+                    status=DispatchStatus.COLLECTOR_ERROR,
+                    collector_health=health,
+                    error_message=f"Collector expand timed out after {EXPAND_TIMEOUT}s",
+                    duration_ms=_elapsed_ms(start_ns),
+                )
+            except CollectorSourceUnreachableError:
+                # Re-raise so the caller (_dispatch_inner) can attempt fallback
+                raise
+            except CollectorError as exc:
+                logger.warning(
+                    "Collector %s raised CollectorError",
+                    job.collector_id,
+                    exc_info=True,
+                )
+                return DispatchResult(
+                    status=DispatchStatus.COLLECTOR_ERROR,
+                    collector_health=health,
+                    error_message=str(exc),
+                    duration_ms=_elapsed_ms(start_ns),
+                )
+            except Exception as exc:
+                logger.exception(
+                    "Unexpected error in collector %s",
+                    job.collector_id,
+                )
+                return DispatchResult(
+                    status=DispatchStatus.COLLECTOR_ERROR,
+                    collector_health=health,
+                    error_message=f"{type(exc).__name__}: {exc}",
+                    duration_ms=_elapsed_ms(start_ns),
+                )
+
+            egress_anon = (
+                egress_profile.is_anonymizing
+                if egress_profile is not None
+                else False
+            )
+            return DispatchResult(
+                status=DispatchStatus.SUCCESS,
+                observations=observations,
+                collector_health=health,
+                duration_ms=_elapsed_ms(start_ns),
+                egress_anonymized=egress_anon,
+            )
+        finally:
+            # Resource cleanup: call close() if the collector supports it
+            _close = getattr(collector, "close", None)
+            if _close is not None and callable(_close):
+                try:
+                    await _close()
+                except Exception:
+                    logger.debug(
+                        "Ignoring error from collector %s close()",
+                        job.collector_id,
+                        exc_info=True,
+                    )
 
     async def _dispatch_inner(
         self,
@@ -440,14 +500,16 @@ class PipelineDispatcher:
             return cred_result
 
         # 4. Primary attempt via configured (or default) egress profile
+        primary_egress = self._egress_profile
         primary_egress_name = (
-            self._egress_profile.profile_type.value
-            if self._egress_profile is not None
+            primary_egress.profile_type.value
+            if primary_egress is not None
             else "direct"
         )
         try:
             return await self._run_expand(
                 collector_cls, job, cred_result, start_ns,
+                egress_profile=primary_egress,
             )
         except CollectorSourceUnreachableError as primary_exc:
             # No fallbacks configured — report the error immediately
@@ -474,7 +536,6 @@ class PipelineDispatcher:
                 [fb.profile_type.value for fb in self._egress_fallbacks],
             )
 
-            original_egress = self._egress_profile
             for fb_profile in self._egress_fallbacks:
                 fb_name = fb_profile.profile_type.value
                 logger.info(
@@ -486,13 +547,10 @@ class PipelineDispatcher:
                     "info",
                     f"Retrying {job.collector_id} via {fb_name} fallback",
                 )
-                # Temporarily swap the egress profile for the fallback so
-                # _run_expand (and any egress-aware code it calls) sees the
-                # fallback profile's anonymization flag.
-                self._egress_profile = fb_profile
                 try:
                     result = await self._run_expand(
                         collector_cls, job, cred_result, start_ns,
+                        egress_profile=fb_profile,
                     )
                     # Fallback succeeded — annotate and return
                     logger.info(
@@ -508,9 +566,6 @@ class PipelineDispatcher:
                         fb_name,
                     )
                     continue
-                finally:
-                    # Restore the original profile regardless
-                    self._egress_profile = original_egress
 
             # All fallbacks exhausted — report the original error
             logger.error(
@@ -544,6 +599,8 @@ __all__ = [
     "DispatchJob",
     "DispatchResult",
     "DispatchStatus",
+    "EXPAND_TIMEOUT",
+    "HEALTH_CHECK_TIMEOUT",
     "PipelineDispatcher",
     "clear_health_cache",
     "current_tenant_id",

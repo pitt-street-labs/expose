@@ -383,9 +383,8 @@ async def start_run(
 
         # Store reference to prevent GC before completion (RUF006).
         # Dict keyed by run_id string so admin cancel can look up tasks.
-        _bg_tasks: dict[str, asyncio.Task[None]] = getattr(
-            request.app.state, "_bg_tasks", {}
-        )
+        # Mutate in-place — the dict is initialized once in lifespan startup.
+        bg_tasks: dict[str, asyncio.Task[None]] = request.app.state._bg_tasks
         task = asyncio.create_task(
             _run_pipeline_background(
                 run_id=run_id,
@@ -397,9 +396,8 @@ async def start_run(
             )
         )
         task_key = str(run_id)
-        _bg_tasks[task_key] = task
-        task.add_done_callback(lambda _t: _bg_tasks.pop(task_key, None))
-        request.app.state._bg_tasks = _bg_tasks
+        bg_tasks[task_key] = task
+        task.add_done_callback(lambda _t: bg_tasks.pop(task_key, None))
 
     # 6. Return 202 immediately
     return RunStarted(

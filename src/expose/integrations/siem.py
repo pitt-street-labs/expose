@@ -20,10 +20,12 @@ A successful probe resets the breaker; a failed probe re-opens it.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import time
 from abc import ABC, abstractmethod
 from typing import Any
+from urllib.parse import urlparse
 from uuid import UUID
 
 import httpx
@@ -32,8 +34,11 @@ from pydantic import BaseModel, ConfigDict, Field
 __all__ = [
     "CircuitBreakerOpen",
     "DeliveryResult",
+    "SSRFValidationError",
     "SIEMAdapter",
     "SIEMConfig",
+    "TenantMismatchError",
+    "validate_endpoint_not_internal",
 ]
 
 logger = logging.getLogger(__name__)
@@ -48,6 +53,58 @@ _HTTP_SERVER_ERROR = 500
 # Circuit breaker parameters.
 _CIRCUIT_BREAKER_THRESHOLD = 5
 _CIRCUIT_BREAKER_RESET_SECONDS = 60.0
+
+
+# Private/internal IP networks that SIEM endpoints must not resolve to.
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),  # covers 169.254.169.254
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fd00::/8"),
+]
+
+
+class SSRFValidationError(ValueError):
+    """Raised when a SIEM endpoint URL resolves to an internal/private IP."""
+
+
+class TenantMismatchError(ValueError):
+    """Raised when a payload tenant_id does not match the adapter's configured tenant context."""
+
+
+def validate_endpoint_not_internal(endpoint: str) -> None:
+    """Validate that *endpoint* does not point to an internal/private IP.
+
+    Parses the URL, extracts the hostname, and checks it against blocked
+    RFC 1918 / RFC 4193 / link-local / loopback ranges.  Raises
+    ``SSRFValidationError`` if the host is an IP literal that falls within
+    a blocked range.
+
+    DNS-resolved addresses are NOT checked here (that would require async I/O
+    and belongs in the egress layer); this catches obvious IP-literal SSRF
+    payloads such as ``http://169.254.169.254/...``.
+    """
+    parsed = urlparse(endpoint)
+    hostname = parsed.hostname
+    if not hostname:
+        raise SSRFValidationError(f"Cannot extract hostname from endpoint: {endpoint}")
+
+    try:
+        addr = ipaddress.ip_address(hostname)
+    except ValueError:
+        # Not an IP literal — DNS hostname.  IP-level blocking is deferred
+        # to the egress layer (ip_guard / SOCKS5 proxy).
+        return
+
+    for network in _BLOCKED_NETWORKS:
+        if addr in network:
+            raise SSRFValidationError(
+                f"SIEM endpoint resolves to blocked internal address: "
+                f"{hostname} is in {network}"
+            )
 
 
 class CircuitBreakerOpen(Exception):
@@ -93,11 +150,16 @@ class SIEMAdapter(ABC):
     adapter_id: str
     display_name: str
 
-    def __init__(self, config: SIEMConfig) -> None:
+    def __init__(self, config: SIEMConfig, *, tenant_id: UUID | None = None) -> None:
+        validate_endpoint_not_internal(config.endpoint)
         self._config = config
-        # Circuit breaker state.
+        self._tenant_id = tenant_id
+        # Circuit breaker state — protected by _cb_lock for async safety.
         self._consecutive_failures: int = 0
         self._circuit_open_since: float | None = None
+        self._cb_lock = asyncio.Lock()
+        # Reusable HTTP client — created once per adapter instance.
+        self._http_client = httpx.AsyncClient()
 
     # ----- circuit breaker -----
 
@@ -112,21 +174,23 @@ class SIEMAdapter(ABC):
             return False
         return True
 
-    def _record_success(self) -> None:
+    async def _record_success(self) -> None:
         """Reset the breaker on a successful delivery."""
-        self._consecutive_failures = 0
-        self._circuit_open_since = None
+        async with self._cb_lock:
+            self._consecutive_failures = 0
+            self._circuit_open_since = None
 
-    def _record_failure(self) -> None:
+    async def _record_failure(self) -> None:
         """Increment the failure counter and trip the breaker if threshold reached."""
-        self._consecutive_failures += 1
-        if self._consecutive_failures >= _CIRCUIT_BREAKER_THRESHOLD:
-            self._circuit_open_since = time.monotonic()
-            logger.warning(
-                "%s: circuit breaker opened after %d consecutive failures",
-                self.adapter_id,
-                self._consecutive_failures,
-            )
+        async with self._cb_lock:
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= _CIRCUIT_BREAKER_THRESHOLD:
+                self._circuit_open_since = time.monotonic()
+                logger.warning(
+                    "%s: circuit breaker opened after %d consecutive failures",
+                    self.adapter_id,
+                    self._consecutive_failures,
+                )
 
     # ----- abstract interface -----
 
@@ -155,6 +219,20 @@ class SIEMAdapter(ABC):
 
     # ----- shared helpers for subclasses -----
 
+    def _validate_tenant(self, tenant_id: UUID) -> None:
+        """Verify *tenant_id* matches the adapter's configured tenant context.
+
+        Raises ``TenantMismatchError`` if the adapter was constructed with
+        a ``tenant_id`` and the supplied value does not match.  Skips the
+        check when the adapter was created without a tenant context (i.e.
+        ``tenant_id=None`` at init time).
+        """
+        if self._tenant_id is not None and tenant_id != self._tenant_id:
+            raise TenantMismatchError(
+                f"Payload tenant_id {tenant_id} does not match adapter tenant "
+                f"{self._tenant_id}"
+            )
+
     def _is_retryable_status(self, status_code: int) -> bool:
         """Return ``True`` if the HTTP status warrants retry."""
         return status_code == _HTTP_RATE_LIMITED or status_code >= _HTTP_SERVER_ERROR
@@ -180,19 +258,18 @@ class SIEMAdapter(ABC):
                 f"{self.adapter_id}: circuit breaker is open — call rejected"
             )
 
-        last_exc: Exception | None = None
+        last_exc: Exception = RuntimeError("no attempts made")
 
         for attempt in range(1, len(_RETRY_DELAYS) + 2):  # 4 attempts total
             try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(
-                        url,
-                        content=content,
-                        headers=headers,
-                        timeout=request_timeout,
-                    )
+                response = await self._http_client.post(
+                    url,
+                    content=content,
+                    headers=headers,
+                    timeout=request_timeout,
+                )
                 if not self._is_retryable_status(response.status_code):
-                    self._record_success()
+                    await self._record_success()
                     return response
 
                 # Retryable status (429 or 5xx).
@@ -234,8 +311,8 @@ class SIEMAdapter(ABC):
                 await asyncio.sleep(_RETRY_DELAYS[attempt - 1])
 
         # All retries exhausted.
-        self._record_failure()
-        raise last_exc  # type: ignore[misc]
+        await self._record_failure()
+        raise last_exc
 
     def _timed_result(
         self,

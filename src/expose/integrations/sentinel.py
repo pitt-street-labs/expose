@@ -36,6 +36,7 @@ from expose.integrations.siem import (
     DeliveryResult,
     SIEMAdapter,
     SIEMConfig,
+    TenantMismatchError,
 )
 
 __all__ = ["SentinelAdapter"]
@@ -53,8 +54,14 @@ class SentinelAdapter(SIEMAdapter):
     adapter_id = "sentinel"
     display_name = "Microsoft Sentinel"
 
-    def __init__(self, config: SIEMConfig, *, workspace_id: str = "") -> None:
-        super().__init__(config)
+    def __init__(
+        self,
+        config: SIEMConfig,
+        *,
+        workspace_id: str = "",
+        tenant_id: UUID | None = None,
+    ) -> None:
+        super().__init__(config, tenant_id=tenant_id)
         self._workspace_id = workspace_id or self._extract_workspace_id(config.endpoint)
 
     # ----- public interface ---------------------------------------------------
@@ -65,6 +72,7 @@ class SentinelAdapter(SIEMAdapter):
         tenant_id: UUID,
     ) -> DeliveryResult:
         """Deliver observations to the EXPOSE_Observations_CL table."""
+        self._validate_tenant(tenant_id)
         if not self._config.enabled:
             return DeliveryResult(
                 adapter_id=self.adapter_id,
@@ -109,6 +117,7 @@ class SentinelAdapter(SIEMAdapter):
         tenant_id: UUID,
     ) -> DeliveryResult:
         """Deliver a single finding to the EXPOSE_Findings_CL table."""
+        self._validate_tenant(tenant_id)
         if not self._config.enabled:
             return DeliveryResult(
                 adapter_id=self.adapter_id,

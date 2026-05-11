@@ -28,6 +28,7 @@ Coverage:
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
@@ -57,6 +58,7 @@ from expose.pipeline.dispatcher import (
     DispatchResult,
     DispatchStatus,
     PipelineDispatcher,
+    clear_health_cache,
     current_tenant_id,
 )
 from expose.pipeline.enforcement import EnforcementLog
@@ -330,6 +332,17 @@ def scope_empty() -> TenantAuthorizationScope:
     return TenantAuthorizationScope(
         explicit_entity_identifiers=frozenset(),
     )
+
+
+@pytest.fixture(autouse=True)
+def _clear_health_cache() -> None:
+    """Clear the module-level health-check cache before every test.
+
+    Without this, a cached healthy result from one test can mask a
+    timeout or failure in a subsequent test that uses the same
+    collector_id.
+    """
+    clear_health_cache()
 
 
 def _make_job(collector_id: str, seed: Seed, tenant_id: UUID = TENANT_ID) -> DispatchJob:
@@ -1460,3 +1473,282 @@ class TestTier3AttributionGate:
         # Tier-3 gate which allows because example.com is in scope
         assert result.status == DispatchStatus.SUCCESS
         assert len(result.observations) == 1
+
+
+# === Mock collectors for timeout and cleanup tests ============================
+
+
+class MockSlowHealthCheckCollector(Collector):
+    """Collector whose health_check() hangs indefinitely (for timeout tests)."""
+
+    collector_id = "mock-slow-health"
+    collector_version = "1.0.0"
+    requires_credentials = False
+    rate_limit_per_minute = None
+    tier = CollectorTier.TIER_1
+
+    async def expand(self, seed: Seed) -> AsyncIterator[Observation]:
+        yield _make_observation(
+            self.collector_id,
+            self.collector_version,
+            self.config.tenant_id,
+            seed.value,
+        )
+
+    async def health_check(self) -> CollectorHealthCheck:
+        # Block forever -- the dispatcher must time this out
+        await asyncio.sleep(999999)
+        # Unreachable, but satisfies the return type
+        return CollectorHealthCheck(  # pragma: no cover
+            collector_id=self.collector_id,
+            collector_version=self.collector_version,
+            status=CollectorStatus.SUCCESS,
+            checked_at=_NOW,
+            latency_ms=1.0,
+        )
+
+
+class MockSlowExpandCollector(Collector):
+    """Collector whose expand() hangs indefinitely (for timeout tests)."""
+
+    collector_id = "mock-slow-expand"
+    collector_version = "1.0.0"
+    requires_credentials = False
+    rate_limit_per_minute = None
+    tier = CollectorTier.TIER_1
+
+    async def expand(self, seed: Seed) -> AsyncIterator[Observation]:
+        # Block forever -- the dispatcher must time this out
+        await asyncio.sleep(999999)
+        yield _make_observation(  # pragma: no cover
+            self.collector_id,
+            self.collector_version,
+            self.config.tenant_id,
+            seed.value,
+        )
+
+    async def health_check(self) -> CollectorHealthCheck:
+        return CollectorHealthCheck(
+            collector_id=self.collector_id,
+            collector_version=self.collector_version,
+            status=CollectorStatus.SUCCESS,
+            checked_at=_NOW,
+            latency_ms=1.0,
+        )
+
+
+class MockCloseableCollector(Collector):
+    """Collector with a close() method to verify resource cleanup."""
+
+    collector_id = "mock-closeable"
+    collector_version = "1.0.0"
+    requires_credentials = False
+    rate_limit_per_minute = None
+    tier = CollectorTier.TIER_1
+
+    close_called: bool = False
+
+    def __init__(self, config: CollectorConfig) -> None:
+        super().__init__(config)
+        MockCloseableCollector.close_called = False
+
+    async def close(self) -> None:
+        MockCloseableCollector.close_called = True
+
+    async def expand(self, seed: Seed) -> AsyncIterator[Observation]:
+        yield _make_observation(
+            self.collector_id,
+            self.collector_version,
+            self.config.tenant_id,
+            seed.value,
+        )
+
+    async def health_check(self) -> CollectorHealthCheck:
+        return CollectorHealthCheck(
+            collector_id=self.collector_id,
+            collector_version=self.collector_version,
+            status=CollectorStatus.SUCCESS,
+            checked_at=_NOW,
+            latency_ms=1.0,
+        )
+
+
+class MockCloseableErrorCollector(Collector):
+    """Collector with close() that verifies cleanup even after expand errors."""
+
+    collector_id = "mock-closeable-error"
+    collector_version = "1.0.0"
+    requires_credentials = False
+    rate_limit_per_minute = None
+    tier = CollectorTier.TIER_1
+
+    close_called: bool = False
+
+    def __init__(self, config: CollectorConfig) -> None:
+        super().__init__(config)
+        MockCloseableErrorCollector.close_called = False
+
+    async def close(self) -> None:
+        MockCloseableErrorCollector.close_called = True
+
+    async def expand(self, seed: Seed) -> AsyncIterator[Observation]:
+        raise CollectorError("simulated failure for cleanup test")
+        yield  # type: ignore[misc]
+
+    async def health_check(self) -> CollectorHealthCheck:
+        return CollectorHealthCheck(
+            collector_id=self.collector_id,
+            collector_version=self.collector_version,
+            status=CollectorStatus.SUCCESS,
+            checked_at=_NOW,
+            latency_ms=1.0,
+        )
+
+
+# === Timeout tests ============================================================
+
+
+class TestDispatcherTimeouts:
+    """Tests for health-check and expand timeout enforcement."""
+
+    @pytest.mark.asyncio
+    async def test_health_check_timeout(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """Health check that exceeds the timeout returns HEALTH_CHECK_FAILED."""
+        from unittest.mock import patch  # noqa: PLC0415
+
+        registry.register(MockSlowHealthCheckCollector)
+        dispatcher = PipelineDispatcher(registry, scope_empty, TENANT_ID)
+
+        # Shrink the timeout constant so the test finishes instantly
+        with patch("expose.pipeline.dispatcher.HEALTH_CHECK_TIMEOUT", 0.01):
+            result = await dispatcher.dispatch(_make_job("mock-slow-health", seed))
+
+        assert result.status == DispatchStatus.HEALTH_CHECK_FAILED
+        assert "timed out" in (result.error_message or "").lower()
+        assert result.observations == []
+
+    @pytest.mark.asyncio
+    async def test_expand_timeout(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """Expand that exceeds the timeout returns COLLECTOR_ERROR."""
+        from unittest.mock import patch  # noqa: PLC0415
+
+        registry.register(MockSlowExpandCollector)
+        dispatcher = PipelineDispatcher(registry, scope_empty, TENANT_ID)
+
+        # Shrink the timeout constant so the test finishes instantly
+        with patch("expose.pipeline.dispatcher.EXPAND_TIMEOUT", 0.01):
+            result = await dispatcher.dispatch(_make_job("mock-slow-expand", seed))
+
+        assert result.status == DispatchStatus.COLLECTOR_ERROR
+        assert "timed out" in (result.error_message or "").lower()
+        assert result.observations == []
+        assert result.collector_health is not None
+
+
+# === Resource cleanup tests ===================================================
+
+
+class TestCollectorResourceCleanup:
+    """Tests for collector close() cleanup after dispatch."""
+
+    @pytest.mark.asyncio
+    async def test_close_called_on_success(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """close() is called after a successful dispatch."""
+        registry.register(MockCloseableCollector)
+        MockCloseableCollector.close_called = False
+        dispatcher = PipelineDispatcher(registry, scope_empty, TENANT_ID)
+        result = await dispatcher.dispatch(_make_job("mock-closeable", seed))
+
+        assert result.status == DispatchStatus.SUCCESS
+        assert MockCloseableCollector.close_called is True
+
+    @pytest.mark.asyncio
+    async def test_close_called_on_error(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """close() is called even when expand() raises."""
+        registry.register(MockCloseableErrorCollector)
+        MockCloseableErrorCollector.close_called = False
+        dispatcher = PipelineDispatcher(registry, scope_empty, TENANT_ID)
+        result = await dispatcher.dispatch(_make_job("mock-closeable-error", seed))
+
+        assert result.status == DispatchStatus.COLLECTOR_ERROR
+        assert MockCloseableErrorCollector.close_called is True
+
+    @pytest.mark.asyncio
+    async def test_no_close_method_is_fine(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """Collectors without close() still dispatch successfully (duck-typing)."""
+        dispatcher = PipelineDispatcher(registry, scope_empty, TENANT_ID)
+        result = await dispatcher.dispatch(_make_job("mock-tier1", seed))
+
+        assert result.status == DispatchStatus.SUCCESS
+        assert len(result.observations) == 1
+
+
+# === Egress profile mutation race condition test ==============================
+
+
+class TestEgressProfileImmutability:
+    """Tests that egress profile is passed explicitly, never mutated on self."""
+
+    @pytest.mark.asyncio
+    async def test_egress_profile_never_mutated_during_fallback(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """self._egress_profile is never modified during fallback dispatch."""
+        registry.register(MockUnreachableThenOkCollector)
+        MockUnreachableThenOkCollector.call_count = 0
+
+        from expose.egress.direct import DirectEgressProfile  # noqa: PLC0415
+        from expose.egress.socks5 import Socks5EgressProfile  # noqa: PLC0415
+
+        original_egress = DirectEgressProfile()
+        fallback = Socks5EgressProfile(proxy_url="socks5://127.0.0.1:9050")
+        dispatcher = PipelineDispatcher(
+            registry, scope_empty, TENANT_ID,
+            egress_profile=original_egress,
+            egress_fallbacks=[fallback],
+        )
+
+        # Capture every value of _egress_profile during dispatch
+        profile_snapshots: list[object] = []
+        original_run_expand = dispatcher._run_expand
+
+        async def tracking_run_expand(*args, **kwargs):  # noqa: ANN002, ANN003
+            profile_snapshots.append(dispatcher._egress_profile)
+            return await original_run_expand(*args, **kwargs)
+
+        dispatcher._run_expand = tracking_run_expand  # type: ignore[method-assign]
+        await dispatcher.dispatch(_make_job("mock-unreachable-then-ok", seed))
+
+        # _egress_profile should be the original throughout (never swapped)
+        for snap in profile_snapshots:
+            assert snap is original_egress, (
+                "self._egress_profile was mutated during fallback dispatch"
+            )

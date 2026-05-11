@@ -8,7 +8,7 @@ Covers:
  1. Create a schedule -> 201 with valid response
  2. Create with invalid cron expression -> 422
  3. List schedules (empty) -> 200 with empty list
- 4. List schedules (with data) -> returns all schedules
+ 4. List schedules (with data) -> returns only caller's schedules
  5. Get schedule by tenant_id -> 200
  6. Get nonexistent schedule -> 404
  7. Delete schedule -> 204
@@ -16,6 +16,8 @@ Covers:
  9. Create replaces existing schedule for same tenant
 10. Concurrent run limit blocks duplicate runs for same tenant
 11. Scheduler background task starts and stops cleanly
+12. Authentication: requests without token -> 401
+13. Authentication: cross-tenant access -> 403
 """
 
 from __future__ import annotations
@@ -37,7 +39,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from expose.api.scheduler import router as scheduler_router
+from expose.api.scheduler import router as scheduler_router, token_store
 from expose.api.tenants import get_session
 from expose.api.tenants import router as tenants_router
 from expose.db.models import Base, Run, Tenant
@@ -142,10 +144,12 @@ async def _tracking_trigger(
 
 @pytest_asyncio.fixture(autouse=True)
 async def _clear_trigger_calls() -> AsyncIterator[None]:
-    """Reset the tracking list before each test."""
+    """Reset the tracking list and token store before each test."""
     _trigger_calls.clear()
+    token_store._tokens.clear()
     yield
     _trigger_calls.clear()
+    token_store._tokens.clear()
 
 
 @pytest_asyncio.fixture
@@ -238,6 +242,12 @@ async def _seed_run(
     return rid
 
 
+def _auth_header(tenant_id: UUID, scopes: list[str] | None = None) -> dict[str, str]:
+    """Create an API token for *tenant_id* and return an Authorization header."""
+    api_token = token_store.create_token(tenant_id, scopes=scopes)
+    return {"Authorization": f"Bearer {api_token.token}"}
+
+
 # ===================================================================
 # 1. Create a schedule -> 201
 # ===================================================================
@@ -247,6 +257,7 @@ async def test_create_schedule(
     client: AsyncClient,
 ) -> None:
     tid = uuid4()
+    headers = _auth_header(tid)
     resp = await client.post(
         "/v1/scheduler/schedules",
         json={
@@ -255,6 +266,7 @@ async def test_create_schedule(
             "collector_ids": ["dns-basic", "whois"],
             "seeds": [{"value": "example.com", "seed_type": "DOMAIN"}],
         },
+        headers=headers,
     )
     assert resp.status_code == 201
     data = resp.json()
@@ -275,12 +287,14 @@ async def test_create_schedule_invalid_cron(
     client: AsyncClient,
 ) -> None:
     tid = uuid4()
+    headers = _auth_header(tid)
     resp = await client.post(
         "/v1/scheduler/schedules",
         json={
             "tenant_id": str(tid),
             "cron_expression": "not a cron",
         },
+        headers=headers,
     )
     assert resp.status_code == 422
 
@@ -289,12 +303,14 @@ async def test_create_schedule_wrong_field_count(
     client: AsyncClient,
 ) -> None:
     tid = uuid4()
+    headers = _auth_header(tid)
     resp = await client.post(
         "/v1/scheduler/schedules",
         json={
             "tenant_id": str(tid),
             "cron_expression": "* * *",
         },
+        headers=headers,
     )
     assert resp.status_code == 422
     assert "5 fields" in resp.json()["detail"]
@@ -304,12 +320,14 @@ async def test_create_schedule_out_of_range(
     client: AsyncClient,
 ) -> None:
     tid = uuid4()
+    headers = _auth_header(tid)
     resp = await client.post(
         "/v1/scheduler/schedules",
         json={
             "tenant_id": str(tid),
             "cron_expression": "99 2 * * *",
         },
+        headers=headers,
     )
     assert resp.status_code == 422
     assert "out of bounds" in resp.json()["detail"]
@@ -323,7 +341,9 @@ async def test_create_schedule_out_of_range(
 async def test_list_schedules_empty(
     client: AsyncClient,
 ) -> None:
-    resp = await client.get("/v1/scheduler/schedules")
+    tid = uuid4()
+    headers = _auth_header(tid)
+    resp = await client.get("/v1/scheduler/schedules", headers=headers)
     assert resp.status_code == 200
     data = resp.json()
     assert data["schedules"] == []
@@ -340,25 +360,34 @@ async def test_list_schedules_with_data(
 ) -> None:
     tid1 = uuid4()
     tid2 = uuid4()
+    headers1 = _auth_header(tid1)
+    headers2 = _auth_header(tid2)
 
     await client.post(
         "/v1/scheduler/schedules",
         json={"tenant_id": str(tid1), "cron_expression": "0 * * * *"},
+        headers=headers1,
     )
     await client.post(
         "/v1/scheduler/schedules",
         json={"tenant_id": str(tid2), "cron_expression": "30 6 * * 1"},
+        headers=headers2,
     )
 
-    resp = await client.get("/v1/scheduler/schedules")
+    # Tenant 1 only sees their own schedule.
+    resp = await client.get("/v1/scheduler/schedules", headers=headers1)
     assert resp.status_code == 200
     data = resp.json()
-    assert data["total"] == 2
-    assert len(data["schedules"]) == 2
+    assert data["total"] == 1
+    assert len(data["schedules"]) == 1
+    assert data["schedules"][0]["tenant_id"] == str(tid1)
 
-    tenant_ids = {s["tenant_id"] for s in data["schedules"]}
-    assert str(tid1) in tenant_ids
-    assert str(tid2) in tenant_ids
+    # Tenant 2 only sees their own schedule.
+    resp2 = await client.get("/v1/scheduler/schedules", headers=headers2)
+    assert resp2.status_code == 200
+    data2 = resp2.json()
+    assert data2["total"] == 1
+    assert data2["schedules"][0]["tenant_id"] == str(tid2)
 
 
 # ===================================================================
@@ -370,6 +399,7 @@ async def test_get_schedule(
     client: AsyncClient,
 ) -> None:
     tid = uuid4()
+    headers = _auth_header(tid)
     await client.post(
         "/v1/scheduler/schedules",
         json={
@@ -377,9 +407,10 @@ async def test_get_schedule(
             "cron_expression": "*/15 * * * *",
             "collector_ids": ["ct-crtsh"],
         },
+        headers=headers,
     )
 
-    resp = await client.get(f"/v1/scheduler/schedules/{tid}")
+    resp = await client.get(f"/v1/scheduler/schedules/{tid}", headers=headers)
     assert resp.status_code == 200
     data = resp.json()
     assert data["tenant_id"] == str(tid)
@@ -396,7 +427,8 @@ async def test_get_schedule_not_found(
     client: AsyncClient,
 ) -> None:
     fake_id = uuid4()
-    resp = await client.get(f"/v1/scheduler/schedules/{fake_id}")
+    headers = _auth_header(fake_id)
+    resp = await client.get(f"/v1/scheduler/schedules/{fake_id}", headers=headers)
     assert resp.status_code == 404
     assert "not found" in resp.json()["detail"].lower()
 
@@ -410,16 +442,18 @@ async def test_delete_schedule(
     client: AsyncClient,
 ) -> None:
     tid = uuid4()
+    headers = _auth_header(tid)
     await client.post(
         "/v1/scheduler/schedules",
         json={"tenant_id": str(tid), "cron_expression": "0 0 * * *"},
+        headers=headers,
     )
 
-    resp = await client.delete(f"/v1/scheduler/schedules/{tid}")
+    resp = await client.delete(f"/v1/scheduler/schedules/{tid}", headers=headers)
     assert resp.status_code == 204
 
     # Confirm it's gone.
-    resp = await client.get(f"/v1/scheduler/schedules/{tid}")
+    resp = await client.get(f"/v1/scheduler/schedules/{tid}", headers=headers)
     assert resp.status_code == 404
 
 
@@ -432,7 +466,8 @@ async def test_delete_schedule_not_found(
     client: AsyncClient,
 ) -> None:
     fake_id = uuid4()
-    resp = await client.delete(f"/v1/scheduler/schedules/{fake_id}")
+    headers = _auth_header(fake_id)
+    resp = await client.delete(f"/v1/scheduler/schedules/{fake_id}", headers=headers)
     assert resp.status_code == 404
 
 
@@ -445,6 +480,7 @@ async def test_create_replaces_existing(
     client: AsyncClient,
 ) -> None:
     tid = uuid4()
+    headers = _auth_header(tid)
 
     # First schedule.
     resp1 = await client.post(
@@ -454,6 +490,7 @@ async def test_create_replaces_existing(
             "cron_expression": "0 2 * * *",
             "collector_ids": ["dns-basic"],
         },
+        headers=headers,
     )
     assert resp1.status_code == 201
 
@@ -465,18 +502,19 @@ async def test_create_replaces_existing(
             "cron_expression": "0 4 * * *",
             "collector_ids": ["whois"],
         },
+        headers=headers,
     )
     assert resp2.status_code == 201
 
     # Only one schedule for this tenant.
-    resp = await client.get(f"/v1/scheduler/schedules/{tid}")
+    resp = await client.get(f"/v1/scheduler/schedules/{tid}", headers=headers)
     assert resp.status_code == 200
     data = resp.json()
     assert data["cron_expression"] == "0 4 * * *"
     assert data["collector_ids"] == ["whois"]
 
     # Total count should be 1, not 2.
-    list_resp = await client.get("/v1/scheduler/schedules")
+    list_resp = await client.get("/v1/scheduler/schedules", headers=headers)
     assert list_resp.json()["total"] == 1
 
 
@@ -633,16 +671,150 @@ async def test_scheduler_not_wired_returns_503(
 
     app.dependency_overrides[get_session] = _override_get_session
 
+    tid = uuid4()
+    headers = _auth_header(tid)
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        resp = await ac.get("/v1/scheduler/schedules")
+        resp = await ac.get("/v1/scheduler/schedules", headers=headers)
         assert resp.status_code == 503
 
         resp = await ac.post(
             "/v1/scheduler/schedules",
             json={
-                "tenant_id": str(uuid4()),
+                "tenant_id": str(tid),
                 "cron_expression": "0 0 * * *",
             },
+            headers=headers,
         )
         assert resp.status_code == 503
+
+
+# ===================================================================
+# 13. Authentication: no token -> 401
+# ===================================================================
+
+
+async def test_no_auth_returns_401(
+    client: AsyncClient,
+) -> None:
+    """All scheduler endpoints reject requests without a Bearer token."""
+    tid = uuid4()
+
+    # POST (create)
+    resp = await client.post(
+        "/v1/scheduler/schedules",
+        json={"tenant_id": str(tid), "cron_expression": "0 0 * * *"},
+    )
+    assert resp.status_code == 401
+
+    # GET (list)
+    resp = await client.get("/v1/scheduler/schedules")
+    assert resp.status_code == 401
+
+    # GET (single)
+    resp = await client.get(f"/v1/scheduler/schedules/{tid}")
+    assert resp.status_code == 401
+
+    # DELETE
+    resp = await client.delete(f"/v1/scheduler/schedules/{tid}")
+    assert resp.status_code == 401
+
+
+# ===================================================================
+# 14. Authentication: cross-tenant access -> 403
+# ===================================================================
+
+
+async def test_cross_tenant_create_returns_403(
+    client: AsyncClient,
+) -> None:
+    """Create schedule for a different tenant than the token -> 403."""
+    caller_tid = uuid4()
+    target_tid = uuid4()
+    headers = _auth_header(caller_tid)
+
+    resp = await client.post(
+        "/v1/scheduler/schedules",
+        json={"tenant_id": str(target_tid), "cron_expression": "0 0 * * *"},
+        headers=headers,
+    )
+    assert resp.status_code == 403
+    assert "tenant_id" in resp.json()["detail"].lower()
+
+
+async def test_cross_tenant_get_returns_403(
+    client: AsyncClient,
+) -> None:
+    """Get schedule for a different tenant than the token -> 403."""
+    caller_tid = uuid4()
+    target_tid = uuid4()
+    headers = _auth_header(caller_tid)
+
+    resp = await client.get(
+        f"/v1/scheduler/schedules/{target_tid}",
+        headers=headers,
+    )
+    assert resp.status_code == 403
+
+
+async def test_cross_tenant_delete_returns_403(
+    client: AsyncClient,
+) -> None:
+    """Delete schedule for a different tenant than the token -> 403."""
+    caller_tid = uuid4()
+    target_tid = uuid4()
+    headers = _auth_header(caller_tid)
+
+    resp = await client.delete(
+        f"/v1/scheduler/schedules/{target_tid}",
+        headers=headers,
+    )
+    assert resp.status_code == 403
+
+
+# ===================================================================
+# 15. Authentication: read-only token cannot create/delete
+# ===================================================================
+
+
+async def test_read_only_token_cannot_create(
+    client: AsyncClient,
+) -> None:
+    """A token with only 'read' scope cannot create schedules."""
+    tid = uuid4()
+    headers = _auth_header(tid, scopes=["read"])
+
+    resp = await client.post(
+        "/v1/scheduler/schedules",
+        json={"tenant_id": str(tid), "cron_expression": "0 0 * * *"},
+        headers=headers,
+    )
+    assert resp.status_code == 403
+    assert "scope" in resp.json()["detail"].lower()
+
+
+async def test_read_only_token_cannot_delete(
+    client: AsyncClient,
+) -> None:
+    """A token with only 'read' scope cannot delete schedules."""
+    tid = uuid4()
+    headers = _auth_header(tid, scopes=["read"])
+
+    resp = await client.delete(
+        f"/v1/scheduler/schedules/{tid}",
+        headers=headers,
+    )
+    assert resp.status_code == 403
+    assert "scope" in resp.json()["detail"].lower()
+
+
+async def test_read_only_token_can_list(
+    client: AsyncClient,
+) -> None:
+    """A token with only 'read' scope can list and get schedules."""
+    tid = uuid4()
+    headers = _auth_header(tid, scopes=["read"])
+
+    resp = await client.get("/v1/scheduler/schedules", headers=headers)
+    assert resp.status_code == 200

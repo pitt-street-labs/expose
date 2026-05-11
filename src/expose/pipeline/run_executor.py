@@ -26,6 +26,7 @@ import asyncio
 import logging
 import socket
 import time
+from collections import defaultdict
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Protocol, runtime_checkable
@@ -510,39 +511,47 @@ class RunExecutor:
                         rule_pack=self._rule_pack,
                         scope_context=getattr(self, "_scope_context", None),
                     )
-                    eval_entities = await self._entity_repo.list_for_tenant(
-                        tenant_id=TenantId(tenant_id),
-                        limit=1000,
-                    )
-                    for entity in eval_entities:
-                        entity_data = {
-                            "entity_type": entity.entity_type,
-                            "canonical_identifier": entity.canonical_identifier,
-                            "properties": entity.properties or {},
-                            "attribution_status": entity.attribution_status,
-                            "attribution_confidence": float(
-                                entity.attribution_confidence
-                            ),
-                        }
-                        eval_result = rule_evaluator.evaluate(entity_data)
-                        if eval_result.matched_rules:
-                            await self._entity_repo.create_or_update(
-                                tenant_id=TenantId(tenant_id),
-                                entity_type=entity.entity_type,
-                                canonical_identifier=entity.canonical_identifier,
-                                properties=entity.properties or {},
-                                attribution_status=eval_result.attribution_tier,
-                                attribution_confidence=Decimal(
-                                    str(round(eval_result.final_confidence, 3))
+                    # Early-exit: skip entirely if the rule pack has no
+                    # enabled rules (avoids a DB query + O(N*M) loop).
+                    enabled_rules = [
+                        r
+                        for r in self._rule_pack.attribution_rules
+                        if r.enabled
+                    ]
+                    if enabled_rules:
+                        eval_entities = await self._entity_repo.list_for_tenant(
+                            tenant_id=TenantId(tenant_id),
+                            limit=1000,
+                        )
+                        for entity in eval_entities:
+                            entity_data = {
+                                "entity_type": entity.entity_type,
+                                "canonical_identifier": entity.canonical_identifier,
+                                "properties": entity.properties or {},
+                                "attribution_status": entity.attribution_status,
+                                "attribution_confidence": float(
+                                    entity.attribution_confidence
                                 ),
-                            )
-                            self._log(
-                                "info",
-                                f"Rule evaluation: {entity.canonical_identifier} "
-                                f"-> {eval_result.attribution_tier} "
-                                f"({eval_result.final_confidence:.3f}), "
-                                f"rules={eval_result.matched_rules}",
-                            )
+                            }
+                            eval_result = rule_evaluator.evaluate(entity_data)
+                            if eval_result.matched_rules:
+                                await self._entity_repo.create_or_update(
+                                    tenant_id=TenantId(tenant_id),
+                                    entity_type=entity.entity_type,
+                                    canonical_identifier=entity.canonical_identifier,
+                                    properties=entity.properties or {},
+                                    attribution_status=eval_result.attribution_tier,
+                                    attribution_confidence=Decimal(
+                                        str(round(eval_result.final_confidence, 3))
+                                    ),
+                                )
+                                self._log(
+                                    "info",
+                                    f"Rule evaluation: {entity.canonical_identifier} "
+                                    f"-> {eval_result.attribution_tier} "
+                                    f"({eval_result.final_confidence:.3f}), "
+                                    f"rules={eval_result.matched_rules}",
+                                )
             except Exception:
                 logger.exception(
                     "Rule evaluation failed after pass %d", pass_number
@@ -795,7 +804,21 @@ class RunExecutor:
             self._log("info", f"Dispatching {collector_id} for {seed.value}")
             async with semaphore:
                 try:
-                    result = await self._dispatcher.dispatch(job)
+                    result = await asyncio.wait_for(
+                        self._dispatcher.dispatch(job),
+                        timeout=120.0,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Dispatch timed out after 120s for %s on %s",
+                        collector_id,
+                        seed.value,
+                    )
+                    self._log(
+                        "warn",
+                        f"{collector_id} dispatch timed out after 120s",
+                    )
+                    return (seed.value, collector_id, None)
                 except Exception as e:
                     logger.warning(
                         "Dispatch exception for %s on %s",
@@ -980,14 +1003,17 @@ class RunExecutor:
         if entity_map:
             from expose.pipeline.lead_scoring import LeadScoringEngine  # noqa: PLC0415
 
+            # Pre-build O(M) lookup to avoid O(N*M) scan per entity
+            obs_by_entity: dict[str, list[dict[str, Any]]] = defaultdict(list)
+            for o in observations:
+                obs_by_entity[o.subject.identifier_value].append(
+                    _observation_properties(o)
+                )
+
             scorer = LeadScoringEngine()
             for canonical_id, entity in entity_map.items():
                 try:
-                    obs_for_entity = [
-                        _observation_properties(o)
-                        for o in observations
-                        if o.subject.identifier_value == canonical_id
-                    ]
+                    obs_for_entity = obs_by_entity.get(canonical_id, [])
                     score_result = scorer.score_entity(
                         entity_identifier=canonical_id,
                         observations=obs_for_entity,
@@ -1066,15 +1092,25 @@ class RunExecutor:
             async def _enrich_one(obs: Observation) -> bool:
                 async with enrichment_sem:
                     try:
-                        enrichment_result = await self._enrichment.enrich_entity(  # type: ignore[union-attr]
-                            entity_type=obs.subject.identifier_type.value,
-                            canonical_identifier=obs.subject.identifier_value,
-                            properties=_observation_properties(obs),
-                            attribution_confidence=float(Decimal("0.000")),
-                            tenant_id=tenant_id,
-                            run_id=run_id,
+                        enrichment_result = await asyncio.wait_for(
+                            self._enrichment.enrich_entity(  # type: ignore[union-attr]
+                                entity_type=obs.subject.identifier_type.value,
+                                canonical_identifier=obs.subject.identifier_value,
+                                properties=_observation_properties(obs),
+                                attribution_confidence=float(Decimal("0.000")),
+                                tenant_id=tenant_id,
+                                run_id=run_id,
+                            ),
+                            timeout=60.0,
                         )
                         return bool(enrichment_result)
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "Enrichment timed out after 60s for %s/%s",
+                            obs.subject.identifier_type.value,
+                            obs.subject.identifier_value,
+                        )
+                        return False
                     except Exception:
                         logger.exception(
                             "Enrichment failed for %s/%s",

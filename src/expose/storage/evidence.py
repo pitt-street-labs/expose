@@ -122,6 +122,13 @@ class EvidenceManager:
             coupling this class to the tenancy model.
         default_retention_seconds: Default TTL for stored blobs when the
             caller does not specify one.
+        verify_on_read: Default integrity-verification policy for
+            :meth:`retrieve`.  When ``True`` (the default), every
+            retrieval re-computes the SHA-256 digest and compares it to
+            the content-addressed key.  Set to ``False`` to skip the
+            hash check by default, avoiding a CPU bottleneck for large
+            blobs.  Individual :meth:`retrieve` calls can still override
+            via the ``verify_integrity`` parameter.
     """
 
     def __init__(
@@ -130,10 +137,12 @@ class EvidenceManager:
         *,
         key_prefix: str = "",
         default_retention_seconds: int = _DEFAULT_RETENTION_SECONDS,
+        verify_on_read: bool = True,
     ) -> None:
         self._backend = backend
         self._key_prefix = key_prefix.rstrip("/")
         self._default_retention_seconds = default_retention_seconds
+        self._verify_on_read = verify_on_read
 
     # -- key helpers --------------------------------------------------------
 
@@ -204,7 +213,9 @@ class EvidenceManager:
 
         return ref
 
-    async def retrieve(self, content_hash: str) -> bytes:
+    async def retrieve(
+        self, content_hash: str, *, verify_integrity: bool | None = None
+    ) -> bytes:
         """Retrieve an evidence blob by its SHA-256 content hash.
 
         Re-hashes the retrieved bytes and raises :class:`EvidenceIntegrityError`
@@ -212,25 +223,38 @@ class EvidenceManager:
 
         Args:
             content_hash: 64-character lowercase hex SHA-256 digest.
+            verify_integrity: Whether to re-hash the blob for integrity
+                verification.  ``None`` (the default) defers to the
+                instance-level ``verify_on_read`` setting.  Pass ``True``
+                or ``False`` to override per call.  Skipping verification
+                avoids the SHA-256 re-computation, which can be a CPU
+                bottleneck for large blobs.
 
         Returns:
             The raw evidence bytes.
 
         Raises:
             StorageKeyNotFoundError: if no blob exists for *content_hash*.
-            EvidenceIntegrityError: if the stored bytes fail integrity check.
+            EvidenceIntegrityError: if the stored bytes fail integrity check
+                (only when verification is enabled).
         """
         blob_key = self._blob_key(content_hash)
         data = await self._backend.get(blob_key)
 
-        # Integrity validation: re-hash and compare.
-        actual_hash = compute_sha256_hex(data)
-        if actual_hash != content_hash:
-            msg = (
-                f"Evidence integrity check failed for {content_hash}: "
-                f"stored data hashes to {actual_hash}"
-            )
-            raise EvidenceIntegrityError(msg)
+        # Resolve effective verification flag: explicit arg > instance default.
+        should_verify = (
+            verify_integrity if verify_integrity is not None else self._verify_on_read
+        )
+
+        if should_verify:
+            # Integrity validation: re-hash and compare.
+            actual_hash = compute_sha256_hex(data)
+            if actual_hash != content_hash:
+                msg = (
+                    f"Evidence integrity check failed for {content_hash}: "
+                    f"stored data hashes to {actual_hash}"
+                )
+                raise EvidenceIntegrityError(msg)
 
         return data
 

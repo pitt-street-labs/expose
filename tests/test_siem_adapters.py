@@ -52,6 +52,7 @@ Integration tests (added):
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 from uuid import UUID
@@ -62,7 +63,14 @@ import respx
 
 from expose.integrations.chronicle import ChronicleAdapter
 from expose.integrations.sentinel import SentinelAdapter
-from expose.integrations.siem import CircuitBreakerOpen, DeliveryResult, SIEMConfig
+from expose.integrations.siem import (
+    CircuitBreakerOpen,
+    DeliveryResult,
+    SIEMConfig,
+    SSRFValidationError,
+    TenantMismatchError,
+    validate_endpoint_not_internal,
+)
 from expose.integrations.splunk import SplunkHECAdapter
 
 # Deterministic test IDs.
@@ -752,7 +760,7 @@ class TestCircuitBreaker:
 
         # Manually simulate some failures without fully tripping.
         adapter._consecutive_failures = 4
-        adapter._record_success()
+        await adapter._record_success()
 
         assert adapter._consecutive_failures == 0
         assert adapter.circuit_is_open is False
@@ -1048,3 +1056,219 @@ class TestBatchSizeLimits:
         # Third batch: 1 event.
         lines_3 = captured_bodies[2].decode().strip().split("\n")
         assert len(lines_3) == 1
+
+
+# ===========================================================================
+# Fix 1: Circuit breaker asyncio.Lock
+# ===========================================================================
+
+
+class TestCircuitBreakerLock:
+    """Verify circuit breaker state is protected by asyncio.Lock."""
+
+    def test_adapter_has_cb_lock(self) -> None:
+        """Adapter instances have a _cb_lock attribute."""
+        adapter = SplunkHECAdapter(_splunk_config())
+        assert hasattr(adapter, "_cb_lock")
+        import asyncio
+
+        assert isinstance(adapter._cb_lock, asyncio.Lock)
+
+    async def test_record_success_is_async(self) -> None:
+        """_record_success is awaitable (async)."""
+        adapter = SplunkHECAdapter(_splunk_config())
+        adapter._consecutive_failures = 3
+        await adapter._record_success()
+        assert adapter._consecutive_failures == 0
+
+    async def test_record_failure_is_async(self) -> None:
+        """_record_failure is awaitable (async)."""
+        adapter = SplunkHECAdapter(_splunk_config())
+        await adapter._record_failure()
+        assert adapter._consecutive_failures == 1
+
+
+# ===========================================================================
+# Fix 2: HTTP client reuse
+# ===========================================================================
+
+
+class TestHTTPClientReuse:
+    """Verify that a single httpx.AsyncClient is reused across retries."""
+
+    def test_adapter_has_http_client(self) -> None:
+        """Adapter instances have a _http_client attribute."""
+        adapter = SplunkHECAdapter(_splunk_config())
+        assert hasattr(adapter, "_http_client")
+        assert isinstance(adapter._http_client, httpx.AsyncClient)
+
+    def test_client_is_same_instance(self) -> None:
+        """The HTTP client is the same object across accesses."""
+        adapter = ChronicleAdapter(_chronicle_config())
+        client1 = adapter._http_client
+        client2 = adapter._http_client
+        assert client1 is client2
+
+
+# ===========================================================================
+# Fix 3: UnboundLocalError in retry — last_exc initialized
+# ===========================================================================
+
+
+class TestLastExcInitialized:
+    """Verify last_exc is initialized before the retry loop."""
+
+    @respx.mock
+    async def test_no_unbound_local_error(self) -> None:
+        """Even if no attempts succeed, last_exc is a RuntimeError, not unbound."""
+        # Mock returns 500 on every attempt.
+        respx.post(f"{SPLUNK_ENDPOINT}/services/collector/event").mock(
+            return_value=httpx.Response(500, text="Internal Server Error"),
+        )
+
+        adapter = SplunkHECAdapter(_splunk_config())
+        # This should NOT raise UnboundLocalError.
+        result = await adapter.send_observations([_sample_observation()], TENANT_ID)
+        assert result.success is False
+
+
+# ===========================================================================
+# Fix 4: SSRF endpoint validation
+# ===========================================================================
+
+
+WRONG_TENANT_ID = UUID("018f1f00-0000-7000-8000-000000000099")
+
+
+class TestSSRFValidation:
+    """Verify internal/private IPs are rejected in SIEM endpoint URLs."""
+
+    def test_loopback_rejected(self) -> None:
+        with pytest.raises(SSRFValidationError, match="blocked internal address"):
+            validate_endpoint_not_internal("http://127.0.0.1:8088/collector")
+
+    def test_rfc1918_10_rejected(self) -> None:
+        with pytest.raises(SSRFValidationError, match="blocked internal address"):
+            validate_endpoint_not_internal("https://10.0.0.1:8088/collector")
+
+    def test_rfc1918_172_rejected(self) -> None:
+        with pytest.raises(SSRFValidationError, match="blocked internal address"):
+            validate_endpoint_not_internal("https://172.16.5.10/api")
+
+    def test_rfc1918_192_rejected(self) -> None:
+        with pytest.raises(SSRFValidationError, match="blocked internal address"):
+            validate_endpoint_not_internal("https://192.168.1.100/api")
+
+    def test_metadata_endpoint_rejected(self) -> None:
+        with pytest.raises(SSRFValidationError, match="blocked internal address"):
+            validate_endpoint_not_internal("http://169.254.169.254/latest/meta-data/")
+
+    def test_ipv6_loopback_rejected(self) -> None:
+        with pytest.raises(SSRFValidationError, match="blocked internal address"):
+            validate_endpoint_not_internal("http://[::1]:8088/collector")
+
+    def test_ipv6_ula_rejected(self) -> None:
+        with pytest.raises(SSRFValidationError, match="blocked internal address"):
+            validate_endpoint_not_internal("http://[fd12::1]:8088/collector")
+
+    def test_public_ip_accepted(self) -> None:
+        # Should NOT raise.
+        validate_endpoint_not_internal("https://8.8.8.8:8088/collector")
+
+    def test_dns_hostname_accepted(self) -> None:
+        # DNS hostnames are allowed through (deferred to egress layer).
+        validate_endpoint_not_internal("https://splunk.example.com:8088/collector")
+
+    def test_adapter_init_blocks_internal_ip(self) -> None:
+        """Constructing an adapter with a private IP endpoint raises."""
+        with pytest.raises(SSRFValidationError):
+            SplunkHECAdapter(
+                _splunk_config(endpoint="https://10.0.0.1:8088")
+            )
+
+    def test_sentinel_init_blocks_internal_ip(self) -> None:
+        with pytest.raises(SSRFValidationError):
+            SentinelAdapter(
+                _sentinel_config(endpoint="https://192.168.1.1/api"),
+                workspace_id="test",
+            )
+
+    def test_chronicle_init_blocks_internal_ip(self) -> None:
+        with pytest.raises(SSRFValidationError):
+            ChronicleAdapter(
+                _chronicle_config(endpoint="http://127.0.0.1:9200")
+            )
+
+
+# ===========================================================================
+# Fix 5: Cross-tenant correlation check
+# ===========================================================================
+
+
+class TestCrossTenantValidation:
+    """Verify tenant_id mismatch is detected and rejected."""
+
+    @respx.mock
+    async def test_splunk_rejects_wrong_tenant(self) -> None:
+        """Splunk adapter rejects a tenant_id that does not match."""
+        adapter = SplunkHECAdapter(_splunk_config(), tenant_id=TENANT_ID)
+        with pytest.raises(TenantMismatchError):
+            await adapter.send_observations([_sample_observation()], WRONG_TENANT_ID)
+
+    @respx.mock
+    async def test_splunk_rejects_wrong_tenant_finding(self) -> None:
+        adapter = SplunkHECAdapter(_splunk_config(), tenant_id=TENANT_ID)
+        with pytest.raises(TenantMismatchError):
+            await adapter.send_finding(_sample_finding(), WRONG_TENANT_ID)
+
+    @respx.mock
+    async def test_sentinel_rejects_wrong_tenant(self) -> None:
+        adapter = SentinelAdapter(
+            _sentinel_config(),
+            workspace_id=SENTINEL_WORKSPACE,
+            tenant_id=TENANT_ID,
+        )
+        with pytest.raises(TenantMismatchError):
+            await adapter.send_observations([_sample_observation()], WRONG_TENANT_ID)
+
+    @respx.mock
+    async def test_sentinel_rejects_wrong_tenant_finding(self) -> None:
+        adapter = SentinelAdapter(
+            _sentinel_config(),
+            workspace_id=SENTINEL_WORKSPACE,
+            tenant_id=TENANT_ID,
+        )
+        with pytest.raises(TenantMismatchError):
+            await adapter.send_finding(_sample_finding(), WRONG_TENANT_ID)
+
+    @respx.mock
+    async def test_chronicle_rejects_wrong_tenant(self) -> None:
+        adapter = ChronicleAdapter(_chronicle_config(), tenant_id=TENANT_ID)
+        with pytest.raises(TenantMismatchError):
+            await adapter.send_observations([_sample_observation()], WRONG_TENANT_ID)
+
+    @respx.mock
+    async def test_chronicle_rejects_wrong_tenant_finding(self) -> None:
+        adapter = ChronicleAdapter(_chronicle_config(), tenant_id=TENANT_ID)
+        with pytest.raises(TenantMismatchError):
+            await adapter.send_finding(_sample_finding(), WRONG_TENANT_ID)
+
+    @respx.mock
+    async def test_matching_tenant_allowed(self) -> None:
+        """Correct tenant_id passes validation and proceeds normally."""
+        respx.post(f"{SPLUNK_ENDPOINT}/services/collector/event").mock(
+            return_value=httpx.Response(200, json={"text": "Success", "code": 0}),
+        )
+        adapter = SplunkHECAdapter(_splunk_config(), tenant_id=TENANT_ID)
+        result = await adapter.send_observations([_sample_observation()], TENANT_ID)
+        assert result.success is True
+
+    @respx.mock
+    async def test_no_tenant_constraint_allows_any(self) -> None:
+        """Adapter without tenant_id constraint accepts any tenant."""
+        respx.post(f"{SPLUNK_ENDPOINT}/services/collector/event").mock(
+            return_value=httpx.Response(200, json={"text": "Success", "code": 0}),
+        )
+        adapter = SplunkHECAdapter(_splunk_config())  # no tenant_id
+        result = await adapter.send_observations([_sample_observation()], WRONG_TENANT_ID)
+        assert result.success is True

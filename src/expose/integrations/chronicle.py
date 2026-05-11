@@ -20,7 +20,13 @@ from uuid import UUID
 
 import httpx
 
-from expose.integrations.siem import CircuitBreakerOpen, DeliveryResult, SIEMAdapter
+from expose.integrations.siem import (
+    CircuitBreakerOpen,
+    DeliveryResult,
+    SIEMAdapter,
+    SIEMConfig,
+    TenantMismatchError,
+)
 
 __all__ = ["ChronicleAdapter"]
 
@@ -41,6 +47,14 @@ class ChronicleAdapter(SIEMAdapter):
     adapter_id = "chronicle"
     display_name = "Google Chronicle (MALACHITE)"
 
+    def __init__(
+        self,
+        config: SIEMConfig,
+        *,
+        tenant_id: UUID | None = None,
+    ) -> None:
+        super().__init__(config, tenant_id=tenant_id)
+
     # ----- public interface ---------------------------------------------------
 
     async def send_observations(
@@ -49,6 +63,7 @@ class ChronicleAdapter(SIEMAdapter):
         tenant_id: UUID,
     ) -> DeliveryResult:
         """Batch-deliver observations as UDM-mapped Chronicle log entries."""
+        self._validate_tenant(tenant_id)
         if not self._config.enabled:
             return DeliveryResult(
                 adapter_id=self.adapter_id,
@@ -95,6 +110,7 @@ class ChronicleAdapter(SIEMAdapter):
         tenant_id: UUID,
     ) -> DeliveryResult:
         """Deliver a single finding as a Chronicle log entry."""
+        self._validate_tenant(tenant_id)
         if not self._config.enabled:
             return DeliveryResult(
                 adapter_id=self.adapter_id,
@@ -137,13 +153,12 @@ class ChronicleAdapter(SIEMAdapter):
         try:
             request_body = self._build_batch_request([])
             payload = json.dumps(request_body, separators=(",", ":"), sort_keys=True)
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    self._ingestion_url,
-                    content=payload.encode(),
-                    headers=self._auth_headers,
-                    timeout=5.0,
-                )
+            response = await self._http_client.post(
+                self._ingestion_url,
+                content=payload.encode(),
+                headers=self._auth_headers,
+                timeout=5.0,
+            )
             return 200 <= response.status_code < 400  # noqa: PLR2004
         except httpx.HTTPError:
             return False

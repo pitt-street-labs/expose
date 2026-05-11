@@ -225,6 +225,25 @@ class WafOriginDiscoveryCollector(Collector):
         super().__init__(config)
         rps: float = float(self.config.extra.get("requests_per_second", 1.0))
         self._rate_limiter = _TokenBucket(rate=rps)
+        self._http_client: httpx.AsyncClient | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        """Lazily create and cache a single ``httpx.AsyncClient``."""
+        if self._http_client is None:
+            self._http_client = httpx.AsyncClient(
+                verify=False,  # noqa: S501
+                max_redirects=5,
+                timeout=self.config.request_timeout_seconds,
+                follow_redirects=True,
+            )
+            self._http_client.headers["User-Agent"] = self.config.user_agent
+        return self._http_client
+
+    async def close(self) -> None:
+        """Close the cached HTTP client, if one exists."""
+        if self._http_client is not None:
+            await self._http_client.aclose()
+            self._http_client = None
 
     # ------------------------------------------------------------------
     # expand
@@ -243,33 +262,62 @@ class WafOriginDiscoveryCollector(Collector):
         all_candidates: list[dict[str, Any]] = []
         cdn_vendor: str | None = None
 
+        # Build the list of coroutines for phases that apply to this seed.
+        coros: list[Any] = [
+            self._analyze_headers(host),
+            self._analyze_certificate(host),
+        ]
+        if seed.seed_type == SeedType.DOMAIN:
+            coros.append(self._enumerate_subdomains(host))
+            coros.append(self._analyze_mx_records(host))
+
+        results = await asyncio.gather(*coros, return_exceptions=True)
+
         # --- Phase 1: HTTP header analysis ---
-        header_candidates, detected_vendor, header_warnings = (
-            await self._analyze_headers(host)
-        )
-        obs_warnings.extend(header_warnings)
-        all_candidates.extend(header_candidates)
-        if detected_vendor:
-            cdn_vendor = detected_vendor
+        header_result = results[0]
+        if isinstance(header_result, BaseException):
+            obs_warnings.append(
+                f"Header analysis raised: {header_result}"
+            )
+        else:
+            header_candidates, detected_vendor, header_warnings = header_result
+            obs_warnings.extend(header_warnings)
+            all_candidates.extend(header_candidates)
+            if detected_vendor:
+                cdn_vendor = detected_vendor
 
         # --- Phase 2: Certificate SAN analysis ---
-        cert_candidates, cert_warnings = await self._analyze_certificate(host)
-        obs_warnings.extend(cert_warnings)
-        all_candidates.extend(cert_candidates)
-
-        # --- Phase 3: Subdomain enumeration (domain seeds only) ---
-        if seed.seed_type == SeedType.DOMAIN:
-            sub_candidates, sub_warnings = await self._enumerate_subdomains(
-                host
+        cert_result = results[1]
+        if isinstance(cert_result, BaseException):
+            obs_warnings.append(
+                f"Certificate analysis raised: {cert_result}"
             )
-            obs_warnings.extend(sub_warnings)
-            all_candidates.extend(sub_candidates)
+        else:
+            cert_candidates, cert_warnings = cert_result
+            obs_warnings.extend(cert_warnings)
+            all_candidates.extend(cert_candidates)
 
-        # --- Phase 4: MX record analysis (domain seeds only) ---
+        # --- Phase 3 & 4: Subdomain + MX (domain seeds only) ---
         if seed.seed_type == SeedType.DOMAIN:
-            mx_candidates, mx_warnings = await self._analyze_mx_records(host)
-            obs_warnings.extend(mx_warnings)
-            all_candidates.extend(mx_candidates)
+            sub_result = results[2]
+            if isinstance(sub_result, BaseException):
+                obs_warnings.append(
+                    f"Subdomain enumeration raised: {sub_result}"
+                )
+            else:
+                sub_candidates, sub_warnings = sub_result
+                obs_warnings.extend(sub_warnings)
+                all_candidates.extend(sub_candidates)
+
+            mx_result = results[3]
+            if isinstance(mx_result, BaseException):
+                obs_warnings.append(
+                    f"MX record analysis raised: {mx_result}"
+                )
+            else:
+                mx_candidates, mx_warnings = mx_result
+                obs_warnings.extend(mx_warnings)
+                all_candidates.extend(mx_candidates)
 
         # Deduplicate candidates by IP
         seen_ips: set[str] = set()
@@ -348,11 +396,11 @@ class WafOriginDiscoveryCollector(Collector):
                 warnings.filterwarnings(
                     "ignore", message="Unverified HTTPS request"
                 )
-                async with httpx.AsyncClient(verify=False) as client:  # noqa: S501
-                    resp = await client.head(
-                        _HEALTH_CHECK_URL,
-                        timeout=self.config.request_timeout_seconds,
-                    )
+                client = self._get_client()
+                resp = await client.head(
+                    _HEALTH_CHECK_URL,
+                    timeout=self.config.request_timeout_seconds,
+                )
             latency = (time.monotonic() - start) * 1000.0
             return CollectorHealthCheck(
                 collector_id=self.collector_id,
@@ -480,7 +528,8 @@ class WafOriginDiscoveryCollector(Collector):
         warn_list: list[str] = []
 
         loop = asyncio.get_running_loop()
-        for prefix in ORIGIN_SUBDOMAIN_PREFIXES:
+
+        async def _resolve_one(prefix: str) -> None:
             subdomain = f"{prefix}.{domain}"
             try:
                 result = await loop.getaddrinfo(
@@ -504,6 +553,10 @@ class WafOriginDiscoveryCollector(Collector):
                 msg = f"Subdomain lookup failed for {subdomain}: {exc}"
                 warn_list.append(msg)
                 logger.debug(msg)
+
+        await asyncio.gather(
+            *(_resolve_one(prefix) for prefix in ORIGIN_SUBDOMAIN_PREFIXES)
+        )
 
         return candidates, warn_list
 
@@ -566,14 +619,8 @@ class WafOriginDiscoveryCollector(Collector):
             warnings.filterwarnings(
                 "ignore", message="Unverified HTTPS request"
             )
-            async with httpx.AsyncClient(
-                verify=False,  # noqa: S501
-                max_redirects=5,
-                timeout=self.config.request_timeout_seconds,
-                follow_redirects=True,
-            ) as client:
-                client.headers["User-Agent"] = self.config.user_agent
-                return await client.head(url)
+            client = self._get_client()
+            return await client.head(url)
 
     async def _get_certificate_sans(self, host: str) -> list[str]:
         """Retrieve Subject Alternative Names from the host's TLS cert.

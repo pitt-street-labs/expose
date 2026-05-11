@@ -200,6 +200,84 @@ async def test_integrity_check_detects_corruption(
         await manager.retrieve(ref.content_hash)
 
 
+async def test_integrity_check_explicit_true(
+    manager: EvidenceManager, backend: LocalStorageBackend, tmp_path: Path
+) -> None:
+    """retrieve(verify_integrity=True) explicitly still catches corruption."""
+    content = b"explicit verify evidence"
+    ref = await manager.store(content, {})
+
+    blob_key = manager._blob_key(ref.content_hash)
+    blob_path = (tmp_path / blob_key).resolve()
+    blob_path.write_bytes(b"TAMPERED")
+
+    with pytest.raises(EvidenceIntegrityError, match="integrity check failed"):
+        await manager.retrieve(ref.content_hash, verify_integrity=True)
+
+
+async def test_integrity_check_skipped_with_false(
+    manager: EvidenceManager, backend: LocalStorageBackend, tmp_path: Path
+) -> None:
+    """retrieve(verify_integrity=False) skips hash check, returns raw data."""
+    content = b"skip verify evidence"
+    ref = await manager.store(content, {})
+
+    # Corrupt the stored file directly.
+    blob_key = manager._blob_key(ref.content_hash)
+    blob_path = (tmp_path / blob_key).resolve()
+    blob_path.write_bytes(b"CORRUPTED BUT RETURNED")
+
+    # With verification disabled, no error is raised -- corrupted data
+    # is returned as-is.
+    result = await manager.retrieve(ref.content_hash, verify_integrity=False)
+    assert result == b"CORRUPTED BUT RETURNED"
+
+
+async def test_instance_verify_on_read_false(
+    backend: LocalStorageBackend, tmp_path: Path
+) -> None:
+    """EvidenceManager(verify_on_read=False) skips hash by default."""
+    mgr = EvidenceManager(backend, verify_on_read=False)
+    content = b"instance-level no-verify"
+    ref = await mgr.store(content, {})
+
+    # Corrupt the stored file directly.
+    blob_key = mgr._blob_key(ref.content_hash)
+    blob_path = (tmp_path / blob_key).resolve()
+    blob_path.write_bytes(b"SILENTLY CORRUPTED")
+
+    # Default retrieval skips verification because verify_on_read=False.
+    result = await mgr.retrieve(ref.content_hash)
+    assert result == b"SILENTLY CORRUPTED"
+
+
+async def test_instance_verify_on_read_false_overridden_by_explicit_true(
+    backend: LocalStorageBackend, tmp_path: Path
+) -> None:
+    """Per-call verify_integrity=True overrides instance verify_on_read=False."""
+    mgr = EvidenceManager(backend, verify_on_read=False)
+    content = b"override test"
+    ref = await mgr.store(content, {})
+
+    blob_key = mgr._blob_key(ref.content_hash)
+    blob_path = (tmp_path / blob_key).resolve()
+    blob_path.write_bytes(b"TAMPERED OVERRIDE")
+
+    # Explicit True overrides instance-level False.
+    with pytest.raises(EvidenceIntegrityError, match="integrity check failed"):
+        await mgr.retrieve(ref.content_hash, verify_integrity=True)
+
+
+async def test_retrieve_no_verify_returns_valid_data(
+    manager: EvidenceManager,
+) -> None:
+    """retrieve(verify_integrity=False) returns correct data for non-corrupt blobs."""
+    content = b"valid data, no verify"
+    ref = await manager.store(content, {})
+    result = await manager.retrieve(ref.content_hash, verify_integrity=False)
+    assert result == content
+
+
 # ---------------------------------------------------------------------------
 # 5. Local filesystem backend (end-to-end)
 # ---------------------------------------------------------------------------

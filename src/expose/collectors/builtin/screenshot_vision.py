@@ -143,6 +143,30 @@ class ScreenshotVisionCollector(Collector):
     rate_limit_per_minute: int | None = None
     technique_ids: ClassVar[list[str]] = ["T1592.004"]
 
+    def __init__(self, config: CollectorConfig) -> None:
+        super().__init__(config)
+        self._http_client: httpx.AsyncClient | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        """Lazily create and cache a single ``httpx.AsyncClient``."""
+        if self._http_client is None:
+            egress_kwargs = self._egress_httpx_kwargs()
+            self._http_client = httpx.AsyncClient(
+                **egress_kwargs,
+                verify=False,  # noqa: S501
+                max_redirects=5,
+                timeout=self.config.request_timeout_seconds,
+                follow_redirects=True,
+            )
+            self._http_client.headers["User-Agent"] = self.config.user_agent
+        return self._http_client
+
+    async def close(self) -> None:
+        """Close the cached HTTP client, if one exists."""
+        if self._http_client is not None:
+            await self._http_client.aclose()
+            self._http_client = None
+
     # ------------------------------------------------------------------
     # expand
     # ------------------------------------------------------------------
@@ -202,11 +226,11 @@ class ScreenshotVisionCollector(Collector):
                 warnings.filterwarnings(
                     "ignore", message="Unverified HTTPS request"
                 )
-                async with httpx.AsyncClient(verify=False) as client:  # noqa: S501
-                    resp = await client.head(
-                        _HEALTH_CHECK_URL,
-                        timeout=self.config.request_timeout_seconds,
-                    )
+                client = self._get_client()
+                resp = await client.head(
+                    _HEALTH_CHECK_URL,
+                    timeout=self.config.request_timeout_seconds,
+                )
             latency = (time.monotonic() - start) * 1000.0
             return CollectorHealthCheck(
                 collector_id=self.collector_id,
@@ -256,19 +280,11 @@ class ScreenshotVisionCollector(Collector):
 
         Returns None if the response is not HTML (with a warning appended).
         """
-        egress_kwargs = self._egress_httpx_kwargs()
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=DeprecationWarning)
             warnings.filterwarnings("ignore", message="Unverified HTTPS request")
-            async with httpx.AsyncClient(
-                **egress_kwargs,
-                verify=False,  # noqa: S501
-                max_redirects=5,
-                timeout=self.config.request_timeout_seconds,
-                follow_redirects=True,
-            ) as client:
-                client.headers["User-Agent"] = self.config.user_agent
-                response = await client.get(url)
+            client = self._get_client()
+            response = await client.get(url)
 
         # Check content-type for HTML.
         content_type = response.headers.get("content-type", "")
