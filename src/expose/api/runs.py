@@ -634,7 +634,9 @@ async def download_artifact(
             f"for completed runs",
         )
 
-    # 3. Generate the canonical artifact
+    # 3. Generate the canonical artifact (with signing when available)
+    from expose.api.signing import get_signer  # noqa: PLC0415
+
     run_repo = RunRepository(session)
     entity_repo = EntityRepository(session)
     relationship_repo = RelationshipRepository(session)
@@ -643,6 +645,7 @@ async def download_artifact(
         entity_repo=entity_repo,
         relationship_repo=relationship_repo,
         run_repo=run_repo,
+        signer=get_signer(),
     )
 
     artifact_result = await generator.generate(
@@ -652,12 +655,19 @@ async def download_artifact(
 
     # 4. Return the JSON artifact as a downloadable file
     filename = f"expose-artifact-{run_id}.json"
+    headers: dict[str, str] = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+    }
+    # Include signature metadata in response headers when signing succeeds.
+    if artifact_result.signature is not None:
+        headers["X-Artifact-Signature"] = artifact_result.signature.signature_b64
+        headers["X-Signature-Key-Id"] = artifact_result.signature.key_id
+        headers["X-Signature-Algorithm"] = artifact_result.signature.algorithm
+
     return Response(
         content=artifact_result.json_bytes,
         media_type="application/json",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-        },
+        headers=headers,
     )
 
 

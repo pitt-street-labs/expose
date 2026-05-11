@@ -973,5 +973,77 @@ def eval_cmd(
         raise SystemExit(1)
 
 
+# --- ``expose verify`` command ------------------------------------------------
+
+
+@main.command("verify")
+@click.option(
+    "--artifact",
+    "artifact_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the artifact JSON file.",
+)
+@click.option(
+    "--signature",
+    "signature_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the detached signature file (base64-encoded).",
+)
+@click.option(
+    "--public-key",
+    "public_key_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to the PEM-encoded public key file.",
+)
+@click.option(
+    "--algorithm",
+    type=click.Choice(["ed25519", "ecdsa-p256"], case_sensitive=False),
+    default="ed25519",
+    show_default=True,
+    help="Signing algorithm used.",
+)
+def verify_cmd(
+    artifact_path: str,
+    signature_path: str,
+    public_key_path: str,
+    algorithm: str,
+) -> None:
+    """Verify an artifact's detached signature.
+
+    Reads the artifact JSON, base64-encoded signature, and PEM public key
+    from the specified files, then verifies the signature matches.
+
+    Examples:
+
+      expose verify --artifact artifact.json --signature artifact.json.sig --public-key cosign.pub
+
+      expose verify --artifact artifact.json --signature artifact.json.sig \\
+        --public-key cosign.pub --algorithm ecdsa-p256
+    """
+    from pathlib import Path  # noqa: PLC0415
+
+    from expose.crypto.signing import verify_artifact as _verify  # noqa: PLC0415
+
+    artifact_bytes = Path(artifact_path).read_bytes()
+    signature_b64 = Path(signature_path).read_text(encoding="ascii").strip()
+    public_key_pem = Path(public_key_path).read_text(encoding="utf-8")
+
+    is_valid = _verify(
+        artifact_bytes,
+        signature_b64,
+        public_key_pem,
+        algorithm=algorithm,
+    )
+
+    if is_valid:
+        click.echo(click.style("VERIFIED: Signature is valid.", fg="green"))
+    else:
+        click.echo(click.style("FAILED: Signature verification failed.", fg="red"))
+        raise SystemExit(1)
+
+
 if __name__ == "__main__":
     sys.exit(main())

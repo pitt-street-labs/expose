@@ -55,6 +55,7 @@ from expose.api.reports import router as reports_router
 from expose.api.timeline import router as timeline_router
 from expose.api.identity import router as identity_router
 from expose.api.metrics import router as metrics_router
+from expose.api.signing import router as signing_router
 from expose.db.engine import (
     DatabaseSettings,
     create_async_engine_from_settings,
@@ -368,6 +369,7 @@ def create_app(
     app.include_router(timeline_router)
     app.include_router(identity_router)
     app.include_router(metrics_router)
+    app.include_router(signing_router)
 
     app.include_router(ui_router)
 
