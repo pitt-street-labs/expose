@@ -161,6 +161,9 @@ class CrtShCollector(Collector):
                 headers={"User-Agent": self.config.user_agent},
             ) as client:
                 response = await client.get(url, params=params)
+                # 404 means "no certificates for this domain" — valid empty result
+                if response.status_code == 404:
+                    return
                 response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             msg = (
