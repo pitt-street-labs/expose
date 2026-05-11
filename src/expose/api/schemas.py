@@ -124,13 +124,28 @@ class EntityList(BaseModel):
 
 
 class RunCreate(BaseModel):
-    """Body for ``POST /v1/tenants/{tenant_id}/runs``."""
+    """Body for ``POST /v1/tenants/{tenant_id}/runs``.
+
+    The ``seeds`` field contains domain/IP/CIDR seeds (at least one required
+    unless ``organization_seeds`` is provided). The optional
+    ``organization_seeds`` field accepts organization names for org-name-based
+    discovery (M&A shadow IT, crt.sh org search).
+
+    At least one of ``seeds`` or ``organization_seeds`` must be non-empty.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    seeds: list[str] = Field(min_length=1)
+    seeds: list[str] = Field(default_factory=list)
     seed_type: str | None = None
+    organization_seeds: list[str] = Field(default_factory=list)
     collector_ids: list[str] | None = None
+
+    def model_post_init(self, __context: object) -> None:
+        """Validate that at least one seed is provided."""
+        if not self.seeds and not self.organization_seeds:
+            msg = "At least one of 'seeds' or 'organization_seeds' must be non-empty."
+            raise ValueError(msg)
 
 
 class RunStarted(BaseModel):
@@ -142,5 +157,6 @@ class RunStarted(BaseModel):
     tenant_id: UUID
     state: str
     seeds: list[str]
+    organization_seeds: list[str] = Field(default_factory=list)
     collector_ids: list[str]
     message: str

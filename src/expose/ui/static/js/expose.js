@@ -52,6 +52,8 @@ function exposeApp() {
             enabled_collectors: [],
             schedule_cron: "",
             egress_profile: "direct",
+            egress_fallbacks: [],
+            socks5_proxy: "",
             llm_enabled: false,
             llm_provider: "",
             llm_cost_ceiling_per_run: 10.0,
@@ -112,6 +114,8 @@ function exposeApp() {
                 enabled_collectors: [],
                 schedule_cron: "",
                 egress_profile: "direct",
+                egress_fallbacks: [],
+                socks5_proxy: "",
                 llm_enabled: false,
                 llm_provider: "",
                 llm_cost_ceiling_per_run: 10.0,
@@ -421,6 +425,8 @@ function exposeApp() {
                     enabled_collectors: data.enabled_collectors || [],
                     schedule_cron: data.schedule_cron || "",
                     egress_profile: data.egress_profile || "direct",
+                    egress_fallbacks: data.egress_fallbacks || [],
+                    socks5_proxy: data.socks5_proxy || "",
                     llm_enabled: data.llm_enabled || false,
                     llm_provider: data.llm_provider || "",
                     llm_cost_ceiling_per_run: data.llm_cost_ceiling_per_run || 0,
@@ -447,6 +453,8 @@ function exposeApp() {
                     enabled_collectors: this.tenantConfig.enabled_collectors,
                     schedule_cron: this.tenantConfig.schedule_cron || null,
                     egress_profile: this.tenantConfig.egress_profile,
+                    egress_fallbacks: this.tenantConfig.egress_fallbacks,
+                    socks5_proxy: this.tenantConfig.socks5_proxy || null,
                     llm_enabled: this.tenantConfig.llm_enabled,
                     llm_provider: this.tenantConfig.llm_provider || null,
                     llm_cost_ceiling_per_run: this.tenantConfig.llm_cost_ceiling_per_run,
@@ -506,6 +514,19 @@ function exposeApp() {
                 this.tenantConfig.enabled_collectors.splice(idx, 1);
             } else {
                 this.tenantConfig.enabled_collectors.push(collectorId);
+            }
+        },
+
+        /**
+         * Toggle an egress profile in the egress_fallbacks list.
+         */
+        toggleEgressFallback(profileId) {
+            if (!this.tenantConfig) return;
+            var idx = this.tenantConfig.egress_fallbacks.indexOf(profileId);
+            if (idx >= 0) {
+                this.tenantConfig.egress_fallbacks.splice(idx, 1);
+            } else {
+                this.tenantConfig.egress_fallbacks.push(profileId);
             }
         },
 
@@ -931,16 +952,21 @@ function exposeApp() {
 function scanForm() {
     return {
         seed: "",
+        orgName: "",
         scanning: false,
         statusMessage: "",
 
         /**
          * Submit the scan request to the runs API.
          * Reads the selected tenant ID from the parent exposeApp component.
+         * Sends both domain/IP/CIDR seeds and optional organization seeds.
          */
         async submitScan() {
-            if (!this.seed.trim()) {
-                this.statusMessage = "Enter a seed value (domain, IP, or CIDR).";
+            var hasSeed = this.seed.trim().length > 0;
+            var hasOrg = this.orgName.trim().length > 0;
+
+            if (!hasSeed && !hasOrg) {
+                this.statusMessage = "Enter a seed value (domain, IP, or CIDR) and/or an organization name.";
                 return;
             }
 
@@ -956,13 +982,16 @@ function scanForm() {
             this.statusMessage = "Starting scan...";
 
             try {
+                var payload = {
+                    seeds: hasSeed ? [this.seed.trim()] : [],
+                    organization_seeds: hasOrg ? [this.orgName.trim()] : [],
+                    collector_ids: null,
+                };
+
                 var resp = await fetch("/v1/tenants/" + tenantId + "/runs", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        seeds: [this.seed.trim()],
-                        collector_ids: null,
-                    }),
+                    body: JSON.stringify(payload),
                 });
 
                 if (!resp.ok) {
@@ -973,7 +1002,15 @@ function scanForm() {
                 }
 
                 var data = await resp.json();
-                this.statusMessage = "Run " + data.run_id + " started (" + data.state + ")";
+                var seedSummary = [];
+                if (data.seeds && data.seeds.length > 0) {
+                    seedSummary.push(data.seeds.length + " seed(s)");
+                }
+                if (data.organization_seeds && data.organization_seeds.length > 0) {
+                    seedSummary.push(data.organization_seeds.length + " org(s)");
+                }
+                this.statusMessage = "Run " + data.run_id + " started — " +
+                    seedSummary.join(", ") + " (" + data.state + ")";
 
                 // Set activeRunId on the parent app component and connect SSE
                 var appEl = document.querySelector("[x-data]");

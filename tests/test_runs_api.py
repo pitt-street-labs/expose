@@ -551,7 +551,7 @@ async def test_run_started_response_fields(
     data = resp.json()
 
     # Verify all required fields are present
-    expected_keys = {"run_id", "tenant_id", "state", "seeds", "collector_ids", "message"}
+    expected_keys = {"run_id", "tenant_id", "state", "seeds", "organization_seeds", "collector_ids", "message"}
     assert set(data.keys()) == expected_keys
 
     # Type checks

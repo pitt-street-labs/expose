@@ -50,13 +50,15 @@ from expose.egress.wireguard import _check_interface
 class TestSocks5EgressProfile:
     """Tests for Socks5EgressProfile."""
 
-    def test_configure_httpx_client_returns_proxy_url(self) -> None:
+    @patch("expose.egress.socks5._socksio_available", return_value=True)
+    def test_configure_httpx_client_returns_proxy_url(self, _mock: object) -> None:
         """configure_httpx_client returns the proxy URL in a 'proxy' key."""
         profile = Socks5EgressProfile(proxy_url="socks5://10.0.0.1:9050")
         result = profile.configure_httpx_client()
         assert "proxy" in result
 
-    def test_dns_through_proxy_rewrites_to_socks5h(self) -> None:
+    @patch("expose.egress.socks5._socksio_available", return_value=True)
+    def test_dns_through_proxy_rewrites_to_socks5h(self, _mock: object) -> None:
         """dns_through_proxy=True rewrites socks5:// to socks5h://."""
         profile = Socks5EgressProfile(
             proxy_url="socks5://10.0.0.1:9050", dns_through_proxy=True
@@ -64,7 +66,8 @@ class TestSocks5EgressProfile:
         result = profile.configure_httpx_client()
         assert result["proxy"] == "socks5h://10.0.0.1:9050"
 
-    def test_dns_through_proxy_false_preserves_url(self) -> None:
+    @patch("expose.egress.socks5._socksio_available", return_value=True)
+    def test_dns_through_proxy_false_preserves_url(self, _mock: object) -> None:
         """dns_through_proxy=False keeps the original socks5:// URL."""
         profile = Socks5EgressProfile(
             proxy_url="socks5://10.0.0.1:9050", dns_through_proxy=False
@@ -72,13 +75,21 @@ class TestSocks5EgressProfile:
         result = profile.configure_httpx_client()
         assert result["proxy"] == "socks5://10.0.0.1:9050"
 
-    def test_socks5h_url_not_double_rewritten(self) -> None:
+    @patch("expose.egress.socks5._socksio_available", return_value=True)
+    def test_socks5h_url_not_double_rewritten(self, _mock: object) -> None:
         """A socks5h:// URL is not rewritten even with dns_through_proxy=True."""
         profile = Socks5EgressProfile(
             proxy_url="socks5h://10.0.0.1:9050", dns_through_proxy=True
         )
         result = profile.configure_httpx_client()
         assert result["proxy"] == "socks5h://10.0.0.1:9050"
+
+    def test_configure_httpx_client_raises_without_socksio(self) -> None:
+        """configure_httpx_client raises RuntimeError when socksio is missing."""
+        profile = Socks5EgressProfile(proxy_url="socks5://10.0.0.1:9050")
+        with patch("expose.egress.socks5._socksio_available", return_value=False):
+            with pytest.raises(RuntimeError, match="socksio"):
+                profile.configure_httpx_client()
 
     def test_dns_resolver_returns_empty_nameservers_when_proxied(self) -> None:
         """dns_through_proxy=True returns empty nameservers list."""

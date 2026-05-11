@@ -42,6 +42,7 @@ from expose.collectors.base import (
     CollectorCredential,
     CollectorError,
     CollectorHealthCheck,
+    CollectorSourceUnreachableError,
     Observation,
     ObservationSubject,
     ObservationType,
@@ -660,3 +661,185 @@ class TestPipelineDispatcher:
         assert result.status == DispatchStatus.COLLECTOR_ERROR
         assert result.observations == []
         assert result.error_message == "missing api_key"
+
+    # === Egress fallback retry (issue #76) ====================================
+
+    @pytest.mark.asyncio
+    async def test_source_unreachable_no_fallback_returns_error(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """19. CollectorSourceUnreachableError without fallbacks returns COLLECTOR_ERROR."""
+        registry.register(MockSourceUnreachableCollector)
+        dispatcher = PipelineDispatcher(registry, scope_empty, TENANT_ID)
+        result = await dispatcher.dispatch(_make_job("mock-unreachable", seed))
+
+        assert result.status == DispatchStatus.COLLECTOR_ERROR
+        assert "source unreachable" in (result.error_message or "").lower()
+        assert result.observations == []
+
+    @pytest.mark.asyncio
+    async def test_source_unreachable_fallback_succeeds(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """20. Source unreachable on primary, fallback egress succeeds."""
+        registry.register(MockUnreachableThenOkCollector)
+        MockUnreachableThenOkCollector.call_count = 0
+
+        from expose.egress.direct import DirectEgressProfile  # noqa: PLC0415
+        from expose.egress.socks5 import Socks5EgressProfile  # noqa: PLC0415
+
+        fallback = Socks5EgressProfile(proxy_url="socks5://127.0.0.1:9050")
+        dispatcher = PipelineDispatcher(
+            registry, scope_empty, TENANT_ID,
+            egress_profile=DirectEgressProfile(),
+            egress_fallbacks=[fallback],
+        )
+        result = await dispatcher.dispatch(_make_job("mock-unreachable-then-ok", seed))
+
+        assert result.status == DispatchStatus.SUCCESS
+        assert len(result.observations) == 1
+        # The collector was called twice: once primary (fail), once fallback (ok)
+        assert MockUnreachableThenOkCollector.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_source_unreachable_all_fallbacks_fail(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """21. Source unreachable on primary and all fallbacks returns original error."""
+        registry.register(MockSourceUnreachableCollector)
+
+        from expose.egress.direct import DirectEgressProfile  # noqa: PLC0415
+        from expose.egress.socks5 import Socks5EgressProfile  # noqa: PLC0415
+
+        fb1 = Socks5EgressProfile(proxy_url="socks5://127.0.0.1:9050")
+        fb2 = Socks5EgressProfile(proxy_url="socks5://127.0.0.1:9051")
+        dispatcher = PipelineDispatcher(
+            registry, scope_empty, TENANT_ID,
+            egress_profile=DirectEgressProfile(),
+            egress_fallbacks=[fb1, fb2],
+        )
+        result = await dispatcher.dispatch(_make_job("mock-unreachable", seed))
+
+        assert result.status == DispatchStatus.COLLECTOR_ERROR
+        assert "source unreachable" in (result.error_message or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_non_unreachable_collector_error_skips_fallback(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """22. Generic CollectorError (not source-unreachable) does NOT trigger fallback."""
+        from expose.egress.direct import DirectEgressProfile  # noqa: PLC0415
+        from expose.egress.socks5 import Socks5EgressProfile  # noqa: PLC0415
+
+        fallback = Socks5EgressProfile(proxy_url="socks5://127.0.0.1:9050")
+        dispatcher = PipelineDispatcher(
+            registry, scope_empty, TENANT_ID,
+            egress_profile=DirectEgressProfile(),
+            egress_fallbacks=[fallback],
+        )
+        # MockErrorCollector raises generic CollectorError, not SourceUnreachable
+        result = await dispatcher.dispatch(_make_job("mock-error", seed))
+
+        assert result.status == DispatchStatus.COLLECTOR_ERROR
+        assert result.error_message == "simulated collector failure"
+
+    @pytest.mark.asyncio
+    async def test_egress_profile_restored_after_fallback(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """23. The original egress profile is restored after fallback attempt."""
+        registry.register(MockUnreachableThenOkCollector)
+        MockUnreachableThenOkCollector.call_count = 0
+
+        from expose.egress.direct import DirectEgressProfile  # noqa: PLC0415
+        from expose.egress.socks5 import Socks5EgressProfile  # noqa: PLC0415
+
+        original_egress = DirectEgressProfile()
+        fallback = Socks5EgressProfile(proxy_url="socks5://127.0.0.1:9050")
+        dispatcher = PipelineDispatcher(
+            registry, scope_empty, TENANT_ID,
+            egress_profile=original_egress,
+            egress_fallbacks=[fallback],
+        )
+        await dispatcher.dispatch(_make_job("mock-unreachable-then-ok", seed))
+
+        # Verify the original profile is restored
+        assert dispatcher._egress_profile is original_egress
+
+
+# === Mock collectors for egress fallback tests ================================
+
+
+class MockSourceUnreachableCollector(Collector):
+    """Collector that always raises CollectorSourceUnreachableError."""
+
+    collector_id = "mock-unreachable"
+    collector_version = "1.0.0"
+    requires_credentials = False
+    rate_limit_per_minute = None
+    tier = CollectorTier.TIER_1
+
+    async def expand(self, seed: Seed) -> AsyncIterator[Observation]:
+        raise CollectorSourceUnreachableError("simulated source unreachable")
+        yield  # type: ignore[misc]
+
+    async def health_check(self) -> CollectorHealthCheck:
+        return CollectorHealthCheck(
+            collector_id=self.collector_id,
+            collector_version=self.collector_version,
+            status=CollectorStatus.SUCCESS,
+            checked_at=_NOW,
+            latency_ms=1.0,
+        )
+
+
+class MockUnreachableThenOkCollector(Collector):
+    """Collector that fails on first call, succeeds on subsequent calls.
+
+    Simulates the scenario where the primary egress path is blocked but
+    a fallback egress path succeeds.
+    """
+
+    collector_id = "mock-unreachable-then-ok"
+    collector_version = "1.0.0"
+    requires_credentials = False
+    rate_limit_per_minute = None
+    tier = CollectorTier.TIER_1
+
+    # Class-level counter so the test can verify call count
+    call_count: int = 0
+
+    async def expand(self, seed: Seed) -> AsyncIterator[Observation]:
+        MockUnreachableThenOkCollector.call_count += 1
+        if MockUnreachableThenOkCollector.call_count == 1:
+            raise CollectorSourceUnreachableError("primary path blocked")
+        yield _make_observation(
+            self.collector_id,
+            self.collector_version,
+            self.config.tenant_id,
+            seed.value,
+        )
+
+    async def health_check(self) -> CollectorHealthCheck:
+        return CollectorHealthCheck(
+            collector_id=self.collector_id,
+            collector_version=self.collector_version,
+            status=CollectorStatus.SUCCESS,
+            checked_at=_NOW,
+            latency_ms=1.0,
+        )

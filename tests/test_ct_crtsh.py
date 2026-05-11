@@ -164,7 +164,7 @@ class TestCrtShExpandEmptyResult:
 
 
 class TestCrtShExpandNonDomainSeed:
-    """Test 3: non-domain seed types are skipped."""
+    """Test 3: unsupported seed types are skipped."""
 
     @respx.mock
     async def test_ip_seed_yields_nothing(self) -> None:
@@ -177,13 +177,6 @@ class TestCrtShExpandNonDomainSeed:
     async def test_asn_seed_yields_nothing(self) -> None:
         collector = CrtShCollector(_make_config())
         seed = Seed(seed_type=SeedType.ASN, value="AS13335")
-        results = await _collect_all(collector, seed)
-        assert results == []
-
-    @respx.mock
-    async def test_organization_seed_yields_nothing(self) -> None:
-        collector = CrtShCollector(_make_config())
-        seed = Seed(seed_type=SeedType.ORGANIZATION, value="Acme Corp")
         results = await _collect_all(collector, seed)
         assert results == []
 
@@ -365,6 +358,138 @@ class TestCrtShHealthCheck:
         assert result.status == CollectorStatus.FAILURE
         assert result.error_message is not None
         assert "unreachable" in result.error_message
+
+
+class TestCrtShExpandOrganization:
+    """Test 9: organization seed queries crt.sh by org name."""
+
+    @respx.mock
+    async def test_org_search_yields_domain_observations(self) -> None:
+        """Org-name search extracts unique domains from cert SANs/CNs."""
+        fixture = _load_fixture("org_search.json")
+        respx.get("https://crt.sh/", params__contains={"output": "json"}).mock(
+            return_value=httpx.Response(200, text=fixture),
+        )
+
+        collector = CrtShCollector(_make_config())
+        seed = Seed(seed_type=SeedType.ORGANIZATION, value="Acme Corp")
+        results = await _collect_all(collector, seed)
+
+        # Should extract: acmecorp.com, mail.acmecorp.com,
+        # vpn.acme-legacy.net, remote.acme-legacy.net
+        # (wildcard *.internal.acmecorp.com is excluded)
+        assert len(results) >= 4
+        domains = {r.subject.identifier_value for r in results}
+        assert "mail.acmecorp.com" in domains
+        assert "acmecorp.com" in domains
+        assert "vpn.acme-legacy.net" in domains
+        assert "remote.acme-legacy.net" in domains
+
+    @respx.mock
+    async def test_org_search_excludes_wildcards(self) -> None:
+        """Wildcard SANs (*.domain.com) are excluded from org search results."""
+        fixture = _load_fixture("org_search.json")
+        respx.get("https://crt.sh/", params__contains={"output": "json"}).mock(
+            return_value=httpx.Response(200, text=fixture),
+        )
+
+        collector = CrtShCollector(_make_config())
+        seed = Seed(seed_type=SeedType.ORGANIZATION, value="Acme Corp")
+        results = await _collect_all(collector, seed)
+
+        domains = {r.subject.identifier_value for r in results}
+        for domain in domains:
+            assert not domain.startswith("*"), f"Wildcard domain found: {domain}"
+
+    @respx.mock
+    async def test_org_search_observation_type(self) -> None:
+        """Org search observations are CT_LOG_ENTRY type."""
+        fixture = _load_fixture("org_search.json")
+        respx.get("https://crt.sh/", params__contains={"output": "json"}).mock(
+            return_value=httpx.Response(200, text=fixture),
+        )
+
+        collector = CrtShCollector(_make_config())
+        seed = Seed(seed_type=SeedType.ORGANIZATION, value="Acme Corp")
+        results = await _collect_all(collector, seed)
+
+        for obs in results:
+            assert obs.observation_type == ObservationType.CT_LOG_ENTRY
+
+    @respx.mock
+    async def test_org_search_payload_fields(self) -> None:
+        """Org search observations have discovery_method and organization."""
+        fixture = _load_fixture("org_search.json")
+        respx.get("https://crt.sh/", params__contains={"output": "json"}).mock(
+            return_value=httpx.Response(200, text=fixture),
+        )
+
+        collector = CrtShCollector(_make_config())
+        seed = Seed(seed_type=SeedType.ORGANIZATION, value="Acme Corp")
+        results = await _collect_all(collector, seed)
+
+        assert len(results) > 0
+        payload = results[0].structured_payload
+        assert payload["discovery_method"] == "ct_org_search"
+        assert payload["organization"] == "Acme Corp"
+        assert "domain" in payload
+        assert "source_entry_count" in payload
+
+    @respx.mock
+    async def test_org_search_empty_name_skipped(self) -> None:
+        """Empty organization name returns nothing (no API call)."""
+        collector = CrtShCollector(_make_config())
+        seed = Seed(seed_type=SeedType.ORGANIZATION, value="  ")
+        results = await _collect_all(collector, seed)
+        assert results == []
+
+    @respx.mock
+    async def test_org_search_empty_result(self) -> None:
+        """crt.sh returns empty array for org -> no observations."""
+        respx.get("https://crt.sh/", params__contains={"output": "json"}).mock(
+            return_value=httpx.Response(200, text="[]"),
+        )
+
+        collector = CrtShCollector(_make_config())
+        seed = Seed(seed_type=SeedType.ORGANIZATION, value="Nonexistent Corp")
+        results = await _collect_all(collector, seed)
+        assert results == []
+
+    @respx.mock
+    async def test_org_search_404_returns_empty(self) -> None:
+        """crt.sh 404 for org search -> valid empty result."""
+        respx.get("https://crt.sh/", params__contains={"output": "json"}).mock(
+            return_value=httpx.Response(404),
+        )
+
+        collector = CrtShCollector(_make_config())
+        seed = Seed(seed_type=SeedType.ORGANIZATION, value="Unknown Org")
+        results = await _collect_all(collector, seed)
+        assert results == []
+
+    @respx.mock
+    async def test_org_search_500_raises(self) -> None:
+        """crt.sh 500 for org search -> CollectorSourceUnreachableError."""
+        respx.get("https://crt.sh/", params__contains={"output": "json"}).mock(
+            return_value=httpx.Response(500, text="Internal Server Error"),
+        )
+
+        collector = CrtShCollector(_make_config())
+        seed = Seed(seed_type=SeedType.ORGANIZATION, value="Acme Corp")
+        with pytest.raises(CollectorSourceUnreachableError, match="500"):
+            await _collect_all(collector, seed)
+
+    @respx.mock
+    async def test_org_search_connection_error_raises(self) -> None:
+        """Connection error on org search -> CollectorSourceUnreachableError."""
+        respx.get("https://crt.sh/", params__contains={"output": "json"}).mock(
+            side_effect=httpx.ConnectError("connection refused"),
+        )
+
+        collector = CrtShCollector(_make_config())
+        seed = Seed(seed_type=SeedType.ORGANIZATION, value="Acme Corp")
+        with pytest.raises(CollectorSourceUnreachableError, match="unreachable"):
+            await _collect_all(collector, seed)
 
 
 class TestCrtShRegistration:

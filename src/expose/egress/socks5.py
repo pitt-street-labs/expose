@@ -8,23 +8,38 @@ When ``dns_through_proxy`` is ``True`` (the default), the profile rewrites the
 proxy URL from ``socks5://`` to ``socks5h://`` so the *proxy* resolves
 hostnames on behalf of the client. This prevents DNS leaks that would reveal
 the operator's resolver to target infrastructure.
+
+httpx SOCKS5 support requires the ``socksio`` package (``pip install socksio``).
+If ``socksio`` is not installed, :meth:`Socks5EgressProfile.configure_httpx_client`
+raises a clear ``RuntimeError`` at call time rather than failing with a cryptic
+import error deep in httpx internals.
 """
 
 from __future__ import annotations
 
 import asyncio
+import importlib.util
+import logging
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 
 from expose.egress.base import EgressHealthCheck, EgressProfile, EgressProfileType
 
+logger = logging.getLogger(__name__)
+
+
+def _socksio_available() -> bool:
+    """Check whether the ``socksio`` package is importable."""
+    return importlib.util.find_spec("socksio") is not None
+
 
 class Socks5EgressProfile(EgressProfile):
     """SOCKS5 proxy egress — routes traffic through a SOCKS5 proxy.
 
     Typical deployment: ``ssh -D 10899 user@exit-node`` or a dedicated SOCKS5
-    daemon (Dante, microsocks).
+    daemon (Dante, microsocks). For Tor, the default proxy is
+    ``socks5://127.0.0.1:9050``.
 
     Args:
         proxy_url: SOCKS5 proxy URL, e.g. ``"socks5://127.0.0.1:10899"``.
@@ -52,13 +67,28 @@ class Socks5EgressProfile(EgressProfile):
         """
         return self._dns_through_proxy
 
+    @property
+    def proxy_url(self) -> str:
+        """The configured SOCKS5 proxy URL."""
+        return self._proxy_url
+
     def configure_httpx_client(self, **kwargs: Any) -> dict[str, Any]:
         """Return httpx proxy kwargs for SOCKS5 tunnelling.
 
         When ``dns_through_proxy`` is enabled, the ``socks5://`` scheme is
         rewritten to ``socks5h://`` so httpx instructs the proxy to resolve
         DNS on the operator's behalf — preventing DNS leaks.
+
+        Raises:
+            RuntimeError: If the ``socksio`` package is not installed.
         """
+        if not _socksio_available():
+            msg = (
+                "SOCKS5 egress requires the 'socksio' package. "
+                "Install it with: pip install socksio"
+            )
+            raise RuntimeError(msg)
+
         effective_url = self._proxy_url
         if self._dns_through_proxy and effective_url.startswith("socks5://"):
             effective_url = "socks5h://" + effective_url[len("socks5://") :]

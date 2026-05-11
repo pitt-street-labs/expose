@@ -1,13 +1,24 @@
 """Certificate Transparency collector — crt.sh (Tier 1, passive).
 
-Queries the crt.sh JSON API for certificates matching a domain seed.
+Queries the crt.sh JSON API for certificates matching a domain seed or
+an organization seed.
+
+**Domain search** (``?q=%25.domain.com&output=json``):
+  Returns certificates whose SAN or CN match the wildcard pattern.
+
+**Organization search** (``?O=OrgName&output=json``):
+  Returns certificates issued to the named organization across *any*
+  domain. This surfaces shadow-IT, M&A remnant certs, and subsidiary
+  infrastructure that would not appear via domain-only CT enumeration.
+
 crt.sh aggregates CT log entries from Google, Cloudflare, and DigiCert
 logs; results include pre-certificates and final certificates.
 
 No credentials required. Rate limiting is advisory (crt.sh has no
 published API contract but will return 429 or TCP RST under heavy load).
 
-Seed types: DOMAIN only. Other seed types are skipped with a warning.
+Seed types: DOMAIN, ORGANIZATION. Other seed types are skipped with a
+warning.
 
 Per ADR-010, we do NOT compute SHA-256 fingerprints from PEM here — the
 FIPS adapter is required for that. Instead we use the certificate serial
@@ -44,7 +55,7 @@ from expose.sanitization.text import (
     SanitizedField,
     sanitize_field,
 )
-from expose.types.canonical import CollectorStatus, ExtendedIdentifierType
+from expose.types.canonical import CollectorStatus, ExtendedIdentifierType, IdentifierType
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +63,11 @@ _CRT_SH_BASE_URL = "https://crt.sh/"
 _CRT_SH_JSON_URL = "https://crt.sh/"
 
 _SAN_BYTE_CAP = 255
+
+# Maximum number of unique domains to extract from org-name search results.
+# crt.sh can return thousands of certs for large CAs; cap to avoid flooding
+# the pipeline with low-value seeds.
+_ORG_SEARCH_DOMAIN_CAP = 200
 
 
 def _parse_sans(name_value: str) -> list[str]:
@@ -143,14 +159,21 @@ class CrtShCollector(Collector):
         super().__init__(config)
 
     async def expand(self, seed: Seed) -> AsyncIterator[Observation]:
-        if seed.seed_type != SeedType.DOMAIN:
+        if seed.seed_type == SeedType.DOMAIN:
+            async for obs in self._expand_domain(seed):
+                yield obs
+        elif seed.seed_type == SeedType.ORGANIZATION:
+            async for obs in self._expand_organization(seed):
+                yield obs
+        else:
             logger.warning(
-                "ct-crtsh: skipping non-domain seed type %s (value=%r)",
+                "ct-crtsh: skipping unsupported seed type %s (value=%r)",
                 seed.seed_type,
                 seed.value,
             )
-            return
 
+    async def _expand_domain(self, seed: Seed) -> AsyncIterator[Observation]:
+        """Query crt.sh by domain wildcard (``?q=%25.domain.com``)."""
         domain = seed.value.strip()
         url = _CRT_SH_JSON_URL
         params = {"q": f"%.{domain}", "output": "json"}
@@ -215,6 +238,91 @@ class CrtShCollector(Collector):
                     exc,
                     exc_info=True,
                 )
+
+    async def _expand_organization(self, seed: Seed) -> AsyncIterator[Observation]:
+        """Query crt.sh by organization name (``?O=OrgName&output=json``).
+
+        Extracts unique domain names from certificate SANs and common names,
+        emitting one observation per discovered domain. This surfaces shadow-IT
+        and M&A remnant domains that would not appear via domain-only CT search.
+        """
+        org_name = seed.value.strip()
+        if not org_name:
+            return
+
+        url = _CRT_SH_JSON_URL
+        params = {"O": org_name, "output": "json"}
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(self.config.request_timeout_seconds),
+                headers={"User-Agent": self.config.user_agent},
+            ) as client:
+                response = await client.get(url, params=params)
+                if response.status_code == 404:
+                    return
+                response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            msg = (
+                f"crt.sh returned HTTP {exc.response.status_code} "
+                f"for organization {org_name!r}"
+            )
+            raise CollectorSourceUnreachableError(msg) from exc
+        except httpx.HTTPError as exc:
+            msg = f"crt.sh unreachable for organization {org_name!r}: {exc}"
+            raise CollectorSourceUnreachableError(msg) from exc
+
+        try:
+            raw: Any = response.json()
+        except Exception as exc:
+            msg = (
+                f"crt.sh returned malformed JSON for organization "
+                f"{org_name!r}: {exc}"
+            )
+            raise CollectorSourceUnreachableError(msg) from exc
+
+        if not isinstance(raw, list):
+            msg = (
+                f"crt.sh returned {type(raw).__name__} instead of "
+                f"JSON array for organization {org_name!r}"
+            )
+            raise CollectorSourceUnreachableError(msg)
+
+        entries: list[dict[str, Any]] = raw
+
+        # Extract unique domain names from SANs and common_name fields.
+        unique_domains: set[str] = set()
+        for entry in entries:
+            cn_raw = str(entry.get("common_name", "")).strip()
+            if cn_raw and "." in cn_raw and not cn_raw.startswith("*"):
+                unique_domains.add(cn_raw.lower())
+            name_value_raw = str(entry.get("name_value", ""))
+            for san in _parse_sans(name_value_raw):
+                san_lower = san.strip().lower()
+                if san_lower and "." in san_lower and not san_lower.startswith("*"):
+                    unique_domains.add(san_lower)
+            if len(unique_domains) >= _ORG_SEARCH_DOMAIN_CAP:
+                break
+
+        # Emit one observation per discovered domain, keyed by the domain name.
+        for domain in sorted(unique_domains):
+            yield Observation(
+                collector_id=self.collector_id,
+                collector_version=self.collector_version,
+                tenant_id=self.config.tenant_id,
+                observation_type=ObservationType.CT_LOG_ENTRY,
+                subject=ObservationSubject(
+                    identifier_type=IdentifierType.DOMAIN,
+                    identifier_value=domain,
+                ),
+                observed_at=datetime.now(tz=UTC),
+                structured_payload={
+                    "discovery_method": "ct_org_search",
+                    "organization": org_name,
+                    "domain": domain,
+                    "source_entry_count": len(entries),
+                },
+            )
 
     async def health_check(self) -> CollectorHealthCheck:
         start = datetime.now(tz=UTC)

@@ -39,6 +39,7 @@ from expose.collectors.base import (
     CollectorCredential,
     CollectorError,
     CollectorHealthCheck,
+    CollectorSourceUnreachableError,
     Observation,
     Seed,
     SeedType,
@@ -140,6 +141,7 @@ class PipelineDispatcher:
         enforcement_log: EnforcementLog | None = None,
         scope_matcher: ScopeMatcher | None = None,
         credential_resolver: CredentialResolver | None = None,
+        egress_fallbacks: list[EgressProfile] | None = None,
     ) -> None:
         self._registry = registry
         self._tenant_scope = tenant_scope
@@ -148,6 +150,7 @@ class PipelineDispatcher:
         self._enforcement_log = enforcement_log or EnforcementLog()
         self._scope_matcher = scope_matcher
         self._credential_resolver = credential_resolver
+        self._egress_fallbacks: list[EgressProfile] = egress_fallbacks or []
 
     async def dispatch(self, job: DispatchJob) -> DispatchResult:
         """Execute one dispatch job and return a structured result.
@@ -245,28 +248,20 @@ class PipelineDispatcher:
             )
         return None
 
-    async def _dispatch_inner(
+    async def _run_expand(
         self,
+        collector_cls: type[Collector],
         job: DispatchJob,
+        cred_result: dict[str, CollectorCredential],
         start_ns: int,
     ) -> DispatchResult:
-        """Core dispatch logic, separated for readability."""
-        # 1. Resolve collector class
-        collector_cls = self._registry.get(job.collector_id)
+        """Build a collector instance, health-check it, and run expand.
 
-        # 2. Authorization gates (scope matcher then Tier-3)
-        auth_denial = (
-            self._check_scope_matcher(job, start_ns)
-            or self._check_tier3_gate(job, collector_cls, start_ns)
-        )
-        if auth_denial is not None:
-            return auth_denial
-
-        # 3. Resolve credentials (if resolver provided) and build config
-        cred_result = await self._resolve_credentials(job, start_ns)
-        if isinstance(cred_result, DispatchResult):
-            return cred_result
-
+        Factored out of ``_dispatch_inner`` so the egress-fallback retry loop
+        can re-invoke it with a different egress profile applied to the
+        collector config without duplicating the health-check/expand/error
+        handling.
+        """
         config = CollectorConfig(
             tenant_id=job.tenant_id,
             run_id=job.run_id,
@@ -274,7 +269,7 @@ class PipelineDispatcher:
         )
         collector: Collector = collector_cls(config)
 
-        # 4. Health check
+        # Health check
         health = await collector.health_check()
         if health.status not in (
             CollectorStatus.SUCCESS,
@@ -287,11 +282,14 @@ class PipelineDispatcher:
                 duration_ms=_elapsed_ms(start_ns),
             )
 
-        # 5. Run expand and collect observations
+        # Run expand and collect observations
         try:
             observations: list[Observation] = []
             async for obs in collector.expand(job.seed):
                 observations.append(obs)
+        except CollectorSourceUnreachableError:
+            # Re-raise so the caller (_dispatch_inner) can attempt fallback
+            raise
         except CollectorError as exc:
             logger.warning(
                 "Collector %s raised CollectorError",
@@ -328,6 +326,116 @@ class PipelineDispatcher:
             duration_ms=_elapsed_ms(start_ns),
             egress_anonymized=egress_anon,
         )
+
+    async def _dispatch_inner(
+        self,
+        job: DispatchJob,
+        start_ns: int,
+    ) -> DispatchResult:
+        """Core dispatch logic, separated for readability.
+
+        When a collector raises ``CollectorSourceUnreachableError`` and
+        fallback egress profiles are configured, the dispatcher logs the
+        primary failure and retries through each fallback in order. If all
+        fallbacks also fail, the *original* error is reported.
+        """
+        # 1. Resolve collector class
+        collector_cls = self._registry.get(job.collector_id)
+
+        # 2. Authorization gates (scope matcher then Tier-3)
+        auth_denial = (
+            self._check_scope_matcher(job, start_ns)
+            or self._check_tier3_gate(job, collector_cls, start_ns)
+        )
+        if auth_denial is not None:
+            return auth_denial
+
+        # 3. Resolve credentials (if resolver provided) and build config
+        cred_result = await self._resolve_credentials(job, start_ns)
+        if isinstance(cred_result, DispatchResult):
+            return cred_result
+
+        # 4. Primary attempt via configured (or default) egress profile
+        primary_egress_name = (
+            self._egress_profile.profile_type.value
+            if self._egress_profile is not None
+            else "direct"
+        )
+        try:
+            return await self._run_expand(
+                collector_cls, job, cred_result, start_ns,
+            )
+        except CollectorSourceUnreachableError as primary_exc:
+            # No fallbacks configured — report the error immediately
+            if not self._egress_fallbacks:
+                logger.warning(
+                    "Collector %s source unreachable via %s egress "
+                    "(no fallbacks configured)",
+                    job.collector_id,
+                    primary_egress_name,
+                )
+                return DispatchResult(
+                    status=DispatchStatus.COLLECTOR_ERROR,
+                    error_message=str(primary_exc),
+                    duration_ms=_elapsed_ms(start_ns),
+                )
+
+            # Fallback chain — try each in order
+            logger.warning(
+                "Collector %s source unreachable via %s egress, "
+                "attempting %d fallback(s): %s",
+                job.collector_id,
+                primary_egress_name,
+                len(self._egress_fallbacks),
+                [fb.profile_type.value for fb in self._egress_fallbacks],
+            )
+
+            original_egress = self._egress_profile
+            for fb_profile in self._egress_fallbacks:
+                fb_name = fb_profile.profile_type.value
+                logger.info(
+                    "Retrying collector %s via %s egress fallback",
+                    job.collector_id,
+                    fb_name,
+                )
+                # Temporarily swap the egress profile for the fallback so
+                # _run_expand (and any egress-aware code it calls) sees the
+                # fallback profile's anonymization flag.
+                self._egress_profile = fb_profile
+                try:
+                    result = await self._run_expand(
+                        collector_cls, job, cred_result, start_ns,
+                    )
+                    # Fallback succeeded — annotate and return
+                    logger.info(
+                        "Collector %s succeeded via %s egress fallback",
+                        job.collector_id,
+                        fb_name,
+                    )
+                    return result
+                except CollectorSourceUnreachableError:
+                    logger.warning(
+                        "Collector %s also unreachable via %s egress fallback",
+                        job.collector_id,
+                        fb_name,
+                    )
+                    continue
+                finally:
+                    # Restore the original profile regardless
+                    self._egress_profile = original_egress
+
+            # All fallbacks exhausted — report the original error
+            logger.error(
+                "Collector %s unreachable via primary (%s) and all "
+                "fallback egress profiles; reporting original error",
+                job.collector_id,
+                primary_egress_name,
+            )
+            return DispatchResult(
+                status=DispatchStatus.COLLECTOR_ERROR,
+                error_message=str(primary_exc),
+                duration_ms=_elapsed_ms(start_ns),
+            )
 
 
 def _elapsed_ms(start_ns: int) -> float:

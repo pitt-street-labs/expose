@@ -1,0 +1,35 @@
+[
+    {
+        "issuer_ca_id": 16418,
+        "issuer_name": "C=US, O=DigiCert Inc, CN=DigiCert SHA2 Secure Server CA",
+        "common_name": "mail.acmecorp.com",
+        "name_value": "mail.acmecorp.com\nacmecorp.com",
+        "id": 8888888801,
+        "entry_timestamp": "2025-03-01T00:00:00.000",
+        "not_before": "2025-03-01T00:00:00",
+        "not_after": "2026-03-01T00:00:00",
+        "serial_number": "aa11bb22cc33dd44ee55ff66aa11bb22"
+    },
+    {
+        "issuer_ca_id": 16418,
+        "issuer_name": "C=US, O=DigiCert Inc, CN=DigiCert SHA2 Secure Server CA",
+        "common_name": "*.internal.acmecorp.com",
+        "name_value": "*.internal.acmecorp.com",
+        "id": 8888888802,
+        "entry_timestamp": "2025-03-15T00:00:00.000",
+        "not_before": "2025-03-15T00:00:00",
+        "not_after": "2026-03-15T00:00:00",
+        "serial_number": "bb22cc33dd44ee55ff66aa11bb22cc33"
+    },
+    {
+        "issuer_ca_id": 16418,
+        "issuer_name": "C=US, O=DigiCert Inc, CN=DigiCert SHA2 Secure Server CA",
+        "common_name": "vpn.acme-legacy.net",
+        "name_value": "vpn.acme-legacy.net\nremote.acme-legacy.net",
+        "id": 8888888803,
+        "entry_timestamp": "2025-04-01T00:00:00.000",
+        "not_before": "2025-04-01T00:00:00",
+        "not_after": "2026-04-01T00:00:00",
+        "serial_number": "cc33dd44ee55ff66aa11bb22cc33dd44"
+    }
+]

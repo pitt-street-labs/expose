@@ -44,10 +44,15 @@
     <div class="card scan-form-card" x-data="scanForm()" x-show="selectedTenantId" x-cloak>
         <h2 class="pane-title" style="margin-bottom: var(--space-sm);">Start Scan</h2>
         <form @submit.prevent="submitScan()">
-            <div style="display: flex; gap: 1rem; align-items: end;">
-                <div style="flex: 1;">
-                    <label for="seed-input" class="sr-only">Seed (domain, IP, or CIDR)</label>
+            <div style="display: flex; gap: 1rem; align-items: end; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 200px;">
+                    <label for="seed-input" style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); display: block; margin-bottom: 4px;">Seed (domain, IP, or CIDR)</label>
                     <input type="text" id="seed-input" x-model="seed" placeholder="example.com"
+                           class="filter-input" style="width: 100%;">
+                </div>
+                <div style="flex: 1; min-width: 200px;">
+                    <label for="org-input" style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); display: block; margin-bottom: 4px;">Organization Name <span style="opacity: 0.6;">(optional)</span></label>
+                    <input type="text" id="org-input" x-model="orgName" placeholder="Acme Corp"
                            class="filter-input" style="width: 100%;">
                 </div>
                 <button type="submit" class="btn btn-primary" :disabled="scanning">

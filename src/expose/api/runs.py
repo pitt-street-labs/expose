@@ -194,6 +194,12 @@ async def start_run(
         st = SeedType(body.seed_type) if body.seed_type is not None else detect_seed_type(raw_seed)
         seed_objects.append(Seed(seed_type=st, value=raw_seed))
 
+    # 2b. Add organization seeds (always typed ORGANIZATION)
+    for org_seed in body.organization_seeds:
+        org_value = org_seed.strip()
+        if org_value:
+            seed_objects.append(Seed(seed_type=SeedType.ORGANIZATION, value=org_value))
+
     # 3. Default collector_ids to all Tier-1 if not specified
     collector_ids = body.collector_ids if body.collector_ids else _get_tier1_collector_ids()
 
@@ -241,6 +247,7 @@ async def start_run(
         tenant_id=tenant_id,
         state="pending",
         seeds=body.seeds,
+        organization_seeds=body.organization_seeds,
         collector_ids=collector_ids,
         message=f"Run {run_id} accepted. Monitor via SSE at "
         f"/v1/tenants/{tenant_id}/runs/{run_id}/events",

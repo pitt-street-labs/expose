@@ -74,6 +74,8 @@ class TenantConfigResponse(BaseModel):
     enabled_collectors: list[str]
     schedule_cron: str | None
     egress_profile: str
+    egress_fallbacks: list[str]
+    socks5_proxy: str | None
     llm_enabled: bool
     llm_provider: str | None
     llm_cost_ceiling_per_run: float
@@ -94,6 +96,8 @@ class TenantConfigUpdate(BaseModel):
     enabled_collectors: list[str] | None = None
     schedule_cron: str | None = None
     egress_profile: str | None = None
+    egress_fallbacks: list[str] | None = None
+    socks5_proxy: str | None = None
     llm_enabled: bool | None = None
     llm_provider: str | None = None
     llm_cost_ceiling_per_run: float | None = None
@@ -119,6 +123,8 @@ def _default_config(tenant_id: UUID) -> dict[str, object]:
         "enabled_collectors": [],
         "schedule_cron": None,
         "egress_profile": "direct",
+        "egress_fallbacks": [],
+        "socks5_proxy": None,
         "llm_enabled": False,
         "llm_provider": None,
         "llm_cost_ceiling_per_run": 0.0,
@@ -153,6 +159,31 @@ def _validate_egress_profile(profile: str) -> None:
             detail=(
                 f"Invalid egress profile: {profile!r}. "
                 f"Must be one of {sorted(VALID_EGRESS_PROFILES)}."
+            ),
+        )
+
+
+def _validate_egress_fallbacks(fallbacks: list[str]) -> None:
+    """Raise ``HTTPException(422)`` if any fallback profile is not recognised."""
+    for fb in fallbacks:
+        if fb not in VALID_EGRESS_PROFILES:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Invalid egress fallback profile: {fb!r}. "
+                    f"Must be one of {sorted(VALID_EGRESS_PROFILES)}."
+                ),
+            )
+
+
+def _validate_socks5_proxy(proxy_url: str) -> None:
+    """Raise ``HTTPException(422)`` if the SOCKS5 proxy URL is malformed."""
+    if not proxy_url.startswith(("socks5://", "socks5h://")):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Invalid socks5_proxy URL: {proxy_url!r}. "
+                "Must start with 'socks5://' or 'socks5h://'."
             ),
         )
 
@@ -215,6 +246,12 @@ async def replace_tenant_config(
     if body.egress_profile is not None:
         _validate_egress_profile(body.egress_profile)
         new_cfg["egress_profile"] = body.egress_profile
+    if body.egress_fallbacks is not None:
+        _validate_egress_fallbacks(body.egress_fallbacks)
+        new_cfg["egress_fallbacks"] = body.egress_fallbacks
+    if body.socks5_proxy is not None:
+        _validate_socks5_proxy(body.socks5_proxy)
+        new_cfg["socks5_proxy"] = body.socks5_proxy
     if body.llm_enabled is not None:
         new_cfg["llm_enabled"] = body.llm_enabled
     if body.llm_provider is not None:
@@ -266,6 +303,12 @@ async def patch_tenant_config(
     if body.egress_profile is not None:
         _validate_egress_profile(body.egress_profile)
         merged["egress_profile"] = body.egress_profile
+    if body.egress_fallbacks is not None:
+        _validate_egress_fallbacks(body.egress_fallbacks)
+        merged["egress_fallbacks"] = body.egress_fallbacks
+    if body.socks5_proxy is not None:
+        _validate_socks5_proxy(body.socks5_proxy)
+        merged["socks5_proxy"] = body.socks5_proxy
     if body.llm_enabled is not None:
         merged["llm_enabled"] = body.llm_enabled
     if body.llm_provider is not None:
