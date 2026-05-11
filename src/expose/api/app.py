@@ -7,11 +7,25 @@ an unauthenticated health endpoint.
 
 from __future__ import annotations
 
+import weakref
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
+
+_app_weak_ref: weakref.ref[FastAPI] | None = None
+
+
+def _set_app_ref(app: FastAPI) -> None:
+    global _app_weak_ref  # noqa: PLW0603
+    _app_weak_ref = weakref.ref(app)
+
+
+def _app_ref() -> FastAPI | None:
+    if _app_weak_ref is None:
+        return None
+    return _app_weak_ref()
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
@@ -76,6 +90,11 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.session_factory = factory
     app.state.server_started_at = datetime.now(UTC)
     app.dependency_overrides[get_session] = _make_session_dependency(factory)
+
+    _set_app_ref(app)
+
+    from expose.api.tenant_config import load_configs_from_db  # noqa: PLC0415
+    await load_configs_from_db()
 
     yield
 

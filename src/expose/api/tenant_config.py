@@ -17,7 +17,7 @@ import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
 from expose.pipeline.scheduler import CronExpression
@@ -111,10 +111,65 @@ class TenantConfigUpdate(BaseModel):
 
 _configs: dict[UUID, dict[str, object]] = {}
 
-logger.warning(
-    "Tenant configuration is stored in-memory only (Phase 1). "
-    "Configuration will be lost on process restart."
-)
+
+async def _persist_config(tenant_id: UUID, cfg: dict[str, object]) -> None:
+    """Write config to Tenant.config_jsonb for persistence across restarts."""
+    try:
+        from expose.api.app import _app_ref  # noqa: PLC0415
+
+        app = _app_ref()
+        if app is None:
+            return
+        sf = getattr(app.state, "session_factory", None)
+        if sf is None:
+            return
+
+        from sqlalchemy import update  # noqa: PLC0415
+        from expose.db.models import Tenant  # noqa: PLC0415
+
+        serializable = {}
+        for k, v in cfg.items():
+            if isinstance(v, datetime):
+                serializable[k] = v.isoformat()
+            elif isinstance(v, UUID):
+                serializable[k] = str(v)
+            else:
+                serializable[k] = v
+
+        async with sf() as session:
+            await session.execute(
+                update(Tenant)
+                .where(Tenant.id == tenant_id)
+                .values(config_jsonb=serializable)
+            )
+            await session.commit()
+    except Exception:
+        logger.debug("Config DB persist failed (non-fatal)", exc_info=True)
+
+
+async def load_configs_from_db() -> None:
+    """Load all tenant configs from DB into the in-memory cache on startup."""
+    try:
+        from expose.api.app import _app_ref  # noqa: PLC0415
+
+        app = _app_ref()
+        if app is None:
+            return
+        sf = getattr(app.state, "session_factory", None)
+        if sf is None:
+            return
+
+        from sqlalchemy import select  # noqa: PLC0415
+        from expose.db.models import Tenant  # noqa: PLC0415
+
+        async with sf() as session:
+            result = await session.execute(select(Tenant))
+            for tenant in result.scalars().all():
+                if tenant.config_jsonb:
+                    _configs[tenant.id] = dict(tenant.config_jsonb)
+                    logger.info("Loaded config from DB for tenant %s", tenant.id)
+    except Exception:
+        logger.debug("Config DB load failed (non-fatal)", exc_info=True)
 
 
 def _default_config(tenant_id: UUID) -> dict[str, object]:
@@ -279,6 +334,7 @@ async def replace_tenant_config(
     new_cfg["updated_by"] = "api"
 
     _configs[tenant_id] = new_cfg
+    await _persist_config(tenant_id, new_cfg)
 
     changed_fields = [
         f for f in TenantConfigUpdate.model_fields if getattr(body, f) is not None
@@ -338,6 +394,7 @@ async def patch_tenant_config(
     merged["updated_by"] = "api"
 
     _configs[tenant_id] = merged
+    await _persist_config(tenant_id, merged)
 
     changed_fields = [
         f for f in TenantConfigUpdate.model_fields if getattr(body, f) is not None
