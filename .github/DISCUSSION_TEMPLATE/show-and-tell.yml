@@ -1,0 +1,27 @@
+title: "[Show & Tell] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Share how you are using EXPOSE in your environment. Deployment patterns,
+        custom collectors, integration examples, and operational lessons learned
+        are all welcome here.
+
+  - type: textarea
+    id: showcase
+    attributes:
+      label: What Are You Sharing
+      description: Describe your deployment, integration, or use case.
+    validations:
+      required: true
+
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: |
+        Additional technical details, configuration excerpts, architecture
+        notes, or lessons learned that might help others.
+    validations:
+      required: false

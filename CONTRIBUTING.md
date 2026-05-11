@@ -1,139 +1,279 @@
 # Contributing to EXPOSE
 
-Thanks for your interest in contributing. EXPOSE is open source under Apache 2.0 and welcomes contributions from the community.
+Thanks for your interest in contributing to EXPOSE. This project is open source under Apache 2.0 and welcomes contributions from the community -- bug fixes, new collectors, documentation improvements, test coverage, and more.
 
-## Before you start
+Before diving in, please read:
 
-Please read:
-
-- **[`README.md`](README.md)** — project overview.
-- **[`docs/SPEC.md`](docs/SPEC.md)** — comprehensive specification.
-- **[`ETHICS.md`](ETHICS.md)** — intended use and non-goals. Some contribution categories are explicitly out of scope.
-- **[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)** — community standards.
-- **[`SECURITY.md`](SECURITY.md)** — security disclosure (don't open public issues for vulnerabilities).
-
-## Developer Certificate of Origin
-
-This project requires the **Developer Certificate of Origin** (DCO) on every commit. The DCO is a lightweight alternative to a Contributor License Agreement: by signing off on each commit, you certify that:
-
-> 1. The contribution was created in whole or in part by you and you have the right to submit it under the open source license indicated in the file; or
-> 2. The contribution is based upon previous work that, to the best of your knowledge, is covered under an appropriate open source license and you have the right under that license to submit that work with modifications, whether created in whole or in part by you, under the same open source license (unless you are permitted to submit under a different license); or
-> 3. The contribution was provided directly to you by some other person who certified (1), (2), or (3) and you have not modified it.
-> 4. You understand and agree that this project and the contribution are public and that a record of the contribution (including all personal information you submit with it, including your sign-off) is maintained indefinitely and may be redistributed consistent with this project or the open source license(s) involved.
-
-Full DCO text: https://developercertificate.org/
-
-To sign off on a commit, append the `-s` flag to `git commit`:
-
-```bash
-git commit -s -m "Add cloud-aws-ranges collector"
-```
-
-This adds a `Signed-off-by: Your Name <your.email@example.com>` line to your commit message. The DCO bot will verify every commit in your pull request has this sign-off; missing sign-offs block merging.
-
-If you forget to sign off, you can amend the commit:
-
-```bash
-git commit --amend -s --no-edit
-git push --force-with-lease
-```
-
-For a series of commits, use `git rebase --signoff main` to sign off on all of them.
-
-## What kinds of contributions are welcome
-
-**Bug fixes.** Always welcome. File an issue first if the bug is non-obvious or its fix has design implications.
-
-**New collectors.** Welcome with discussion. Open an issue describing the collector source, why it adds value, and any rate limits or licensing constraints. Some collector sources are commercial-only and require operator-provided credentials; we welcome those implementations as long as the engine code itself is freely usable.
-
-**Performance improvements.** Welcome. Include benchmark before/after data; ideally a reproducible benchmark we can re-run.
-
-**Documentation improvements.** Always welcome. Including: SPEC.md clarifications, ADR additions for new design decisions, glossary updates, deployment guides for environments we don't currently document well.
-
-**Test coverage.** Always welcome. Cross-tenant isolation tests, regression tests for previous bugs, integration tests against synthetic seed graphs.
-
-**Bug reports.** Open an issue with reproduction steps, EXPOSE version, deployment environment, expected vs. actual behavior.
-
-**Feature requests.** Open an issue describing the use case. We'll discuss whether it fits the project's scope and intent before any code is written.
-
-## What kinds of contributions are not welcome
-
-Per [`ETHICS.md`](ETHICS.md):
-
-- Active exploitation modules.
-- PII enrichment beyond public records.
-- Features whose primary purpose is surveillance or unauthorized reconnaissance.
-- Features bypassing sanitization or authorization-scope layers.
-- Customer-specific rule packs (those go in private repositories, not the public engine repo).
-
-If you're unsure whether a contribution fits the project, open a discussion issue before writing code.
+- **[README.md](README.md)** -- project overview and quick start.
+- **[docs/SPEC.md](docs/SPEC.md)** -- comprehensive specification.
+- **[ETHICS.md](ETHICS.md)** -- intended use and non-goals. Some contribution categories are explicitly out of scope.
+- **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** -- community standards.
+- **[SECURITY.md](SECURITY.md)** -- vulnerability reporting (do not open public issues for security vulnerabilities).
 
 ## Development setup
 
+EXPOSE uses [uv](https://docs.astral.sh/uv/) for dependency management and virtual environment setup.
+
 ```bash
-git clone https://github.com/korlogos/expose.git
+git clone https://github.com/pitt-street-labs/expose.git
 cd expose
 
-# Install uv (Python package manager): https://docs.astral.sh/uv/
-curl -LsSf https://astral.sh/uv/install.sh | sh
+# Install uv if you don't have it
+pip install uv
 
-# Set up the Python environment
-uv sync --all-extras --dev
+# Install all dependencies (including dev and test extras)
+uv sync --all-extras
 
-# Activate the venv
-source .venv/bin/activate
-
-# Run tests
+# Run the test suite -- 1059 tests should pass
 uv run pytest
 
 # Run type checking
 uv run mypy src/
 
-# Run linter
+# Run linter and formatter checks
 uv run ruff check src/
 uv run ruff format --check src/
 ```
 
-For containerized integration testing:
+For containerized integration testing (requires Docker):
 
 ```bash
 docker compose -f deploy/dev/docker-compose.yml up -d
 uv run pytest tests/integration/
 ```
 
-For Helm chart development:
+For Helm chart development (requires k3d and Helm):
 
 ```bash
-# Install k3d for local Kubernetes
-curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
-
-# Spin up a local cluster
 k3d cluster create expose-dev
-
-# Install the chart
 helm install expose ./deploy/helm-chart \
     --values deploy/dev/local-values.yaml \
     --namespace expose --create-namespace
 ```
 
-## Pull request workflow
+## Code quality
 
-1. **Fork the repository** and create a feature branch from `main`.
-2. **Write your changes** with sign-off on every commit.
-3. **Add tests** that cover the change. New collectors need integration tests; new attribution rules need rule-pack-validation tests; bug fixes need regression tests.
-4. **Update documentation** as appropriate. SPEC.md changes for architectural changes, ADR additions for design decisions, README updates for user-facing behavior.
-5. **Run the full test suite** locally before opening the PR.
-6. **Open the PR** with a clear description: what changed, why, and any operational implications.
-7. **Respond to review feedback.** Maintainers may request changes; please be patient as we balance review work with other priorities.
+The project enforces strict code quality standards through CI and pre-commit hooks.
 
-PRs are reviewed by Korlogos maintainers. Expect 5-10 business days for initial response on substantive PRs.
+**Linting and formatting.** [Ruff](https://docs.astral.sh/ruff/) handles both linting and formatting. Run `uv run ruff check src/` and `uv run ruff format --check src/` before committing.
 
-## Commit message conventions
+**Type checking.** [mypy](https://mypy-lang.org/) runs in strict mode. All public functions require type annotations. Run `uv run mypy src/` to check.
 
-Subject line under 72 characters, imperative mood ("Add" not "Added"), no trailing period.
+**Testing.** [pytest](https://docs.pytest.org/) with `pytest-asyncio` for async tests. All external HTTP calls must be mocked with [respx](https://lundberg.github.io/respx/) -- no live network calls in the test suite. Database tests use testcontainers for real Postgres instances in CI and aiosqlite for fast local runs.
+
+**Pre-commit hooks.** The repository includes a `.pre-commit-config.yaml` with ruff, gitleaks (secret scanning), JSON Schema validation, and Helm lint. Install hooks with:
+
+```bash
+uv run pre-commit install
+```
+
+## Writing a new collector
+
+Collectors are the primary extension point in EXPOSE. Each collector queries a specific data source and yields `Observation` records into the pipeline. The existing builtin collectors in `src/expose/collectors/builtin/` are the best reference -- study `ct_crtsh.py` or `cloud_ranges.py` before writing your own.
+
+### Step 1: Create the collector module
+
+Create a new file at `src/expose/collectors/builtin/your_collector.py`. Every collector must:
+
+- Subclass `Collector` from `expose.collectors.base`
+- Use the `@register_collector` decorator from `expose.collectors.registry`
+- Declare class-level metadata: `collector_id`, `collector_version`, `tier`, and `requires_credentials`
+- Implement two async methods: `expand()` and `health_check()`
+
+```python
+"""Short description of the collector -- what it queries and why.
+
+Document the data source, any rate limits, required credentials,
+and which seed types are supported.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
+
+import httpx
+
+from expose.collectors.base import (
+    Collector,
+    CollectorConfig,
+    CollectorHealthCheck,
+    CollectorSourceUnreachableError,
+    Observation,
+    ObservationSubject,
+    ObservationType,
+    Seed,
+    SeedType,
+)
+from expose.collectors.registry import register_collector
+from expose.collectors.tiers import CollectorTier
+from expose.types.canonical import CollectorStatus, ExtendedIdentifierType
+
+logger = logging.getLogger(__name__)
+
+
+@register_collector
+class YourCollector(Collector):
+    """One-line summary of the collector."""
+
+    collector_id: str = "your-collector-id"
+    collector_version: str = "0.1.0"
+    tier: CollectorTier = CollectorTier.TIER_1  # or TIER_2, TIER_3
+    requires_credentials: bool = False
+
+    def __init__(self, config: CollectorConfig) -> None:
+        super().__init__(config)
+
+    async def expand(self, seed: Seed) -> AsyncIterator[Observation]:
+        """Query the data source and yield Observation records.
+
+        Skip unsupported seed types with a warning. Raise
+        CollectorSourceUnreachableError for catastrophic failures
+        (source down, auth invalid). Individual observation failures
+        should be logged as warnings, not raised.
+        """
+        if seed.seed_type != SeedType.DOMAIN:
+            logger.warning(
+                "%s: skipping unsupported seed type %s",
+                self.collector_id,
+                seed.seed_type,
+            )
+            return
+
+        # Query the data source, build observations, yield them
+        ...
+
+    async def health_check(self) -> CollectorHealthCheck:
+        """Verify the data source is reachable.
+
+        Return a CollectorHealthCheck with status SUCCESS or FAILURE.
+        """
+        start = datetime.now(tz=UTC)
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(10.0),
+                headers={"User-Agent": self.config.user_agent},
+            ) as client:
+                response = await client.head("https://your-data-source.example.com")
+            elapsed_ms = (datetime.now(tz=UTC) - start).total_seconds() * 1000.0
+
+            if response.status_code < 400:
+                return CollectorHealthCheck(
+                    collector_id=self.collector_id,
+                    collector_version=self.collector_version,
+                    status=CollectorStatus.SUCCESS,
+                    checked_at=start,
+                    latency_ms=elapsed_ms,
+                )
+            return CollectorHealthCheck(
+                collector_id=self.collector_id,
+                collector_version=self.collector_version,
+                status=CollectorStatus.FAILURE,
+                checked_at=start,
+                latency_ms=elapsed_ms,
+                error_message=f"HTTP {response.status_code}",
+            )
+        except httpx.HTTPError as exc:
+            elapsed_ms = (datetime.now(tz=UTC) - start).total_seconds() * 1000.0
+            return CollectorHealthCheck(
+                collector_id=self.collector_id,
+                collector_version=self.collector_version,
+                status=CollectorStatus.FAILURE,
+                checked_at=start,
+                latency_ms=elapsed_ms,
+                error_message=str(exc),
+            )
+```
+
+### Step 2: Understand collector tiers
+
+Collectors are tiered by sensitivity (SPEC section 6.3):
+
+- **Tier 1** -- Passive, broad query. CT logs, passive DNS, ASN/BGP, cloud IP ranges. No attribution gating required.
+- **Tier 2** -- Passive, targeted. Internet-wide scan APIs querying seed-graph hosts.
+- **Tier 3** -- Active, attribution-gated. DNS resolution, TLS handshake, HTTP fingerprinting, port scanning. Only dispatched against entities with `confirmed` or `high` attribution, or entities explicitly in the tenant authorization scope.
+
+Choose the appropriate tier for your collector. Tier 3 collectors have additional dispatch constraints enforced by the pipeline -- you do not need to implement the gating logic yourself.
+
+### Step 3: Write tests
+
+Create `tests/test_your_collector.py`. All collector tests must mock HTTP interactions -- no live network calls.
+
+```python
+"""Tests for the your-collector-id collector.
+
+Uses respx to mock all HTTP interactions -- NO live network calls.
+"""
+
+import pytest
+import respx
+
+from expose.collectors.base import CollectorConfig, Seed, SeedType
+from expose.collectors.builtin.your_collector import YourCollector
+
+TENANT_ID = UUID("018f1f00-0000-7000-8000-00000000ca01")
+RUN_ID = UUID("018f1f00-0000-7000-8000-00000000ca02")
+
+
+def _make_config() -> CollectorConfig:
+    return CollectorConfig(
+        tenant_id=TENANT_ID,
+        run_id=RUN_ID,
+        request_timeout_seconds=30.0,
+    )
+
+
+class TestYourCollectorMetadata:
+    def test_collector_id(self) -> None:
+        assert YourCollector.collector_id == "your-collector-id"
+
+    def test_tier(self) -> None:
+        assert YourCollector.tier == CollectorTier.TIER_1
+
+
+@pytest.mark.asyncio
+class TestYourCollectorExpand:
+    @respx.mock
+    async def test_happy_path(self) -> None:
+        # Mock the HTTP call, create a collector, call expand, assert results
+        ...
+
+    @respx.mock
+    async def test_source_unreachable(self) -> None:
+        # Mock a failure, verify CollectorSourceUnreachableError is raised
+        ...
+```
+
+### Step 4: Create fixture files (if needed)
+
+If your collector parses structured responses, create fixture files under `tests/fixtures/collectors/your_collector/`. Store canned JSON or other response data there and load it in tests. See `tests/fixtures/collectors/ct_crtsh/` for examples.
+
+### Step 5: Sanitize all external input
+
+All data from external sources must pass through the sanitization layer (`expose.sanitization`) before entering the observation graph. Certificate SANs, HTTP banners, DNS records, WHOIS fields -- anything from an adversary-controllable source gets sanitized. See the existing collectors for the pattern.
+
+### Step 6: Open a discussion issue first
+
+Before writing a new collector, open an issue describing the data source, why it adds value, any rate limits or licensing constraints, and which seed types it supports. Some data sources are commercial-only and require operator-provided credentials; those are welcome as long as the engine code itself remains freely usable.
+
+## Commit conventions
+
+Subject line under 72 characters, imperative mood ("Add" not "Added"), no trailing period. Use [Conventional Commits](https://www.conventionalcommits.org/) prefixes:
 
 ```
-Add cloud-aws-ranges collector
+feat: add cloud-aws-ranges collector
+fix: handle empty SAN list in ct-crtsh collector
+docs: clarify Tier 3 dispatch gating in SPEC
+test: add regression test for duplicate serial dedup
+refactor: extract shared HTTP client config
+chore: update ruff to 0.5.0
+```
+
+Larger changes benefit from a body explaining the *why*, not just the *what*:
+
+```
+feat: add cloud-aws-ranges collector
 
 Implements the cloud-aws-ranges collector reading AWS's ip-ranges.json
 manifest. Refreshes daily, parses service tags, populates CloudResource
@@ -144,36 +284,109 @@ Closes #123
 Signed-off-by: Your Name <your.email@example.com>
 ```
 
-Larger changes benefit from a body explaining the why, not just the what.
+### DCO sign-off
+
+Every commit requires a **Developer Certificate of Origin** sign-off. The DCO certifies that you have the right to submit the contribution under the project's open source license. Full text: https://developercertificate.org/
+
+Append the `-s` flag to `git commit`:
+
+```bash
+git commit -s -m "feat: add cloud-aws-ranges collector"
+```
+
+This adds a `Signed-off-by: Your Name <your.email@example.com>` line. The DCO bot verifies every commit in your pull request; missing sign-offs block merging.
+
+If you forget to sign off, amend or rebase:
+
+```bash
+# Amend the last commit
+git commit --amend -s --no-edit
+git push --force-with-lease
+
+# Sign off on a series of commits
+git rebase --signoff main
+```
+
+## Pull request process
+
+1. **Fork the repository** and create a feature branch from `main`.
+2. **Write your changes** with DCO sign-off on every commit.
+3. **Add tests.** New collectors need tests with mocked HTTP; bug fixes need regression tests; new attribution rules need rule-pack validation tests.
+4. **Update documentation** as appropriate. SPEC.md changes for architectural decisions, ADR additions for design decisions, README updates for user-facing behavior.
+5. **Run the full test suite** locally: `uv run pytest` (all 1059 tests should pass).
+6. **Run linting and type checking:** `uv run ruff check src/ && uv run mypy src/`
+7. **Open the PR** with a clear description: what changed, why, and any operational implications.
+8. **Respond to review feedback.** Maintainers may request changes; please be patient as we balance review work with other priorities.
+
+PRs are reviewed by Pitt Street Labs maintainers. Expect 5-10 business days for initial response on substantive PRs.
+
+## Issue labels
+
+The project uses a structured label taxonomy for issue tracking:
+
+| Prefix | Purpose | Examples |
+|--------|---------|----------|
+| `epic:` | Groups related issues into a feature area | `epic:collectors`, `epic:pipeline`, `epic:observability` |
+| `area:` | Identifies the codebase area affected | `area:api`, `area:scope`, `area:sanitization`, `area:helm` |
+| `priority:` | Urgency level | `priority:high`, `priority:medium`, `priority:low` |
+| `type:` | Kind of work | `type:bug`, `type:feature`, `type:docs`, `type:refactor`, `type:test` |
+
+When filing issues, apply labels that best match. Maintainers will adjust labels during triage if needed.
+
+## What kinds of contributions are welcome
+
+- **Bug fixes** -- always welcome. File an issue first if the bug is non-obvious or its fix has design implications.
+- **New collectors** -- welcome with discussion. Open an issue first (see "Writing a new collector" above).
+- **Performance improvements** -- welcome with benchmark before/after data.
+- **Documentation improvements** -- always welcome. SPEC.md clarifications, deployment guides, glossary updates.
+- **Test coverage** -- always welcome. Cross-tenant isolation tests, regression tests, integration tests against synthetic seed graphs.
+- **Bug reports** -- open an issue with reproduction steps, EXPOSE version, deployment environment, expected vs. actual behavior.
+- **Feature requests** -- open an issue describing the use case. We will discuss scope fit before any code is written.
+
+## What kinds of contributions are not welcome
+
+Per [ETHICS.md](ETHICS.md):
+
+- Active exploitation modules.
+- PII enrichment beyond public records.
+- Features whose primary purpose is surveillance or unauthorized reconnaissance.
+- Features bypassing sanitization or authorization-scope layers.
+- Customer-specific rule packs (those belong in private repositories, not the public engine repo).
+
+If you are unsure whether a contribution fits the project, open a discussion issue before writing code.
 
 ## Style and standards
 
-**Python.** PEP 8 enforced via `ruff format`. Type annotations required on all public functions; checked via `mypy`. Pydantic v2 for data models.
+**Python.** PEP 8 enforced via `ruff format`. Type annotations required on all public functions; checked via `mypy --strict`. Pydantic v2 for data models.
 
 **Async.** All I/O is async. Use `asyncio.gather` for concurrency, `asyncio.Semaphore` for rate limiting.
 
-**Logging.** Structured logging via OpenTelemetry. No `print()` statements, no `logger.info("Processing ${user.email}")` style fragments.
+**Logging.** Structured logging via OpenTelemetry. No `print()` statements. No PII in log messages.
 
-**Schemas.** Schema changes require updating both Pydantic models and JSON Schema files in `schemas/`. CI verifies they stay in sync.
+**Schemas.** Schema changes require updating both Pydantic models (`src/expose/types/`) and JSON Schema files (`schemas/`). CI verifies they stay in sync.
 
-**Tests.** Use `pytest`. Async tests via `pytest-asyncio`. Mock external services with `respx` for httpx, real Postgres for database tests (testcontainers in CI).
+**Tests.** Use `pytest` with `pytest-asyncio` for async tests. Mock external services with `respx` for httpx. Real Postgres via testcontainers for database tests in CI. All data from external sources must be sanitized before graph insertion.
 
-**Comments.** Explain why, not what. Code that needs heavy "what" comments usually needs refactoring.
+**Comments.** Explain *why*, not *what*. Code that needs heavy "what" comments usually needs refactoring.
 
-## Releases
+## Security
 
-Releases are tagged from `main` following SemVer:
+If you discover a security vulnerability, do not open a public issue. See [SECURITY.md](SECURITY.md) for private reporting channels and response SLAs.
 
-- **Major** (1.0.0 → 2.0.0) — breaking schema changes, breaking config changes.
-- **Minor** (1.0.0 → 1.1.0) — backward-compatible additions, new collectors, new attribution rule predicates.
-- **Patch** (1.0.0 → 1.0.1) — bug fixes, security fixes, no behavior changes.
+## Code of conduct
 
-Pre-release tags use `-rc.N` and `-beta.N` suffixes.
-
-## Questions
-
-Open a discussion at https://github.com/korlogos/expose/discussions for design questions, usage questions, or general discussion. File issues for bug reports and feature requests with concrete asks.
+This project follows the Contributor Covenant version 2.1. See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for the full text and enforcement details.
 
 For Code of Conduct concerns, email `conduct@korlogos.com`.
 
-For security disclosure, see [`SECURITY.md`](SECURITY.md).
+## License
+
+EXPOSE Core is licensed under [Apache 2.0](LICENSE). By contributing, you agree that your contributions will be licensed under the same terms. The DCO sign-off on each commit is the mechanism for this agreement.
+
+EXPOSE Threat Context, EXPOSE Identity Surface, and EXPOSE Research are separate products with their own licenses (see [GOVERNANCE.md](GOVERNANCE.md) for details on the open-core structure).
+
+## Questions
+
+Open a discussion at https://github.com/pitt-street-labs/expose/discussions for design questions, usage questions, or general conversation. File issues for bug reports and feature requests with concrete asks.
+
+For security disclosure, see [SECURITY.md](SECURITY.md).

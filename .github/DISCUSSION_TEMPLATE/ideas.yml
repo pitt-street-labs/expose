@@ -1,0 +1,27 @@
+title: "[Idea] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Share feature ideas, roadmap suggestions, or architectural proposals for
+        EXPOSE. This is the place for open-ended brainstorming before a concrete
+        feature request or pull request takes shape.
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: Idea
+      description: Describe your idea. What capability would it add? What problem does it address?
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: |
+        Any additional context that helps frame the idea. Examples: related tools
+        or techniques, links to prior art, use cases from your own workflow.
+    validations:
+      required: false

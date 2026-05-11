@@ -1,0 +1,79 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in EXPOSE.
+labels: ["type:bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report a bug. Please fill out the fields
+        below so maintainers can reproduce and investigate the issue.
+
+        **Security vulnerabilities:** Do not open a public issue. Follow the
+        [security disclosure process](../../SECURITY.md) instead.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of the bug.
+      placeholder: What went wrong?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: |
+        Provide a minimal sequence of steps that reliably triggers the bug.
+        Include relevant CLI commands, API calls, or configuration snippets.
+      placeholder: |
+        1. Configure a run with seed domain example.com
+        2. Execute `expose run --seed domain:example.com`
+        3. Observe error in output
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen instead.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: EXPOSE Version
+      description: Output of `expose --version` or the container image tag.
+      placeholder: "1.2.0"
+    validations:
+      required: false
+
+  - type: input
+    id: environment
+    attributes:
+      label: OS and Python Version
+      description: Operating system and Python version (e.g., Ubuntu 24.04, Python 3.12.3).
+      placeholder: "Ubuntu 24.04, Python 3.12.3"
+    validations:
+      required: false
+
+  - type: input
+    id: collectors
+    attributes:
+      label: Collector IDs Involved
+      description: If the bug involves specific collectors, list their IDs.
+      placeholder: "ct-crtsh, active-dns"
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      description: Paste any relevant log output or error tracebacks. Redact secrets and internal hostnames before posting.
+      render: text
+    validations:
+      required: false

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions and Support
+    url: https://github.com/korlogos/expose/discussions/categories/q-a
+    about: Ask usage questions, get help with configuration, or discuss deployment scenarios.
+  - name: Security Vulnerabilities
+    url: https://github.com/korlogos/expose/security/policy
+    about: Report security vulnerabilities through the coordinated disclosure process. Do not open a public issue.

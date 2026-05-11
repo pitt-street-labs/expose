@@ -1,0 +1,31 @@
+title: "[Q&A] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ask questions about EXPOSE usage, configuration, deployment, or
+        development. The community and maintainers monitor this category.
+
+        Before posting, check [existing discussions](../discussions) and the
+        [documentation](../../docs/) to see if your question has already been
+        answered.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What would you like to know?
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: What I Have Tried
+      description: |
+        Describe what you have already attempted or reviewed. Include relevant
+        configuration snippets, error messages, or documentation sections you
+        consulted.
+    validations:
+      required: false

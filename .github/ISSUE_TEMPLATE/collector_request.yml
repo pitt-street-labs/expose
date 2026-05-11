@@ -1,0 +1,96 @@
+name: Collector Request
+description: Request a new data source collector for EXPOSE.
+labels: ["type:collector"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        EXPOSE collectors are the pipeline's interface to external data sources.
+        Use this template to propose a new collector. Before submitting, review
+        the [specification](../../docs/SPEC.md) for collector architecture and
+        tier definitions.
+
+  - type: input
+    id: source_name
+    attributes:
+      label: Data Source Name
+      description: The name of the external data source this collector would query.
+      placeholder: "Shodan"
+    validations:
+      required: true
+
+  - type: input
+    id: source_url
+    attributes:
+      label: Data Source URL
+      description: Link to the data source's website or API documentation.
+      placeholder: "https://developer.shodan.io/api"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Tier Classification
+      description: |
+        Select the appropriate collection tier per the EXPOSE tiered-collection
+        model. Tier 1 collects only from public passive sources. Tier 2 sends
+        targeted queries to the seed (e.g., DNS lookups). Tier 3 performs active
+        probing against discovered assets.
+      options:
+        - Tier 1 Passive
+        - Tier 2 Targeted
+        - Tier 3 Active
+    validations:
+      required: true
+
+  - type: dropdown
+    id: credentials
+    attributes:
+      label: Credentials Required
+      description: Does this data source require API keys or other credentials to access?
+      options:
+        - "Yes"
+        - "No"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: seed_types
+    attributes:
+      label: Seed Types Supported
+      description: Which seed types can this collector accept as input?
+      options:
+        - label: Domain
+        - label: IP
+        - label: ASN
+        - label: Organization
+        - label: CIDR
+        - label: Cloud Account
+
+  - type: textarea
+    id: observations
+    attributes:
+      label: Observation Types Produced
+      description: |
+        What types of observations or entities does this collector produce?
+        For example: subdomains, IP addresses, open ports, TLS certificates,
+        WHOIS records, cloud resource identifiers.
+      placeholder: |
+        - Subdomains
+        - Open ports and services
+        - TLS certificate metadata
+    validations:
+      required: false
+
+  - type: textarea
+    id: value
+    attributes:
+      label: Why This Source Adds Value
+      description: |
+        Explain why this data source is worth integrating. Consider: coverage
+        gaps it fills, unique data it provides, how it complements existing
+        collectors, and any rate limits or licensing constraints operators
+        should be aware of.
+    validations:
+      required: true

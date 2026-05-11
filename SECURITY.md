@@ -1,8 +1,8 @@
 # Security Policy
 
-This policy governs vulnerability reporting and response for the EXPOSE engine. It is aligned with [`ETHICS.md`](ETHICS.md), which defines intended use, non-goals, and scope posture: security disclosures whose remediation changes what is collected, retained, or how authorization scope is enforced trigger an ad-hoc ETHICS review (see `ETHICS.md` § Trigger events for ad-hoc review).
+This policy governs vulnerability reporting and response for EXPOSE. It is aligned with [`ETHICS.md`](ETHICS.md), which defines intended use, non-goals, and scope posture: security disclosures whose remediation changes what is collected, retained, or how authorization scope is enforced trigger an ad-hoc ETHICS review (see `ETHICS.md`).
 
-## Supported versions
+## Supported Versions
 
 | Version | Supported |
 |---------|-----------|
@@ -11,15 +11,15 @@ This policy governs vulnerability reporting and response for the EXPOSE engine. 
 
 Security fixes are applied to the current development branch only. Once EXPOSE reaches 1.0, this table will expand to cover LTS and maintenance release lines.
 
-## Reporting a vulnerability
+## Reporting a Vulnerability
 
-If you discover a security vulnerability in EXPOSE, please report it privately. Do not file public GitHub issues for security vulnerabilities.
+If you discover a security vulnerability in EXPOSE, please report it privately. **Do not file public GitHub issues for security vulnerabilities.**
 
-**Preferred channel:** GitHub Security Advisory at https://github.com/korlogos/expose/security/advisories/new (private).
+**Preferred:** [GitHub Security Advisory](https://github.com/pitt-street-labs/expose/security/advisories/new) (private, end-to-end).
 
-**Alternate channel:** Email `security@korlogos.com` with GPG encryption preferred (see [Security contacts](#security-contacts) below).
+**Alternate:** Email `security@korlogos.com` with GPG encryption preferred (key below).
 
-### What to include
+### What to Include
 
 - Description of the vulnerability and its impact.
 - Steps to reproduce (proof-of-concept code, test scenarios, configuration excerpts).
@@ -30,16 +30,18 @@ If you discover a security vulnerability in EXPOSE, please report it privately. 
 
 ### Response SLA
 
+| Severity | Target Fix | Maximum |
+|----------|-----------|---------|
+| Critical / High | 30 days | 90 days |
+| Medium | 90 days | Best effort |
+| Low | Next minor release | 180 days |
+
 - **Initial acknowledgment:** within 48 hours of receipt.
 - **Triage and severity classification:** within 5 business days.
-- **Fix or mitigation:**
-  - Critical/High severity: 30 days target, 90 days maximum.
-  - Medium severity: 90 days target.
-  - Low severity: 180 days or next minor release.
 
-These are targets; we will communicate proactively if a specific case will exceed them.
+These are targets. We will communicate proactively if a specific case will exceed them.
 
-### Coordinated disclosure
+### Coordinated Disclosure
 
 We follow a coordinated disclosure model with a **90-day disclosure window** from report acceptance. The reporter and maintainers may agree on a different timeline if circumstances warrant it.
 
@@ -51,100 +53,106 @@ After a fix is available:
 
 If a vulnerability is being actively exploited in the wild, we will accelerate disclosure with mitigations.
 
-### Reporter credit
+### Reporter Credit
 
-Reporters are credited by name (or handle) in the published advisory and in the [Hall of fame](#hall-of-fame) section below, unless they request anonymity. We will confirm your preferred attribution before publication.
+Reporters are credited by name (or handle) in the published advisory and in the [Hall of Fame](#hall-of-fame) section below, unless they request anonymity. We will confirm your preferred attribution before publication.
 
-## Severity classification
+## Severity Classification
 
 We use a CVSS-aligned classification:
 
-- **Critical** — remote unauthenticated exploit producing data exfiltration, code execution, or tenant boundary compromise.
-- **High** — authenticated exploit producing similar consequences, or unauthenticated denial of service against production deployments.
-- **Medium** — exploit requiring local access or unusual conditions, or information disclosure of non-secret data.
-- **Low** — best-practice deviations, hardening opportunities.
+| Level | Description |
+|-------|-------------|
+| **Critical** | Remote unauthenticated exploit producing data exfiltration, code execution, or tenant boundary compromise. |
+| **High** | Authenticated exploit producing similar consequences, or unauthenticated denial of service against production deployments. |
+| **Medium** | Exploit requiring local access or unusual conditions, or information disclosure of non-secret data. |
+| **Low** | Best-practice deviations, hardening opportunities. |
 
-## Security scope
+## Security Scope
 
-### In scope
+### In Scope
 
-The following components are covered by this security policy:
+- **The EXPOSE engine** -- all source code in this repository.
+- **Collector modules** -- both builtin collectors and the registered-plugin framework.
+- **Pipeline orchestration and dispatch** -- the NATS JetStream broker, worker lifecycle, and run coordination.
+- **Sanitization and canonicalization layer** -- input sanitization before graph insertion (SPEC Section 7).
+- **Authentication and authorization** -- bearer token validation, tenant isolation enforcement, and scope gating.
+- **Container images and supply chain** -- published images, cosign signatures, SBOMs, and build provenance.
+- **Schemas and example rule packs** -- JSON Schema definitions and bundled examples.
+- **Helm charts** -- deployment manifests published from this repository.
 
-- **The EXPOSE engine** — all source code in this repository.
-- **Collector modules** — both builtin collectors and the registered-plugin framework (`src/expose/collectors/`).
-- **Pipeline orchestration and dispatch** — the NATS JetStream broker, worker lifecycle, and run coordination (`src/expose/broker/`).
-- **Sanitization and canonicalization layer** — input sanitization before graph insertion (SPEC §7, `src/expose/sanitization/`).
-- **Authentication and authorization** — bearer token validation, tenant isolation enforcement, and scope gating when implemented (ADR-007, ADR-008).
-- **Container images and supply chain** — published images, cosign signatures, SBOMs, and build provenance.
-- **Schemas and example rule packs** — JSON Schema definitions (`schemas/`) and bundled examples (`examples/`).
-- **Helm charts** — deployment manifests published from this repository (`deploy/helm-chart/`).
+### Out of Scope
 
-### Out of scope
-
-- **Environment 2 (downstream LLM analysis).** EXPOSE is Environment 1 only. Whatever tooling operators use for narrative analysis, red team briefing, or open-ended reasoning is outside our security boundary. See `ETHICS.md` § Two-environment design.
+- **Environment 2 (downstream LLM analysis).** EXPOSE is Environment 1 only. Whatever tooling operators use for narrative analysis, red team briefing, or open-ended reasoning is outside our security boundary. See `ETHICS.md`.
 - **Operator infrastructure.** Kubernetes cluster configuration, network policies, cloud IAM, host OS hardening, and similar deployment-environment concerns are the operator's responsibility.
 - **Third-party collector API providers.** Vulnerabilities in Censys, Shodan, crt.sh, or other upstream data sources should be reported to those providers directly.
 - **Customer-specific rule packs** that live in private repositories outside this codebase.
-- **Social engineering of project maintainers.** Phishing, pretexting, or other social-engineering attacks targeting maintainers are not in scope for this policy.
+- **Social engineering of project maintainers.** Phishing, pretexting, or other social-engineering attacks targeting maintainers are not in scope.
 - **Vulnerabilities in dependencies.** Report those upstream; we will update our pinned versions promptly. If a dependency vulnerability creates an exploitable path through EXPOSE, that is in scope.
-- **Operator misconfigurations** — unless caused by misleading defaults or unclear documentation in our code.
+- **Operator misconfigurations** -- unless caused by misleading defaults or unclear documentation in our code.
 
-## Security design principles
+## Security Design Principles
 
-- **Tenant isolation enforced at every data path.** Entity, relationship, and run data are scoped by `tenant_id` at the repository layer. Cross-tenant queries are architecturally prevented, not just policy-gated (ADR-007).
-- **FIPS-validated cryptography only.** All hashing, fingerprinting, and signature operations use FIPS 140-2/3 validated algorithms. Non-FIPS primitives are banned by CI gate and test enforcement (ADR-010).
-- **External content always sanitized before graph insertion.** Data from adversary-controllable sources (certificate SANs, HTTP banners, DNS TXT records, WHOIS fields) passes through the sanitization layer before entering the observation graph (SPEC §7).
-- **Tier-3 active probing gated by attribution and scope.** Active reconnaissance (DNS resolution, TLS handshakes, HTTP fingerprinting) is only performed against assets that pass attribution confidence thresholds within the operator's declared authorization scope (ADR-008).
-- **Container images signed with cosign.** Published images carry keyless cosign signatures and SLSA provenance attestations (when published; see [Known limitations](#known-limitations)).
-- **Secrets never logged; credentials just-in-time fetched.** The secrets backend abstraction ensures credentials are retrieved at the point of use and never serialized to logs, artifacts, or diagnostic output.
+**Tenant isolation enforced at every data path.** Entity, relationship, and run data are scoped by `tenant_id` at the repository layer. Cross-tenant queries are architecturally prevented, not just policy-gated.
 
-## Known limitations
+**FIPS-validated cryptography only.** All hashing, fingerprinting, and signature operations use FIPS 140-2/3 validated algorithms. Non-FIPS primitives are banned by CI gate and test enforcement.
 
-The following are known gaps in the current development state. They are tracked and will be addressed in upcoming sprints:
+**External content always sanitized before graph insertion.** Data from adversary-controllable sources (certificate SANs, HTTP banners, DNS TXT records, WHOIS fields) passes through the sanitization layer before entering the observation graph.
 
-- **In-memory secrets backend is dev-only.** The `InMemoryBackend` stores credentials in process memory without encryption. Production deployments require a real secrets backend (Vault, KMS). See issue #8.
-- **Bearer token authentication not yet implemented.** API authentication is planned for Sprint 7+. Current development builds have no authentication layer.
-- **Cosign signing not active in lab deployments.** Container image signing infrastructure is wired in CI but not exercised in internal lab builds. See issue #3.
-- **Rate limiting is per-collector, not global.** Each collector enforces its own rate limits. There is no fleet-level throttle across all collectors in a run. Operators deploying at scale should implement external rate limiting.
+**Three-tier collector model with attribution gating.** Passive collection (Tier 1) has no target interaction. Semi-passive collection (Tier 2) queries public databases. Active probing (Tier 3) is gated by attribution confidence thresholds within the operator's declared authorization scope -- preventing accidental probing of unrelated infrastructure.
 
-## Verifying signed artifacts
+**Container images signed with cosign.** Published images carry keyless cosign signatures and SLSA provenance attestations.
+
+**Secrets never logged; credentials fetched just-in-time.** The secrets backend abstraction ensures credentials are retrieved at the point of use and never serialized to logs, artifacts, or diagnostic output.
+
+## SBOM and Supply Chain
+
+We publish SBOMs (SPDX format) for all container images via `syft`. Build provenance attestations target SLSA Level 2, with Level 3 as an ongoing improvement target.
+
+SBOM generation is documented in `scripts/generate-sbom.sh`. Signing configuration is documented in `deploy/cosign-keypair-setup.md`.
+
+## Verifying Signed Artifacts
 
 Production artifacts (container images, releases) are signed via cosign keyless. To verify:
 
 ```bash
 # Verify a container image
-cosign verify ghcr.io/korlogos/expose:<tag> \
-    --certificate-identity-regexp '^https://github.com/korlogos/expose/' \
+cosign verify ghcr.io/pitt-street-labs/expose:<tag> \
+    --certificate-identity-regexp '^https://github.com/pitt-street-labs/expose/' \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
 # Verify a canonical artifact
 cosign verify-blob \
     --signature canonical.json.gz.sig \
     canonical.json.gz \
-    --certificate-identity-regexp '^https://github.com/korlogos/expose/' \
+    --certificate-identity-regexp '^https://github.com/pitt-street-labs/expose/' \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-Verification details and example workflows are documented in `docs/SPEC.md` §9.4.
+## Known Limitations
 
-## SBOM and supply chain
+The following are known gaps in the current development state, tracked for resolution:
 
-We publish SBOMs (SPDX format) for all container images via `syft`. Build provenance attestations target SLSA Level 2 with Level 3 as ongoing improvement.
+- **In-memory secrets backend is dev-only.** The `InMemoryBackend` stores credentials in process memory without encryption. Production deployments require a real secrets backend (Vault, KMS).
+- **Bearer token authentication not yet implemented.** API authentication is planned for a future sprint. Current development builds have no authentication layer.
+- **Rate limiting is per-collector, not global.** Each collector enforces its own rate limits. There is no fleet-level throttle across all collectors in a run. Operators deploying at scale should implement external rate limiting.
 
-## Security contacts
+## Security Contacts
 
-- **Email:** `security@korlogos.com`
-- **GPG key:** GPG key for encrypted reports will be published with the first public release.
-- **GitHub Security Advisories:** https://github.com/korlogos/expose/security/advisories/new
+| Channel | Address |
+|---------|---------|
+| GitHub Security Advisories | [File a private advisory](https://github.com/pitt-street-labs/expose/security/advisories/new) |
+| Email | `security@korlogos.com` |
+| GPG key | Published with the first public release |
 
-For general conduct concerns related to EXPOSE's intended use, contact `conduct@korlogos.com` (see `ETHICS.md`).
+For conduct concerns related to EXPOSE's intended use, contact `conduct@korlogos.com` (see `ETHICS.md`).
 
-## Bug bounty
+## Bug Bounty
 
 We do not currently offer a bug bounty program. We will revisit this when the project's deployment scale and funding justify it.
 
-## Hall of fame
+## Hall of Fame
 
-Reporters credited here when they consent to public credit:
+Reporters credited here when they consent to public attribution:
 
-(none yet — project pre-release)
+(none yet -- project pre-release)

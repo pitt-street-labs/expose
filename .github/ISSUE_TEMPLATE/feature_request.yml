@@ -1,0 +1,55 @@
+name: Feature Request
+description: Suggest a new feature or enhancement for EXPOSE.
+labels: ["type:feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting an improvement. Please describe the problem you
+        are trying to solve and the solution you have in mind. Reviewing
+        [ETHICS.md](../../ETHICS.md) before submitting helps ensure the request
+        falls within the project's intended scope.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Description
+      description: |
+        What problem does this feature solve? Describe the workflow friction,
+        missing capability, or unmet need.
+      placeholder: When I try to ..., I cannot ... because ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: |
+        Describe the feature or change you would like to see. Be as specific as
+        possible about the expected behavior, inputs, and outputs.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: persona
+    attributes:
+      label: Which Persona Benefits
+      description: Select the primary user persona this feature serves.
+      options:
+        - Red Team Operator
+        - Security Director
+        - Threat Researcher
+        - All
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: |
+        Have you considered other approaches or workarounds? Describe any
+        alternatives you evaluated and why they fall short.
+    validations:
+      required: false
