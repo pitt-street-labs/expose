@@ -32,6 +32,7 @@ import expose.collectors.builtin.scan_shodan
 import expose.collectors.builtin.wayback_machine
 import expose.collectors.builtin.sip_discovery
 import expose.collectors.builtin.waf_detection  # noqa: F401
+import expose.collectors.builtin.waf_origin_discovery  # noqa: F401
 import expose.collectors.builtin.wikipedia_edits  # noqa: F401
 import expose.collectors.builtin.git_commit_emails  # noqa: F401
 import expose.collectors.builtin.paste_monitor  # noqa: F401

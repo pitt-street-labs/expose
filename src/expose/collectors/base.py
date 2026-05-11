@@ -110,6 +110,7 @@ class ObservationType(StrEnum):
     TLS_HANDSHAKE = "tls_handshake"
     HTTP_RESPONSE = "http_response"
     PORT_SCAN_RESULT = "port_scan_result"
+    WAF_ORIGIN_DISCOVERY = "waf_origin_discovery"
 
 
 class ObservationSubject(StrictModel):

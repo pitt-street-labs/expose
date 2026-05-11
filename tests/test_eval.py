@@ -17,6 +17,24 @@ Coverage:
 13. load_dataset raises on missing file.
 14. load_all_datasets raises on non-directory path.
 15. EvalRunner.run_all returns per-dataset metrics.
+16. Custom attribution function injection.
+17. Frozen models are immutable.
+18. EvalMetrics is frozen.
+19. Sample datasets load cleanly from examples/.
+20. load_dataset_by_category loads a specific category.
+21. load_dataset_by_category rejects unknown categories.
+22. load_datasets_by_categories loads all four categories.
+23. EvalReport contains per-category precision/recall/F1.
+24. EvalReport confusion matrix is well-formed.
+25. EvalReport timing fields are populated.
+26. RuleEvaluator integration via from_rule_evaluator.
+27. CLI eval --all runs without error.
+28. CLI eval --dataset runs a single category.
+29. CLI exit code 0 when accuracy >= threshold.
+30. CLI exit code 1 when accuracy < threshold.
+31. CLI --json-output produces valid JSON.
+32. CLI rejects --dataset + --all together.
+33. CLI requires --dataset or --all.
 
 Refs #17.
 """
@@ -28,11 +46,20 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from click.testing import CliRunner
 from pydantic import ValidationError
 
-from expose.eval.datasets import EvalCase, EvalDataset, load_all_datasets, load_dataset
+from expose.eval.datasets import (
+    EVAL_CATEGORIES,
+    EvalCase,
+    EvalDataset,
+    load_all_datasets,
+    load_dataset,
+    load_dataset_by_category,
+    load_datasets_by_categories,
+)
 from expose.eval.metrics import EvalMetrics, compute_metrics
-from expose.eval.runner import EvalResult, EvalRunner
+from expose.eval.runner import ConfusionMatrix, EvalReport, EvalResult, EvalRunner
 
 # === Fixtures ================================================================
 
@@ -467,3 +494,314 @@ async def test_sample_datasets_load(repo_root: Path) -> None:
         assert len(ds.cases) >= 1
         for case in ds.cases:
             assert case.expected_confidence_min <= case.expected_confidence_max
+
+
+# === 20. load_dataset_by_category loads a specific category =================
+
+
+async def test_load_dataset_by_category(repo_root: Path) -> None:
+    """load_dataset_by_category returns the correct dataset for a known category."""
+    eval_dir = repo_root / "examples" / "eval-datasets"
+    if not eval_dir.is_dir():
+        pytest.skip("examples/eval-datasets not found")
+    ds = load_dataset_by_category(eval_dir, "confirmed_yours")
+    assert ds.category == "confirmed_yours"
+    assert len(ds.cases) >= 1
+
+
+# === 21. load_dataset_by_category rejects unknown categories ================
+
+
+async def test_load_dataset_by_category_unknown() -> None:
+    """load_dataset_by_category raises ValueError for bogus category."""
+    with pytest.raises(ValueError, match="Unknown eval category"):
+        load_dataset_by_category(Path("/tmp"), "nonexistent_category")
+
+
+# === 22. load_datasets_by_categories loads all four =========================
+
+
+async def test_load_datasets_by_categories_all(repo_root: Path) -> None:
+    """load_datasets_by_categories with None loads all four categories."""
+    eval_dir = repo_root / "examples" / "eval-datasets"
+    if not eval_dir.is_dir():
+        pytest.skip("examples/eval-datasets not found")
+    datasets = load_datasets_by_categories(eval_dir)
+    assert len(datasets) == 4
+    categories = {ds.category for ds in datasets}
+    assert categories == set(EVAL_CATEGORIES)
+
+
+# === 23. EvalReport contains per-category precision/recall/F1 ===============
+
+
+async def test_eval_report_precision_recall_f1() -> None:
+    """run_report produces an EvalReport with per-category P/R/F1."""
+    # Build two minimal datasets.
+    ds_yours = EvalDataset.model_validate(_make_dataset_dict(
+        name="cy", category="confirmed_yours",
+    ))
+    not_yours_case = {
+        "case_id": "cn-001",
+        "description": "No observations",
+        "entity_type": "ip",
+        "canonical_identifier": "192.0.2.99",
+        "observations": [],
+        "expected_attribution": "not_yours",
+        "expected_confidence_min": 0.0,
+        "expected_confidence_max": 0.2,
+    }
+    ds_not = EvalDataset.model_validate(_make_dataset_dict(
+        name="cn", category="confirmed_not_yours", cases=[not_yours_case],
+    ))
+
+    runner = EvalRunner()
+    report = await runner.run_report([ds_yours, ds_not])
+
+    assert isinstance(report, EvalReport)
+    assert "cy" in report.categories
+    assert "cn" in report.categories
+
+    cy_cat = report.categories["cy"]
+    assert 0.0 <= cy_cat.precision <= 1.0
+    assert 0.0 <= cy_cat.recall <= 1.0
+    assert 0.0 <= cy_cat.f1 <= 1.0
+
+    assert 0.0 <= report.overall_precision <= 1.0
+    assert 0.0 <= report.overall_recall <= 1.0
+    assert 0.0 <= report.overall_f1 <= 1.0
+
+
+# === 24. Confusion matrix is well-formed ====================================
+
+
+async def test_confusion_matrix_well_formed() -> None:
+    """ConfusionMatrix covers all four tiers and sums to total results."""
+    results = [
+        EvalResult(
+            case_id="a", expected_attribution="confirmed",
+            actual_attribution="confirmed",
+            expected_confidence_range=(0.9, 1.0),
+            actual_confidence=0.98, correct=True, duration_ms=1.0,
+        ),
+        EvalResult(
+            case_id="b", expected_attribution="not_yours",
+            actual_attribution="high",
+            expected_confidence_range=(0.0, 0.2),
+            actual_confidence=0.80, correct=False, duration_ms=1.0,
+        ),
+    ]
+    cm = ConfusionMatrix.from_results(results)
+    assert set(cm.matrix.keys()) == {"confirmed", "high", "medium", "not_yours"}
+    total = sum(
+        cm.matrix[exp][act]
+        for exp in cm.matrix
+        for act in cm.matrix[exp]
+    )
+    assert total == 2
+    assert cm.matrix["confirmed"]["confirmed"] == 1
+    assert cm.matrix["not_yours"]["high"] == 1
+
+
+# === 25. EvalReport timing fields populated =================================
+
+
+async def test_eval_report_timing() -> None:
+    """run_report populates wall-clock timing fields."""
+    ds = EvalDataset.model_validate(_make_dataset_dict())
+    runner = EvalRunner()
+    report = await runner.run_report([ds])
+
+    assert report.total_wall_clock_ms >= 0.0
+    for cat_report in report.categories.values():
+        assert cat_report.total_wall_clock_ms >= 0.0
+        assert cat_report.mean_wall_clock_ms >= 0.0
+
+
+# === 26. RuleEvaluator integration via from_rule_evaluator ==================
+
+
+async def test_from_rule_evaluator() -> None:
+    """EvalRunner.from_rule_evaluator wraps a RuleEvaluator correctly."""
+    from expose.pipeline.rule_evaluator import RuleEvaluator
+    from expose.types.rulepack import (
+        Action,
+        AttributionRule,
+        CategoryThresholds,
+        LeadScoreFormula,
+        LeadScoreWeights,
+        Outcome,
+        Predicate,
+        PredicateCondition,
+        RulePack,
+        TierThresholds,
+    )
+
+    # Minimal rule pack: any entity with 1+ collector observations -> promote.
+    pack = RulePack(
+        pack_id="test-pack",
+        pack_version="0.1.0",
+        description="Minimal test pack",
+        attribution_rules=[
+            AttributionRule(
+                rule_id="always-promote",
+                rule_version="1.0.0",
+                description="Promote everything observed",
+                when=PredicateCondition(
+                    predicate=Predicate.TARGET_OBSERVED_BY_COLLECTORS_COUNT_GTE,
+                    params={"count": 1},
+                ),
+                then=Action(outcome=Outcome.PROMOTE, confidence_delta=1.0),
+                priority=10,
+            ),
+        ],
+        lead_score_formula=LeadScoreFormula(
+            formula_version="0.1.0",
+            weights=LeadScoreWeights(),
+            modifiers=[],
+            category_thresholds=CategoryThresholds(),
+        ),
+        tier_thresholds=TierThresholds(),
+    )
+    evaluator = RuleEvaluator(pack)
+    runner = EvalRunner.from_rule_evaluator(evaluator)
+
+    ds = EvalDataset.model_validate(_make_dataset_dict())
+    results = await runner.run_dataset(ds)
+    assert len(results) == 1
+    # The case has 3 observations with collector_ids, so rule fires -> confirmed.
+    assert results[0].actual_attribution == "confirmed"
+    assert results[0].actual_confidence == 1.0
+
+
+# === 27-33. CLI integration tests ============================================
+
+
+class TestEvalCLI:
+    """CLI integration tests for ``expose eval``."""
+
+    def _invoke(self, args: list[str]) -> Any:
+        """Invoke the CLI and return the Click Result."""
+        from expose.cli import main as cli_main
+
+        runner = CliRunner()
+        return runner.invoke(cli_main, args)
+
+    # --- 27. CLI eval --all runs without error ---
+
+    def test_cli_eval_all(self, repo_root: Path) -> None:
+        """expose eval --all runs and produces output."""
+        eval_dir = repo_root / "examples" / "eval-datasets"
+        if not eval_dir.is_dir():
+            pytest.skip("examples/eval-datasets not found")
+        result = self._invoke(["eval", "--all", "--dataset-dir", str(eval_dir)])
+        # Stub will get some wrong -> could be exit 0 or 1, but not 2.
+        assert result.exit_code in (0, 1)
+        assert "Accuracy:" in result.output or "overall_accuracy" in result.output
+
+    # --- 28. CLI eval --dataset runs a single category ---
+
+    def test_cli_eval_single_dataset(self, repo_root: Path) -> None:
+        """expose eval --dataset confirmed_yours runs only that category."""
+        eval_dir = repo_root / "examples" / "eval-datasets"
+        if not eval_dir.is_dir():
+            pytest.skip("examples/eval-datasets not found")
+        result = self._invoke([
+            "eval", "--dataset", "confirmed_yours",
+            "--dataset-dir", str(eval_dir),
+        ])
+        assert result.exit_code in (0, 1)
+        assert "confirmed_yours" in result.output
+
+    # --- 29. CLI exit code 0 when accuracy >= threshold ---
+
+    def test_cli_exit_code_pass(self, tmp_path: Path) -> None:
+        """Exit code 0 when accuracy meets threshold."""
+        # Build a dataset the stub will get 100% right.
+        ds = _make_dataset_dict(name="confirmed_yours", category="confirmed_yours")
+        (tmp_path / "confirmed_yours.json").write_text(json.dumps(ds), encoding="utf-8")
+
+        result = self._invoke([
+            "eval", "--dataset", "confirmed_yours",
+            "--dataset-dir", str(tmp_path),
+            "--threshold", "0.5",
+        ])
+        assert result.exit_code == 0
+        assert "PASS" in result.output
+
+    # --- 30. CLI exit code 1 when accuracy < threshold ---
+
+    def test_cli_exit_code_fail(self, tmp_path: Path) -> None:
+        """Exit code 1 when accuracy is below threshold."""
+        # Build a dataset the stub will get wrong (expects confirmed but has 0 obs).
+        bad_case = {
+            "case_id": "force-fail",
+            "description": "No observations but expects confirmed",
+            "entity_type": "ip",
+            "canonical_identifier": "192.0.2.1",
+            "observations": [],
+            "expected_attribution": "confirmed",
+            "expected_confidence_min": 0.95,
+            "expected_confidence_max": 1.0,
+        }
+        ds = _make_dataset_dict(
+            name="confirmed_yours", category="confirmed_yours", cases=[bad_case],
+        )
+        (tmp_path / "confirmed_yours.json").write_text(json.dumps(ds), encoding="utf-8")
+
+        result = self._invoke([
+            "eval", "--dataset", "confirmed_yours",
+            "--dataset-dir", str(tmp_path),
+            "--threshold", "1.0",
+        ])
+        assert result.exit_code == 1
+        assert "FAIL" in result.output
+
+    # --- 31. CLI --json-output produces valid JSON ---
+
+    def test_cli_json_output(self, tmp_path: Path) -> None:
+        """--json-output emits a valid EvalReport JSON."""
+        ds = _make_dataset_dict(name="confirmed_yours", category="confirmed_yours")
+        (tmp_path / "confirmed_yours.json").write_text(json.dumps(ds), encoding="utf-8")
+
+        result = self._invoke([
+            "eval", "--dataset", "confirmed_yours",
+            "--dataset-dir", str(tmp_path),
+            "--json-output",
+        ])
+        # Extract JSON from output -- skip preamble and trailing PASS/FAIL lines.
+        lines = result.output.strip().split("\n")
+        json_start = 0
+        json_end = len(lines)
+        for i, line in enumerate(lines):
+            if line.strip().startswith("{"):
+                json_start = i
+                break
+        # Find the closing brace of the JSON object.
+        for i in range(len(lines) - 1, json_start - 1, -1):
+            if lines[i].strip() == "}":
+                json_end = i + 1
+                break
+        json_text = "\n".join(lines[json_start:json_end])
+        parsed = json.loads(json_text)
+        assert "categories" in parsed
+        assert "confusion_matrix" in parsed
+        assert "overall_accuracy" in parsed
+        assert "overall_precision" in parsed
+        assert "overall_f1" in parsed
+
+    # --- 32. CLI rejects --dataset + --all together ---
+
+    def test_cli_rejects_dataset_plus_all(self) -> None:
+        """Specifying both --dataset and --all is an error."""
+        result = self._invoke([
+            "eval", "--dataset", "confirmed_yours", "--all",
+        ])
+        assert result.exit_code == 2
+
+    # --- 33. CLI requires --dataset or --all ---
+
+    def test_cli_requires_dataset_or_all(self) -> None:
+        """Omitting both --dataset and --all is an error."""
+        result = self._invoke(["eval"])
+        assert result.exit_code == 2

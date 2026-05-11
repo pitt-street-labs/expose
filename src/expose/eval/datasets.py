@@ -102,3 +102,47 @@ def load_all_datasets(directory: Path) -> list[EvalDataset]:
     for json_path in sorted(directory.glob("*.json")):
         datasets.append(load_dataset(json_path))
     return datasets
+
+
+# The four canonical evaluation categories.
+EVAL_CATEGORIES: tuple[str, ...] = (
+    "confirmed_yours",
+    "confirmed_not_yours",
+    "ambiguous",
+    "adversarial",
+)
+
+
+def load_dataset_by_category(
+    directory: Path,
+    category: str,
+) -> EvalDataset:
+    """Load the dataset file for a specific evaluation category.
+
+    Looks for ``<category>.json`` inside *directory*.  Raises
+    ``FileNotFoundError`` if the file does not exist, or
+    ``ValueError`` if *category* is not one of the four canonical
+    categories.
+    """
+    if category not in EVAL_CATEGORIES:
+        msg = (
+            f"Unknown eval category '{category}'. "
+            f"Valid categories: {', '.join(EVAL_CATEGORIES)}"
+        )
+        raise ValueError(msg)
+
+    path = directory / f"{category}.json"
+    return load_dataset(path)
+
+
+def load_datasets_by_categories(
+    directory: Path,
+    categories: list[str] | None = None,
+) -> list[EvalDataset]:
+    """Load datasets for the given categories (or all four if *categories* is ``None``).
+
+    Returns datasets in the order of *categories*.  Raises ``ValueError``
+    for unknown categories and ``FileNotFoundError`` for missing files.
+    """
+    targets = list(categories) if categories else list(EVAL_CATEGORIES)
+    return [load_dataset_by_category(directory, cat) for cat in targets]

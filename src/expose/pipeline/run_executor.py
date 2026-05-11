@@ -35,7 +35,7 @@ from collections.abc import Callable
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from expose.collectors.base import Observation, Seed
+from expose.collectors.base import Observation, ObservationType, Seed
 from expose.compliance.misuse_detection import MisuseAlert, MisuseDetector
 from expose.pipeline.collector_filter import filter_collectors
 from expose.pipeline.dispatcher import clear_health_cache
@@ -1087,6 +1087,107 @@ class RunExecutor:
                 *[_enrich_one(obs) for obs in unique_obs],
             )
             enrichment_count = sum(1 for r in results if r)
+
+        # --- Stage 4c: Vision analysis (screenshot classification) ------
+        #
+        # When the enrichment pipeline is available (implying an LLM client),
+        # collect HTTP_RESPONSE observations that carry HTML evidence blobs
+        # (from the screenshot-vision collector) and run them through the
+        # VisionAnalyzer for page-type classification, technology detection,
+        # and security-indicator extraction.  Results are stored as entity
+        # properties prefixed with ``_vision_``.
+        #
+        # Opt-in: skipped entirely when no enrichment pipeline (no LLM client).
+        # Capped at 10 observations per batch to limit LLM spend.
+        if self._enrichment is not None:
+            try:
+                from expose.pipeline.vision import VisionAnalyzer  # noqa: PLC0415
+
+                # Build a VisionAnalyzer using the same LLM client that
+                # the enrichment pipeline uses.
+                llm_client = getattr(self._enrichment, "_client", None)
+                if llm_client is not None:
+                    vision = VisionAnalyzer(llm_client=llm_client)
+                    _MAX_VISION_PER_BATCH = 10  # noqa: N806
+
+                    # Collect screenshot-eligible observations: HTTP_RESPONSE
+                    # observations with HTML evidence blobs.
+                    screenshot_obs = [
+                        obs for obs in observations
+                        if (
+                            obs.observation_type == ObservationType.HTTP_RESPONSE
+                            and obs.evidence_blob is not None
+                            and obs.evidence_blob_content_type == "text/html"
+                        )
+                    ][:_MAX_VISION_PER_BATCH]
+
+                    for obs in screenshot_obs:
+                        try:
+                            banner_text = (
+                                obs.evidence_blob.decode("utf-8", errors="replace")
+                                if obs.evidence_blob
+                                else None
+                            )
+                            url = obs.structured_payload.get(
+                                "url", obs.subject.identifier_value
+                            )
+                            analysis = await vision.analyze_screenshot(
+                                banner_text=banner_text,
+                                url=url,
+                                headers=obs.structured_payload.get("headers"),
+                                tenant_id=tenant_id,
+                                run_id=run_id,
+                            )
+                            if analysis is not None:
+                                entity = entity_map.get(
+                                    obs.subject.identifier_value
+                                )
+                                if entity is not None:
+                                    updated_props = dict(entity.properties or {})
+                                    updated_props["_vision_page_type"] = (
+                                        analysis.page_type
+                                    )
+                                    updated_props["_vision_technologies"] = (
+                                        analysis.technologies_detected
+                                    )
+                                    updated_props["_vision_indicators"] = [
+                                        {
+                                            "type": ind.indicator_type,
+                                            "detail": ind.detail,
+                                            "severity": ind.severity,
+                                        }
+                                        for ind in analysis.security_indicators
+                                    ]
+                                    updated_props["_vision_confidence"] = (
+                                        analysis.visual_confidence
+                                    )
+                                    await self._entity_repo.create_or_update(
+                                        tenant_id=TenantId(tenant_id),
+                                        entity_type=entity.entity_type,
+                                        canonical_identifier=(
+                                            entity.canonical_identifier
+                                        ),
+                                        properties=updated_props,
+                                        attribution_status=(
+                                            entity.attribution_status
+                                        ),
+                                        attribution_confidence=(
+                                            entity.attribution_confidence
+                                        ),
+                                    )
+                                    self._log(
+                                        "info",
+                                        f"Vision: {entity.canonical_identifier} "
+                                        f"classified as {analysis.page_type} "
+                                        f"({analysis.visual_confidence:.2f})",
+                                    )
+                        except Exception:
+                            logger.exception(
+                                "Vision analysis failed for %s",
+                                obs.subject.identifier_value,
+                            )
+            except Exception:
+                logger.exception("Stage 4c vision analysis setup failed")
 
         return enrichment_count, upsert_failures
 

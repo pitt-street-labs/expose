@@ -19,10 +19,14 @@ isolation at the storage layer (per ADR-007).
 """
 
 from expose.storage.base import StorageBackend, StorageKeyNotFoundError
+from expose.storage.evidence import EvidenceIntegrityError, EvidenceManager, EvidenceRef
 from expose.storage.local import LocalStorageBackend
 from expose.storage.s3 import S3StorageBackend
 
 __all__ = [
+    "EvidenceIntegrityError",
+    "EvidenceManager",
+    "EvidenceRef",
     "LocalStorageBackend",
     "S3StorageBackend",
     "StorageBackend",

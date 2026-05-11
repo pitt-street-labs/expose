@@ -17,17 +17,30 @@ Sub-modules:
 Refs #17.
 """
 
-from expose.eval.datasets import EvalCase, EvalDataset, EvalResult, load_all_datasets, load_dataset
+from expose.eval.datasets import (
+    EVAL_CATEGORIES,
+    EvalCase,
+    EvalDataset,
+    EvalResult,
+    load_all_datasets,
+    load_dataset,
+    load_dataset_by_category,
+    load_datasets_by_categories,
+)
 from expose.eval.metrics import EvalMetrics, compute_metrics
-from expose.eval.runner import EvalRunner
+from expose.eval.runner import EvalReport, EvalRunner
 
 __all__ = [
+    "EVAL_CATEGORIES",
     "EvalCase",
     "EvalDataset",
     "EvalMetrics",
+    "EvalReport",
     "EvalResult",
     "EvalRunner",
     "compute_metrics",
     "load_all_datasets",
     "load_dataset",
+    "load_dataset_by_category",
+    "load_datasets_by_categories",
 ]

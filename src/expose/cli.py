@@ -13,7 +13,8 @@ Subcommands:
 - ``expose run list --tenant <id>`` — list recent runs for a tenant
 - ``expose artifact list --tenant <id>`` — list artifacts from past runs (future)
 - ``expose scope validate <file>`` — validate a tenant's authorization scope (future)
-- ``expose eval run --provider <p> --model <m> --dataset <d>`` — Phase 2 LLM eval (future)
+- ``expose eval --dataset <category> --rulepack <file>`` — run eval harness against a dataset
+- ``expose eval --all --rulepack <file>`` — run eval harness against all datasets
 """
 
 from __future__ import annotations
@@ -769,6 +770,207 @@ def current() -> None:
 
     cfg = _alembic_config()
     alembic_cmd.current(cfg, verbose=True)
+
+
+# --- ``expose eval`` command --------------------------------------------------
+
+# Default accuracy threshold for exit code determination.
+_EVAL_PASS_THRESHOLD = 0.80
+
+
+@main.command("eval")
+@click.option(
+    "--dataset",
+    "dataset_name",
+    type=click.Choice(
+        ["confirmed_yours", "confirmed_not_yours", "ambiguous", "adversarial"],
+        case_sensitive=False,
+    ),
+    default=None,
+    help="Eval dataset category to run.  Mutually exclusive with --all.",
+)
+@click.option(
+    "--all",
+    "run_all",
+    is_flag=True,
+    default=False,
+    help="Run evaluation against all four dataset categories.",
+)
+@click.option(
+    "--rulepack",
+    "rulepack_path",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to a RulePack JSON file.  When omitted the built-in stub is used.",
+)
+@click.option(
+    "--dataset-dir",
+    "dataset_dir",
+    type=click.Path(exists=True, file_okay=False),
+    default=None,
+    help="Directory containing eval dataset JSON files. "
+    "Defaults to examples/eval-datasets/ relative to the project root.",
+)
+@click.option(
+    "--threshold",
+    type=float,
+    default=_EVAL_PASS_THRESHOLD,
+    show_default=True,
+    help="Minimum overall accuracy to pass (exit code 0).",
+)
+@click.option(
+    "--json-output",
+    "json_output",
+    is_flag=True,
+    default=False,
+    help="Emit the full EvalReport as JSON instead of human-readable text.",
+)
+def eval_cmd(
+    dataset_name: str | None,
+    *,
+    run_all: bool,
+    rulepack_path: str | None,
+    dataset_dir: str | None,
+    threshold: float,
+    json_output: bool,
+) -> None:
+    """Run the EXPOSE attribution eval harness.
+
+    Evaluates an attribution function against curated datasets and reports
+    accuracy, precision, recall, F1, and a confusion matrix.
+
+    Examples:
+
+      expose eval --dataset confirmed_yours
+
+      expose eval --all --rulepack examples/rulepacks/example-baseline.json
+
+      expose eval --all --json-output
+
+    Exit code 0 if overall accuracy >= threshold (default 80%), 1 otherwise.
+    """
+    import json as json_mod  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    from expose.eval.datasets import (  # noqa: PLC0415
+        EVAL_CATEGORIES,
+        load_dataset_by_category,
+        load_datasets_by_categories,
+    )
+    from expose.eval.runner import EvalRunner  # noqa: PLC0415
+
+    # --- Validate mutually exclusive options ---
+    if not dataset_name and not run_all:
+        click.echo(
+            click.style(
+                "ERROR: Specify --dataset <category> or --all.", fg="red",
+            ),
+            err=True,
+        )
+        raise SystemExit(2)
+
+    if dataset_name and run_all:
+        click.echo(
+            click.style(
+                "ERROR: --dataset and --all are mutually exclusive.", fg="red",
+            ),
+            err=True,
+        )
+        raise SystemExit(2)
+
+    # --- Resolve dataset directory ---
+    if dataset_dir:
+        ds_dir = Path(dataset_dir)
+    else:
+        # Default: project root / examples / eval-datasets
+        # cli.py lives at src/expose/cli.py -> 3 parents up = project root
+        ds_dir = Path(__file__).resolve().parent.parent.parent / "examples" / "eval-datasets"
+
+    if not ds_dir.is_dir():
+        click.echo(
+            click.style(f"ERROR: Dataset directory not found: {ds_dir}", fg="red"),
+            err=True,
+        )
+        raise SystemExit(2)
+
+    # --- Load datasets ---
+    if run_all:
+        categories = list(EVAL_CATEGORIES)
+        datasets = load_datasets_by_categories(ds_dir, categories)
+    else:
+        datasets = [load_dataset_by_category(ds_dir, dataset_name)]  # type: ignore[arg-type]
+
+    # --- Build the runner ---
+    runner: EvalRunner
+    if rulepack_path:
+        rp_path = Path(rulepack_path)
+        rp_data = json_mod.loads(rp_path.read_text(encoding="utf-8"))
+        # Strip $schema key if present (editor convention not in Pydantic model).
+        rp_data.pop("$schema", None)
+
+        from expose.pipeline.rule_evaluator import RuleEvaluator  # noqa: PLC0415
+        from expose.types.rulepack import RulePack  # noqa: PLC0415
+
+        pack = RulePack.model_validate(rp_data)
+        evaluator = RuleEvaluator(pack)
+        runner = EvalRunner.from_rule_evaluator(evaluator)
+        click.echo(f"Using rulepack: {pack.pack_id} v{pack.pack_version}")
+    else:
+        runner = EvalRunner()
+        click.echo("Using built-in stub attribution function.")
+
+    # --- Run evaluation ---
+    click.echo(f"Running {len(datasets)} dataset(s)...\n")
+    report = asyncio.run(runner.run_report(datasets))
+
+    # --- Output ---
+    if json_output:
+        click.echo(report.model_dump_json(indent=2))
+    else:
+        # Human-readable output.
+        for ds_name, cat_report in report.categories.items():
+            m = cat_report.metrics
+            click.echo(f"=== {ds_name} ({cat_report.category}) ===")
+            click.echo(f"  Cases:       {m.total_cases}")
+            click.echo(f"  Correct:     {m.correct_attributions}")
+            click.echo(f"  Accuracy:    {m.attribution_accuracy:.2%}")
+            click.echo(f"  Precision:   {cat_report.precision:.2%}")
+            click.echo(f"  Recall:      {cat_report.recall:.2%}")
+            click.echo(f"  F1:          {cat_report.f1:.2%}")
+            click.echo(f"  FP:          {m.false_positives}")
+            click.echo(f"  FN:          {m.false_negatives}")
+            click.echo(f"  Conf Error:  {m.mean_confidence_error:.4f}")
+            click.echo(f"  Wall Clock:  {cat_report.total_wall_clock_ms:.1f} ms "
+                        f"(mean {cat_report.mean_wall_clock_ms:.3f} ms/case)")
+            click.echo()
+
+        # Confusion matrix
+        click.echo("=== Confusion Matrix (Expected vs Actual) ===")
+        for line in report.confusion_matrix.display_lines():
+            click.echo(f"  {line}")
+        click.echo()
+
+        # Overall
+        click.echo("=== Overall ===")
+        click.echo(f"  Total Cases:  {report.total_cases}")
+        click.echo(f"  Accuracy:     {report.overall_accuracy:.2%}")
+        click.echo(f"  Precision:    {report.overall_precision:.2%}")
+        click.echo(f"  Recall:       {report.overall_recall:.2%}")
+        click.echo(f"  F1:           {report.overall_f1:.2%}")
+        click.echo(f"  Wall Clock:   {report.total_wall_clock_ms:.1f} ms")
+
+    # --- Exit code ---
+    if report.overall_accuracy >= threshold:
+        click.echo(click.style(
+            f"\nPASS: accuracy {report.overall_accuracy:.2%} >= {threshold:.2%}",
+            fg="green",
+        ))
+    else:
+        click.echo(click.style(
+            f"\nFAIL: accuracy {report.overall_accuracy:.2%} < {threshold:.2%}",
+            fg="red",
+        ))
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

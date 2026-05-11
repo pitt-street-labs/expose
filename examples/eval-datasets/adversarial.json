@@ -1,0 +1,97 @@
+{
+  "name": "adversarial",
+  "category": "adversarial",
+  "cases": [
+    {
+      "case_id": "ad-001",
+      "description": "Typosquat domain designed to fool string matching -- not tenant-owned",
+      "entity_type": "domain",
+      "canonical_identifier": "acme-corp.example.net",
+      "observations": [
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Acme Corp Lookalike LLC",
+          "matches_tenant": false
+        },
+        {
+          "collector_id": "cert-transparency",
+          "subject": "acme-corp.example.net",
+          "issuer": "Let's Encrypt"
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    },
+    {
+      "case_id": "ad-002",
+      "description": "IP with spoofed cloud signals -- many observations but none genuinely from tenant cloud",
+      "entity_type": "ip",
+      "canonical_identifier": "198.51.100.222",
+      "observations": [
+        {
+          "collector_id": "cloud-range-check",
+          "cloud_account_match": false,
+          "provider": "aws",
+          "service_category": "ec2"
+        },
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Different Org",
+          "matches_tenant": false
+        },
+        {
+          "collector_id": "active-http",
+          "status_code": 200,
+          "server_header": "nginx"
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    },
+    {
+      "case_id": "ad-003",
+      "description": "Domain that looks like a subdomain of tenant apex but is actually a different TLD",
+      "entity_type": "domain",
+      "canonical_identifier": "acme.example.co",
+      "observations": [
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Squatter Holdings",
+          "matches_tenant": false
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    },
+    {
+      "case_id": "ad-004",
+      "description": "Honeypot IP with deliberately planted tenant-like banners -- 3 observations to trigger stub threshold",
+      "entity_type": "ip",
+      "canonical_identifier": "192.0.2.200",
+      "observations": [
+        {
+          "collector_id": "active-http",
+          "status_code": 200,
+          "server_header": "Apache",
+          "body_snippet": "Welcome to Acme Corp Portal"
+        },
+        {
+          "collector_id": "active-dns",
+          "record_type": "PTR",
+          "value": "mail.acme.example.com"
+        },
+        {
+          "collector_id": "cert-transparency",
+          "subject": "acme-fake.example.com",
+          "issuer": "Self-Signed"
+        }
+      ],
+      "expected_attribution": "not_yours",
+      "expected_confidence_min": 0.0,
+      "expected_confidence_max": 0.3
+    }
+  ]
+}

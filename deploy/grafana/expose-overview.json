@@ -30,6 +30,12 @@
     },
     {
       "type": "panel",
+      "id": "gauge",
+      "name": "Gauge",
+      "version": ""
+    },
+    {
+      "type": "panel",
       "id": "timeseries",
       "name": "Time series",
       "version": ""
@@ -50,6 +56,12 @@
       "type": "panel",
       "id": "heatmap",
       "name": "Heatmap",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "piechart",
+      "name": "Pie chart",
       "version": ""
     },
     {
@@ -75,7 +87,7 @@
       }
     ]
   },
-  "description": "EXPOSE EASI Platform - Operator Overview. Shows active runs, collector health, dispatch latency, and tenant activity across all tenants.",
+  "description": "EXPOSE EASI Platform - Operator Overview. Shows active runs, collector health, dispatch latency, LLM cost, attribution distribution, and tenant activity across all tenants.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -126,7 +138,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
+      "gridPos": { "h": 6, "w": 4, "x": 0, "y": 1 },
       "id": 1,
       "options": {
         "colorMode": "background",
@@ -162,59 +174,55 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "95th percentile of pipeline run duration over the selected time range. Helps identify runs that are taking longer than expected.",
+      "description": "Total completed runs across all tenants. Shows 24h, 7d, and 30d windows side by side.",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "thresholds"
           },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "Duration",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 15,
-            "gradientMode": "scheme",
-            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
-            "insertNulls": false,
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "pointSize": 5,
-            "scaleDistribution": { "type": "linear" },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": { "group": "A", "mode": "none" },
-            "thresholdsStyle": { "mode": "off" }
-          },
-          "unit": "ms",
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 30000 },
-              { "color": "red", "value": 60000 }
+              { "color": "purple", "value": null }
             ]
           },
-          "mappings": []
+          "mappings": [],
+          "unit": "short"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "24h" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "purple", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "7d" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "30d" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "dark-blue", "mode": "fixed" } }
+            ]
+          }
+        ]
       },
-      "gridPos": { "h": 6, "w": 10, "x": 6, "y": 1 },
-      "id": 2,
+      "gridPos": { "h": 6, "w": 6, "x": 4, "y": 1 },
+      "id": 8,
       "options": {
-        "legend": {
-          "calcs": ["lastNotNull", "max"],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
         },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
+        "textMode": "auto"
       },
       "pluginVersion": "11.0.0",
       "targets": [
@@ -224,9 +232,9 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum(rate(expose_run_duration_milliseconds_bucket[5m])) by (le))",
-          "legendFormat": "p95 Run Duration",
-          "range": true,
+          "expr": "sum(increase(expose_run_duration_milliseconds_count[24h]))",
+          "legendFormat": "24h",
+          "instant": true,
           "refId": "A"
         },
         {
@@ -235,15 +243,84 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.50, sum(rate(expose_run_duration_milliseconds_bucket[5m])) by (le))",
-          "legendFormat": "p50 Run Duration",
-          "range": true,
-          "refId": "B",
-          "hide": false
+          "expr": "sum(increase(expose_run_duration_milliseconds_count[7d]))",
+          "legendFormat": "7d",
+          "instant": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(increase(expose_run_duration_milliseconds_count[30d]))",
+          "legendFormat": "30d",
+          "instant": true,
+          "refId": "C"
         }
       ],
-      "title": "Run Duration (p95 / p50)",
-      "type": "timeseries"
+      "title": "Total Runs (24h / 7d / 30d)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Percentage of pipeline runs that completed successfully (state='completed') vs total runs in the selected time range. A low rate indicates pipeline failures that need investigation.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.8 },
+              { "color": "yellow", "value": 0.9 },
+              { "color": "green", "value": 0.95 }
+            ]
+          },
+          "mappings": [],
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 4, "x": 10, "y": 1 },
+      "id": 9,
+      "options": {
+        "minVizHeight": 75,
+        "minVizWidth": 75,
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "sizing": "auto"
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(increase(expose_run_duration_milliseconds_count{state=\"completed\"}[$__range])) / sum(increase(expose_run_duration_milliseconds_count[$__range]))",
+          "legendFormat": "Success Rate",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Run Success Rate",
+      "type": "gauge"
     },
     {
       "datasource": {
@@ -267,7 +344,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 6, "w": 4, "x": 16, "y": 1 },
+      "gridPos": { "h": 6, "w": 4, "x": 14, "y": 1 },
       "id": 7,
       "options": {
         "colorMode": "background",
@@ -303,7 +380,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Total completed runs in the last 24 hours across all tenants.",
+      "description": "Entities discovered by type across all tenants over the selected time range. Shows the distribution of entity types (Domain, IP, Certificate, etc.) being found by collectors.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -312,7 +389,7 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "purple", "value": null }
+              { "color": "semi-dark-green", "value": null }
             ]
           },
           "mappings": [],
@@ -320,19 +397,19 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 6, "w": 4, "x": 20, "y": 1 },
-      "id": 8,
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 1 },
+      "id": 10,
       "options": {
         "colorMode": "background",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
-        "orientation": "auto",
+        "orientation": "horizontal",
         "reduceOptions": {
           "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
-        "textMode": "auto"
+        "textMode": "value_and_name"
       },
       "pluginVersion": "11.0.0",
       "targets": [
@@ -342,13 +419,13 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(increase(expose_run_duration_milliseconds_count[24h]))",
-          "legendFormat": "Runs (24h)",
+          "expr": "sum by (entity_type) (increase(expose_observations_emitted_total{entity_type!=\"\"}[$__range]))",
+          "legendFormat": "{{entity_type}}",
           "instant": true,
           "refId": "A"
         }
       ],
-      "title": "Completed Runs (24h)",
+      "title": "Entities Discovered (by Type)",
       "type": "stat"
     },
     {
@@ -424,7 +501,317 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Total observations emitted by each collector in the selected time range.",
+      "description": "Detailed collector health table showing success rate, average dispatch duration, and total dispatches per collector. Sortable by any column.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "auto" },
+            "inspect": false
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "collector_id" },
+            "properties": [
+              { "id": "displayName", "value": "Collector" },
+              { "id": "custom.width", "value": 220 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Value #success_rate" },
+            "properties": [
+              { "id": "displayName", "value": "Success Rate" },
+              { "id": "unit", "value": "percentunit" },
+              { "id": "decimals", "value": 1 },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "red", "value": null },
+                    { "color": "orange", "value": 0.8 },
+                    { "color": "green", "value": 0.95 }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": { "mode": "basic", "type": "color-background" }
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Value #avg_duration" },
+            "properties": [
+              { "id": "displayName", "value": "Avg Duration (ms)" },
+              { "id": "unit", "value": "ms" },
+              { "id": "decimals", "value": 1 },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "green", "value": null },
+                    { "color": "yellow", "value": 1000 },
+                    { "color": "red", "value": 5000 }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": { "mode": "basic", "type": "color-background" }
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Value #total_dispatches" },
+            "properties": [
+              { "id": "displayName", "value": "Total Dispatches" },
+              { "id": "unit", "value": "short" },
+              { "id": "decimals", "value": 0 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Value #observations" },
+            "properties": [
+              { "id": "displayName", "value": "Observations" },
+              { "id": "unit", "value": "short" },
+              { "id": "decimals", "value": 0 }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 11,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": ["sum"],
+          "show": true
+        },
+        "showHeader": true,
+        "sortBy": [
+          { "desc": false, "displayName": "Success Rate" }
+        ]
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (collector_id) (increase(expose_collector_dispatch_count_total{status=\"success\"}[1h])) / sum by (collector_id) (increase(expose_collector_dispatch_count_total[1h]))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "success_rate"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (collector_id) (rate(expose_collector_dispatch_duration_milliseconds_sum[1h])) / sum by (collector_id) (rate(expose_collector_dispatch_duration_milliseconds_count[1h]))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "avg_duration"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (collector_id) (increase(expose_collector_dispatch_count_total[1h]))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "total_dispatches"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (collector_id) (increase(expose_observations_emitted_total[1h]))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "observations"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {
+              "collector_id": 0,
+              "Value #success_rate": 1,
+              "Value #avg_duration": 2,
+              "Value #total_dispatches": 3,
+              "Value #observations": 4
+            },
+            "renameByName": {}
+          }
+        }
+      ],
+      "title": "Collector Health Table",
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
+      "id": 102,
+      "title": "Run Duration & Observations",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Pipeline run duration percentile trend over time. Shows p50, p95, and p99 to identify latency regressions and outliers.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Duration",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "scheme",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "line+area" }
+          },
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "transparent", "value": null },
+              { "color": "red", "value": 60000 }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "p50" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "p95" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "p99" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
+      "id": 2,
+      "options": {
+        "legend": {
+          "calcs": ["lastNotNull", "max"],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.50, sum(rate(expose_run_duration_milliseconds_bucket[5m])) by (le))",
+          "legendFormat": "p50",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum(rate(expose_run_duration_milliseconds_bucket[5m])) by (le))",
+          "legendFormat": "p95",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum(rate(expose_run_duration_milliseconds_bucket[5m])) by (le))",
+          "legendFormat": "p99",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Run Duration Trend (p50 / p95 / p99)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Observations emitted by each collector over time, stacked to show relative contribution and total volume trend.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -436,11 +823,19 @@
             "axisColorMode": "text",
             "axisLabel": "Observations",
             "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "bars",
             "fillOpacity": 80,
             "gradientMode": "none",
             "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
             "lineWidth": 1,
+            "pointSize": 5,
             "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "normal" },
             "thresholdsStyle": { "mode": "off" }
           },
           "unit": "short",
@@ -454,15 +849,90 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
       "id": 4,
+      "options": {
+        "legend": {
+          "calcs": ["sum"],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (collector_id) (increase(expose_observations_emitted_total[5m]))",
+          "legendFormat": "{{collector_id}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Observations per Collector (Stacked)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 },
+      "id": 103,
+      "title": "LLM Cost & Attribution",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "LLM cost per tenant over the selected time range. Tracks expenditure across all LLM-powered analysis stages (enrichment, attribution, entity resolution). Requires expose_llm_cost_usd_total metric with tenant_id label.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "Cost (USD)",
+            "axisPlacement": "auto",
+            "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineWidth": 1,
+            "scaleDistribution": { "type": "linear" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "unit": "currencyUSD",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 20 }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
+      "id": 12,
       "options": {
         "barRadius": 0.1,
         "barWidth": 0.7,
         "fullHighlight": false,
         "groupWidth": 0.7,
         "legend": {
-          "calcs": [],
+          "calcs": ["sum"],
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
@@ -484,19 +954,101 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (collector_id) (increase(expose_observations_emitted_total[$__range]))",
-          "legendFormat": "{{collector_id}}",
+          "expr": "sum by (tenant_id) (increase(expose_llm_cost_usd_total{tenant_id!=\"\"}[$__range]))",
+          "legendFormat": "{{tenant_id}}",
           "instant": true,
           "refId": "A"
         }
       ],
-      "title": "Observations per Collector",
+      "title": "LLM Cost per Tenant",
       "type": "barchart"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Distribution of attribution confidence tiers across all tenants. Shows the proportion of confirmed (>=0.75), high (0.5-0.74), medium (0.25-0.49), and unattributed (<0.25) observations.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          },
+          "mappings": [],
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "confirmed" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "high" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "semi-dark-green", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "medium" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "unattributed" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 26 },
+      "id": 13,
+      "options": {
+        "displayLabels": ["name", "percent"],
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "values": ["value", "percent"]
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (attribution_status) (increase(expose_observations_emitted_total{attribution_status!=\"\"}[$__range]))",
+          "legendFormat": "{{attribution_status}}",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Attribution Distribution",
+      "type": "piechart"
+    },
+    {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
-      "id": 102,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 34 },
+      "id": 104,
       "title": "Dispatch Latency & Tenant Activity",
       "type": "row"
     },
@@ -515,7 +1067,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 35 },
       "id": 5,
       "options": {
         "calculate": false,
@@ -626,7 +1178,7 @@
           }
         ]
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 35 },
       "id": 6,
       "options": {
         "cellHeight": "sm",

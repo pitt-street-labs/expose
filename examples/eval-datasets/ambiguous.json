@@ -1,0 +1,64 @@
+{
+  "name": "ambiguous",
+  "category": "ambiguous",
+  "cases": [
+    {
+      "case_id": "am-001",
+      "description": "Shared hosting IP -- WHOIS matches tenant but cloud account does not confirm",
+      "entity_type": "ip",
+      "canonical_identifier": "203.0.113.50",
+      "observations": [
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Acme Corp",
+          "matches_tenant": true
+        },
+        {
+          "collector_id": "active-http",
+          "status_code": 200,
+          "server_header": "shared-hosting"
+        }
+      ],
+      "expected_attribution": "high",
+      "expected_confidence_min": 0.60,
+      "expected_confidence_max": 0.90
+    },
+    {
+      "case_id": "am-002",
+      "description": "Domain with mixed signals -- cert matches but registrant differs",
+      "entity_type": "domain",
+      "canonical_identifier": "partner-portal.example.com",
+      "observations": [
+        {
+          "collector_id": "cert-transparency",
+          "subject": "partner-portal.example.com",
+          "issuer": "Let's Encrypt"
+        },
+        {
+          "collector_id": "rdap-whois",
+          "registrant_org": "Partner Inc",
+          "matches_tenant": false
+        }
+      ],
+      "expected_attribution": "high",
+      "expected_confidence_min": 0.50,
+      "expected_confidence_max": 0.85
+    },
+    {
+      "case_id": "am-003",
+      "description": "Single collector observation with weak signal -- could go either way",
+      "entity_type": "domain",
+      "canonical_identifier": "staging.internal.example.com",
+      "observations": [
+        {
+          "collector_id": "active-dns",
+          "record_type": "CNAME",
+          "value": "lb.cloud-provider.example.net"
+        }
+      ],
+      "expected_attribution": "medium",
+      "expected_confidence_min": 0.40,
+      "expected_confidence_max": 0.70
+    }
+  ]
+}
