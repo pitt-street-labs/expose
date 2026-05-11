@@ -1,0 +1,982 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title | default("Admin") }}{% endblock %}
+
+{% block content %}
+<div x-data="adminPanel()" class="admin-layout">
+
+    <!-- ===== Top bar ===== -->
+    <header class="top-bar">
+        <div class="top-bar-left">
+            <div class="logo">
+                <span class="logo-mark">&#9670;</span>
+                <span class="logo-text">EXPOSE</span>
+                <span class="logo-tagline">Admin Panel</span>
+            </div>
+        </div>
+        <div class="top-bar-right">
+            <a href="/" class="btn btn-ghost">Dashboard</a>
+        </div>
+    </header>
+
+    <!-- ===== Main content ===== -->
+    <div class="admin-content">
+
+        <!-- ============================================================= -->
+        <!-- Section 1: Tenants                                            -->
+        <!-- ============================================================= -->
+        <section class="admin-section">
+            <div class="admin-section-header" @click="showTenants = !showTenants">
+                <h2 class="admin-section-title">
+                    Tenants
+                    <span class="admin-section-count" x-show="tenants.length > 0" x-text="tenants.length" x-cloak></span>
+                </h2>
+                <span class="admin-section-toggle" x-text="showTenants ? '▲' : '▼'"></span>
+            </div>
+            <div x-show="showTenants" x-transition>
+                <!-- Create tenant form -->
+                <div class="admin-form-row">
+                    <input type="text" x-model="newTenantName" placeholder="New tenant name..."
+                           class="filter-input" style="flex: 1; width: auto;"
+                           @keydown.enter="createTenant()">
+                    <button class="btn btn-primary" @click="createTenant()" :disabled="!newTenantName.trim() || tenantCreating">
+                        <span x-show="!tenantCreating">Create Tenant</span>
+                        <span x-show="tenantCreating">Creating...</span>
+                    </button>
+                </div>
+                <div x-show="tenantMessage" x-text="tenantMessage"
+                     class="admin-message" :class="tenantMessageType === 'error' ? 'admin-message--error' : ''"></div>
+
+                <!-- Tenants table -->
+                <div class="admin-table-wrap">
+                    <table class="entity-table admin-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>ID</th>
+                                <th>State</th>
+                                <th>Created</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="tenant in tenants" :key="tenant.id">
+                                <tr class="entity-row">
+                                    <td>
+                                        <span class="identifier-text" x-text="tenant.name"></span>
+                                    </td>
+                                    <td style="font-size: 0.75rem; color: var(--text-muted);" x-text="tenant.id.substring(0, 8) + '...'"></td>
+                                    <td>
+                                        <span class="admin-state-badge"
+                                              :class="'admin-state-' + tenant.state"
+                                              x-text="tenant.state"></span>
+                                    </td>
+                                    <td style="font-size: 0.75rem; color: var(--text-muted);" x-text="formatDate(tenant.created_at)"></td>
+                                    <td>
+                                        <button class="btn btn-ghost btn-sm btn-danger"
+                                                @click="deleteTenant(tenant.id, tenant.name)"
+                                                :disabled="tenant.state === 'pending_deletion'">
+                                            Delete
+                                        </button>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                    <div x-show="tenants.length === 0" class="admin-empty">
+                        No tenants found. Create one above.
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================================= -->
+        <!-- Section 2: Run Management                                     -->
+        <!-- ============================================================= -->
+        <section class="admin-section">
+            <div class="admin-section-header" @click="showRuns = !showRuns">
+                <h2 class="admin-section-title">
+                    Run Management
+                    <span class="admin-section-count" x-show="allRuns.length > 0" x-text="allRuns.length" x-cloak></span>
+                    <span x-show="hasActiveRuns" x-cloak
+                          style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--success); margin-left: 6px; animation: pulse-dot 1.5s ease-in-out infinite;"></span>
+                </h2>
+                <span class="admin-section-toggle" x-text="showRuns ? '▲' : '▼'"></span>
+            </div>
+            <div x-show="showRuns" x-transition>
+                <div x-show="runMessage" x-text="runMessage"
+                     class="admin-message" :class="runMessageType === 'error' ? 'admin-message--error' : ''"></div>
+
+                <div class="admin-table-wrap">
+                    <table class="entity-table admin-table">
+                        <thead>
+                            <tr>
+                                <th>Run ID</th>
+                                <th>Tenant</th>
+                                <th>State</th>
+                                <th>Started</th>
+                                <th>Duration</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="run in allRuns" :key="run.id">
+                                <tr class="entity-row">
+                                    <td style="font-size: 0.75rem;" x-text="run.id.substring(0, 8) + '...'"></td>
+                                    <td>
+                                        <span class="identifier-text" x-text="tenantNameById(run.tenant_id)"></span>
+                                    </td>
+                                    <td>
+                                        <span class="admin-run-badge"
+                                              :class="'admin-run-' + run.state"
+                                              x-text="run.state"></span>
+                                    </td>
+                                    <td style="font-size: 0.75rem; color: var(--text-muted);" x-text="formatDate(run.started_at)"></td>
+                                    <td style="font-size: 0.75rem; color: var(--text-muted);" x-text="runDuration(run)"></td>
+                                    <td class="admin-actions-cell">
+                                        <button class="btn btn-ghost btn-sm"
+                                                x-show="run.state === 'pending' || run.state === 'running' || run.state === 'seeding' || run.state === 'collecting' || run.state === 'sanitizing' || run.state === 'attributing'"
+                                                @click="cancelRun(run.id)">
+                                            Cancel
+                                        </button>
+                                        <button class="btn btn-ghost btn-sm btn-danger"
+                                                x-show="run.state === 'completed' || run.state === 'failed' || run.state === 'partial'"
+                                                @click="deleteRun(run.id)">
+                                            Delete
+                                        </button>
+                                        <button class="btn btn-ghost btn-sm"
+                                                @click="rerunRun(run)">
+                                            Re-run
+                                        </button>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                    <div x-show="allRuns.length === 0" class="admin-empty">
+                        No runs found across any tenant.
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================================= -->
+        <!-- Section 3: Credential Health                                  -->
+        <!-- ============================================================= -->
+        <section class="admin-section">
+            <div class="admin-section-header" @click="showCredentials = !showCredentials">
+                <h2 class="admin-section-title">
+                    Credential Health
+                </h2>
+                <span class="admin-section-toggle" x-text="showCredentials ? '▲' : '▼'"></span>
+            </div>
+            <div x-show="showCredentials" x-transition>
+                <!-- Tenant selector for credential testing -->
+                <div class="admin-form-row">
+                    <select x-model="credTenantId" class="selector-input" style="flex: 1; min-width: 200px;"
+                            @change="credResults = []; credMessage = '';">
+                        <option value="">Select tenant for credential test...</option>
+                        <template x-for="t in tenants" :key="t.id">
+                            <option :value="t.id" x-text="t.name"></option>
+                        </template>
+                    </select>
+                    <button class="btn btn-primary" @click="testAllCredentials()" :disabled="!credTenantId || credTesting">
+                        <span x-show="!credTesting">Test All</span>
+                        <span x-show="credTesting">Testing...</span>
+                    </button>
+                </div>
+                <div x-show="credMessage" x-text="credMessage"
+                     class="admin-message" :class="credMessageType === 'error' ? 'admin-message--error' : ''"></div>
+
+                <!-- Credential results table -->
+                <div x-show="credResults.length > 0" x-cloak class="admin-table-wrap">
+                    <table class="entity-table admin-table">
+                        <thead>
+                            <tr>
+                                <th>Credential</th>
+                                <th>Status</th>
+                                <th>Message</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="cred in credResults" :key="cred.id">
+                                <tr class="entity-row">
+                                    <td>
+                                        <span class="identifier-text" x-text="cred.name"></span>
+                                    </td>
+                                    <td>
+                                        <span class="admin-cred-badge"
+                                              :class="cred.status === 'ok' ? 'admin-cred-ok' : cred.status === 'pending' ? 'admin-cred-pending' : 'admin-cred-fail'"
+                                              x-text="cred.status === 'ok' ? 'OK' : cred.status === 'pending' ? 'Testing...' : 'FAIL'"></span>
+                                    </td>
+                                    <td style="font-size: 0.8rem; color: var(--text-muted);" x-text="cred.message || '--'"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================================= -->
+        <!-- Section 4: System Info                                        -->
+        <!-- ============================================================= -->
+        <section class="admin-section">
+            <div class="admin-section-header" @click="showSystemInfo = !showSystemInfo">
+                <h2 class="admin-section-title">
+                    System Info
+                </h2>
+                <span class="admin-section-toggle" x-text="showSystemInfo ? '▲' : '▼'"></span>
+            </div>
+            <div x-show="showSystemInfo" x-transition>
+                <div class="admin-stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" x-text="systemStats.totalEntities">--</div>
+                        <div class="stat-label">Total Entities</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" x-text="systemStats.totalRelationships">--</div>
+                        <div class="stat-label">Total Relationships</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" x-text="systemStats.totalRuns">--</div>
+                        <div class="stat-label">Total Runs</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" x-text="systemStats.totalTenants">--</div>
+                        <div class="stat-label">Tenants</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" x-text="systemStats.registeredCollectors">--</div>
+                        <div class="stat-label">Registered Collectors</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" x-text="systemStats.uptime">--</div>
+                        <div class="stat-label">Page Uptime</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </div>
+
+    <!-- ===== Bottom status bar ===== -->
+    <footer class="status-bar">
+        <div class="status-bar-inner">
+            <div class="status-idle">
+                <span class="status-stage-text">Admin Panel</span>
+                <span class="status-separator">|</span>
+                <span class="status-version">EXPOSE v0.1.0-dev</span>
+                <span class="status-separator">|</span>
+                <span class="status-stage-text" x-text="allRuns.filter(r => r.state !== 'completed' && r.state !== 'failed' && r.state !== 'partial').length + ' active run(s)'"></span>
+            </div>
+        </div>
+    </footer>
+
+</div>
+
+<style>
+/* ===== Admin Layout ===== */
+.admin-layout {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+}
+
+.admin-content {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: var(--space-lg);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+}
+
+.admin-content::-webkit-scrollbar { width: 6px; }
+.admin-content::-webkit-scrollbar-track { background: transparent; }
+.admin-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ===== Sections ===== */
+.admin-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-md);
+    animation: emerge 0.3s ease-out;
+}
+
+.admin-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+}
+
+.admin-section-title {
+    font-family: var(--font-sans);
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.admin-section-count {
+    font-size: 0.7rem;
+    font-weight: 400;
+    padding: 1px 6px;
+    background: var(--depth);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+}
+
+.admin-section-toggle {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+/* ===== Form row ===== */
+.admin-form-row {
+    display: flex;
+    gap: var(--space-sm);
+    align-items: center;
+    margin-top: var(--space-md);
+    margin-bottom: var(--space-sm);
+}
+
+/* ===== Messages ===== */
+.admin-message {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    padding: var(--space-xs) 0;
+    animation: slide-up 0.2s ease-out;
+}
+
+.admin-message--error {
+    color: var(--error);
+}
+
+/* ===== Table wrapper ===== */
+.admin-table-wrap {
+    margin-top: var(--space-sm);
+    overflow-x: auto;
+}
+
+.admin-table th {
+    font-family: var(--font-sans);
+}
+
+/* ===== Empty state ===== */
+.admin-empty {
+    text-align: center;
+    padding: var(--space-lg);
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    font-style: italic;
+}
+
+/* ===== State badges ===== */
+.admin-state-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.admin-state-active {
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--success);
+}
+
+.admin-state-suspended {
+    background: rgba(234, 179, 8, 0.15);
+    color: var(--warning);
+}
+
+.admin-state-pending_deletion {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--error);
+}
+
+/* ===== Run state badges ===== */
+.admin-run-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.admin-run-pending {
+    background: rgba(100, 116, 139, 0.15);
+    color: var(--text-muted);
+}
+
+.admin-run-running,
+.admin-run-seeding,
+.admin-run-collecting,
+.admin-run-sanitizing,
+.admin-run-attributing {
+    background: rgba(99, 102, 241, 0.15);
+    color: var(--accent);
+}
+
+.admin-run-partial {
+    background: rgba(234, 179, 8, 0.15);
+    color: var(--warning);
+}
+
+.admin-run-completed {
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--success);
+}
+
+.admin-run-failed {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--error);
+}
+
+/* ===== Credential test badges ===== */
+.admin-cred-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.admin-cred-ok {
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--success);
+}
+
+.admin-cred-fail {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--error);
+}
+
+.admin-cred-pending {
+    background: rgba(99, 102, 241, 0.15);
+    color: var(--accent);
+}
+
+/* ===== Button variants ===== */
+.btn-sm {
+    padding: 2px 8px;
+    font-size: 0.7rem;
+}
+
+.btn-danger {
+    color: var(--error);
+    border-color: rgba(239, 68, 68, 0.3);
+}
+
+.btn-danger:hover {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: var(--error);
+}
+
+/* ===== Actions cell ===== */
+.admin-actions-cell {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+/* ===== Stats grid ===== */
+.admin-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: var(--space-sm);
+    margin-top: var(--space-md);
+}
+
+.admin-stats-grid .stat-card {
+    background: var(--depth);
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 768px) {
+    .admin-content {
+        padding: var(--space-md);
+    }
+
+    .admin-form-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .admin-actions-cell {
+        flex-direction: column;
+    }
+}
+</style>
+
+<script>
+function adminPanel() {
+    return {
+        // Section visibility
+        showTenants: true,
+        showRuns: true,
+        showCredentials: true,
+        showSystemInfo: true,
+
+        // Tenants
+        tenants: [],
+        newTenantName: "",
+        tenantCreating: false,
+        tenantMessage: "",
+        tenantMessageType: "",
+
+        // Runs
+        allRuns: [],
+        runMessage: "",
+        runMessageType: "",
+        _runPollHandle: null,
+
+        // Credential health
+        credTenantId: "",
+        credTesting: false,
+        credResults: [],
+        credMessage: "",
+        credMessageType: "",
+
+        // System info
+        systemStats: {
+            totalEntities: "--",
+            totalRelationships: "--",
+            totalRuns: "--",
+            totalTenants: "--",
+            registeredCollectors: "--",
+            uptime: "--",
+        },
+        _pageLoadTime: performance.now(),
+        _uptimeHandle: null,
+
+        // Computed: are there active runs?
+        get hasActiveRuns() {
+            return this.allRuns.some(function (r) {
+                return r.state !== "completed" && r.state !== "failed" && r.state !== "partial";
+            });
+        },
+
+        // ---- Lifecycle ----
+
+        init() {
+            this.loadTenants();
+            this._startUptimeTimer();
+        },
+
+        destroy() {
+            if (this._runPollHandle) {
+                clearInterval(this._runPollHandle);
+                this._runPollHandle = null;
+            }
+            if (this._uptimeHandle) {
+                clearInterval(this._uptimeHandle);
+                this._uptimeHandle = null;
+            }
+        },
+
+        // ---- Tenants ----
+
+        async loadTenants() {
+            try {
+                var resp = await fetch("/v1/tenants/");
+                if (!resp.ok) {
+                    this.tenantMessage = "Failed to load tenants (HTTP " + resp.status + ")";
+                    this.tenantMessageType = "error";
+                    return;
+                }
+                var data = await resp.json();
+                this.tenants = data.tenants || [];
+                this.systemStats.totalTenants = this.tenants.length;
+                // After loading tenants, load runs for all tenants
+                this.loadAllRuns();
+                // Also compute system stats
+                this._computeSystemStats();
+            } catch (e) {
+                this.tenantMessage = "Error loading tenants: " + e.message;
+                this.tenantMessageType = "error";
+            }
+        },
+
+        async createTenant() {
+            var name = this.newTenantName.trim();
+            if (!name) return;
+
+            this.tenantCreating = true;
+            this.tenantMessage = "";
+            try {
+                var resp = await fetch("/v1/tenants/", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name: name }),
+                });
+                if (!resp.ok) {
+                    var errText = await resp.text();
+                    this.tenantMessage = "Create failed (" + resp.status + "): " + errText;
+                    this.tenantMessageType = "error";
+                } else {
+                    var tenant = await resp.json();
+                    this.tenantMessage = "Tenant '" + tenant.name + "' created.";
+                    this.tenantMessageType = "success";
+                    this.newTenantName = "";
+                    await this.loadTenants();
+                }
+            } catch (e) {
+                this.tenantMessage = "Error: " + e.message;
+                this.tenantMessageType = "error";
+            }
+            this.tenantCreating = false;
+        },
+
+        async deleteTenant(tenantId, tenantName) {
+            if (!confirm("Delete tenant '" + tenantName + "'? This sets the tenant to pending_deletion.")) {
+                return;
+            }
+            this.tenantMessage = "";
+            try {
+                var resp = await fetch("/v1/tenants/" + tenantId, {
+                    method: "DELETE",
+                });
+                if (!resp.ok && resp.status !== 204) {
+                    var errText = await resp.text();
+                    this.tenantMessage = "Delete failed (" + resp.status + "): " + errText;
+                    this.tenantMessageType = "error";
+                } else {
+                    this.tenantMessage = "Tenant '" + tenantName + "' marked for deletion.";
+                    this.tenantMessageType = "success";
+                    await this.loadTenants();
+                }
+            } catch (e) {
+                this.tenantMessage = "Error: " + e.message;
+                this.tenantMessageType = "error";
+            }
+        },
+
+        // ---- Runs ----
+
+        async loadAllRuns() {
+            var runs = [];
+            for (var i = 0; i < this.tenants.length; i++) {
+                try {
+                    var resp = await fetch("/v1/tenants/" + this.tenants[i].id + "/runs");
+                    if (resp.ok) {
+                        var data = await resp.json();
+                        var tenantRuns = data.runs || [];
+                        for (var j = 0; j < tenantRuns.length; j++) {
+                            runs.push(tenantRuns[j]);
+                        }
+                    }
+                } catch (e) {
+                    console.warn("[Admin] Failed to load runs for tenant " + this.tenants[i].id + ":", e);
+                }
+            }
+            // Sort by started_at descending
+            runs.sort(function (a, b) {
+                var ta = a.started_at || "";
+                var tb = b.started_at || "";
+                return tb.localeCompare(ta);
+            });
+            this.allRuns = runs;
+            this.systemStats.totalRuns = runs.length;
+
+            // Start/stop auto-refresh based on active runs
+            this._manageRunPolling();
+        },
+
+        _manageRunPolling() {
+            var self = this;
+            if (this.hasActiveRuns && !this._runPollHandle) {
+                this._runPollHandle = setInterval(function () {
+                    self.loadAllRuns();
+                }, 5000);
+            } else if (!this.hasActiveRuns && this._runPollHandle) {
+                clearInterval(this._runPollHandle);
+                this._runPollHandle = null;
+            }
+        },
+
+        tenantNameById(tenantId) {
+            for (var i = 0; i < this.tenants.length; i++) {
+                if (this.tenants[i].id === tenantId) {
+                    return this.tenants[i].name;
+                }
+            }
+            return tenantId ? tenantId.substring(0, 8) + "..." : "--";
+        },
+
+        runDuration(run) {
+            if (!run.started_at) return "--";
+            var start = new Date(run.started_at);
+            var end = run.completed_at ? new Date(run.completed_at) : new Date();
+            var diffSec = Math.floor((end - start) / 1000);
+            if (diffSec < 60) return diffSec + "s";
+            var min = Math.floor(diffSec / 60);
+            var sec = diffSec % 60;
+            if (min < 60) return min + "m " + sec + "s";
+            var hrs = Math.floor(min / 60);
+            min = min % 60;
+            return hrs + "h " + min + "m";
+        },
+
+        async cancelRun(runId) {
+            this.runMessage = "";
+            try {
+                var resp = await fetch("/v1/admin/runs/" + runId + "/cancel", {
+                    method: "POST",
+                });
+                if (!resp.ok) {
+                    var errText = await resp.text();
+                    this.runMessage = "Cancel failed (" + resp.status + "): " + errText;
+                    this.runMessageType = "error";
+                } else {
+                    this.runMessage = "Run " + runId.substring(0, 8) + " cancelled.";
+                    this.runMessageType = "success";
+                    await this.loadAllRuns();
+                }
+            } catch (e) {
+                this.runMessage = "Error: " + e.message;
+                this.runMessageType = "error";
+            }
+        },
+
+        async deleteRun(runId) {
+            if (!confirm("Delete run " + runId.substring(0, 8) + "...?")) return;
+            this.runMessage = "";
+            try {
+                var resp = await fetch("/v1/admin/runs/" + runId, {
+                    method: "DELETE",
+                });
+                if (!resp.ok && resp.status !== 204) {
+                    var errText = await resp.text();
+                    this.runMessage = "Delete failed (" + resp.status + "): " + errText;
+                    this.runMessageType = "error";
+                } else {
+                    this.runMessage = "Run deleted.";
+                    this.runMessageType = "success";
+                    await this.loadAllRuns();
+                }
+            } catch (e) {
+                this.runMessage = "Error: " + e.message;
+                this.runMessageType = "error";
+            }
+        },
+
+        async rerunRun(run) {
+            this.runMessage = "";
+            try {
+                // Start a new run for the same tenant with default seeds
+                var resp = await fetch("/v1/tenants/" + run.tenant_id + "/runs", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ seeds: [], organization_seeds: [], collector_ids: null }),
+                });
+                if (!resp.ok) {
+                    var errText = await resp.text();
+                    this.runMessage = "Re-run failed (" + resp.status + "): " + errText;
+                    this.runMessageType = "error";
+                } else {
+                    var data = await resp.json();
+                    this.runMessage = "New run " + data.run_id.substring(0, 8) + " started.";
+                    this.runMessageType = "success";
+                    await this.loadAllRuns();
+                }
+            } catch (e) {
+                this.runMessage = "Error: " + e.message;
+                this.runMessageType = "error";
+            }
+        },
+
+        // ---- Credential Health ----
+
+        async testAllCredentials() {
+            if (!this.credTenantId) return;
+            this.credTesting = true;
+            this.credResults = [];
+            this.credMessage = "Loading credentials...";
+            this.credMessageType = "";
+
+            try {
+                // 1. Fetch credential list
+                var listResp = await fetch("/v1/tenants/" + this.credTenantId + "/credentials/");
+                if (!listResp.ok) {
+                    this.credMessage = "Failed to load credentials (HTTP " + listResp.status + ")";
+                    this.credMessageType = "error";
+                    this.credTesting = false;
+                    return;
+                }
+                var listData = await listResp.json();
+                var slots = listData.slots || [];
+
+                if (slots.length === 0) {
+                    this.credMessage = "No credentials configured for this tenant.";
+                    this.credTesting = false;
+                    return;
+                }
+
+                // 2. Initialize results with pending state
+                this.credResults = slots.map(function (s) {
+                    return {
+                        id: s.credential_id,
+                        name: s.display_name || s.credential_id,
+                        status: s.status === "configured" ? "pending" : "skip",
+                        message: s.status !== "configured" ? "Not configured" : "",
+                    };
+                });
+
+                this.credMessage = "Testing " + slots.length + " credential(s)...";
+
+                // 3. Test each configured credential
+                for (var i = 0; i < slots.length; i++) {
+                    if (slots[i].status !== "configured") continue;
+
+                    var credId = slots[i].credential_id;
+                    try {
+                        var testResp = await fetch(
+                            "/v1/tenants/" + this.credTenantId + "/credentials/" + credId + "/test",
+                            { method: "POST" }
+                        );
+                        if (testResp.ok) {
+                            var result = await testResp.json();
+                            this._updateCredResult(credId, result.status || "ok", result.message || "OK");
+                        } else {
+                            this._updateCredResult(credId, "fail", "HTTP " + testResp.status);
+                        }
+                    } catch (e) {
+                        this._updateCredResult(credId, "fail", e.message);
+                    }
+                }
+
+                var okCount = this.credResults.filter(function (r) { return r.status === "ok"; }).length;
+                var failCount = this.credResults.filter(function (r) { return r.status === "fail"; }).length;
+                this.credMessage = "Done: " + okCount + " OK, " + failCount + " failed.";
+                this.credMessageType = failCount > 0 ? "error" : "";
+            } catch (e) {
+                this.credMessage = "Error: " + e.message;
+                this.credMessageType = "error";
+            }
+            this.credTesting = false;
+        },
+
+        _updateCredResult(credId, status, message) {
+            for (var i = 0; i < this.credResults.length; i++) {
+                if (this.credResults[i].id === credId) {
+                    this.credResults[i].status = status;
+                    this.credResults[i].message = message;
+                    break;
+                }
+            }
+        },
+
+        // ---- System Info ----
+
+        async _computeSystemStats() {
+            var totalEntities = 0;
+            var totalRelationships = 0;
+
+            for (var i = 0; i < this.tenants.length; i++) {
+                try {
+                    var resp = await fetch("/v1/tenants/" + this.tenants[i].id + "/entities");
+                    if (resp.ok) {
+                        var data = await resp.json();
+                        var entities = data.entities || data.items || [];
+                        totalEntities += entities.length;
+                    }
+                } catch (e) {
+                    console.warn("[Admin] Entity count failed for tenant " + this.tenants[i].id);
+                }
+
+                // Attempt relationship count via graph endpoint
+                try {
+                    var graphResp = await fetch("/v1/tenants/" + this.tenants[i].id + "/graph");
+                    if (graphResp.ok) {
+                        var graphData = await graphResp.json();
+                        var edges = graphData.edges || [];
+                        totalRelationships += edges.length;
+                    }
+                } catch (e) {
+                    // Graph endpoint may not exist yet
+                }
+            }
+
+            this.systemStats.totalEntities = totalEntities;
+            this.systemStats.totalRelationships = totalRelationships;
+
+            // Collector count: try /v1/collectors or use placeholder
+            try {
+                var collResp = await fetch("/v1/collectors");
+                if (collResp.ok) {
+                    var collData = await collResp.json();
+                    this.systemStats.registeredCollectors = (collData.collectors || []).length;
+                } else {
+                    // Fallback: hardcoded based on CLAUDE.md (22 builtin collectors)
+                    this.systemStats.registeredCollectors = "22+";
+                }
+            } catch (e) {
+                this.systemStats.registeredCollectors = "22+";
+            }
+        },
+
+        _startUptimeTimer() {
+            var self = this;
+            this._updateUptime();
+            this._uptimeHandle = setInterval(function () {
+                self._updateUptime();
+            }, 1000);
+        },
+
+        _updateUptime() {
+            var elapsed = Math.floor((performance.now() - this._pageLoadTime) / 1000);
+            if (elapsed < 60) {
+                this.systemStats.uptime = elapsed + "s";
+            } else if (elapsed < 3600) {
+                var m = Math.floor(elapsed / 60);
+                var s = elapsed % 60;
+                this.systemStats.uptime = m + "m " + s + "s";
+            } else {
+                var h = Math.floor(elapsed / 3600);
+                var rm = Math.floor((elapsed % 3600) / 60);
+                this.systemStats.uptime = h + "h " + rm + "m";
+            }
+        },
+
+        // ---- Formatters ----
+
+        formatDate(isoStr) {
+            if (!isoStr) return "--";
+            try {
+                var d = new Date(isoStr);
+                var now = new Date();
+                var diffMin = Math.floor((now - d) / 60000);
+                if (diffMin < 1) return "just now";
+                if (diffMin < 60) return diffMin + "m ago";
+                var diffHrs = Math.floor(diffMin / 60);
+                if (diffHrs < 24) return diffHrs + "h ago";
+                var diffDays = Math.floor(diffHrs / 24);
+                if (diffDays < 7) return diffDays + "d ago";
+                return d.toISOString().substring(0, 16).replace("T", " ");
+            } catch (e) {
+                return isoStr;
+            }
+        },
+    };
+}
+</script>
+{% endblock %}

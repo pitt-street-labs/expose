@@ -101,6 +101,20 @@ async def dashboard(request: Request) -> HTMLResponse:
     )
 
 
+@router.get("/admin", response_class=HTMLResponse)
+async def admin_page(request: Request) -> HTMLResponse:
+    """Render the admin panel page.
+
+    Provides tenant management, run management, credential health
+    testing, and system-wide statistics in a single view.
+    """
+    return templates.TemplateResponse(
+        request=request,
+        name="admin.html",
+        context={"page_title": "Admin"},
+    )
+
+
 @router.get("/runs/{run_id}", response_class=HTMLResponse)
 async def run_detail(request: Request, run_id: UUID) -> HTMLResponse:
     """Render the detail view for a specific pipeline run.

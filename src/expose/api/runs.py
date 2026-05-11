@@ -335,7 +335,10 @@ async def start_run(
             event_bus = get_event_bus(request.app)
 
         # Store reference to prevent GC before completion (RUF006).
-        _bg_tasks: list[asyncio.Task[None]] = getattr(request.app.state, "_bg_tasks", [])
+        # Dict keyed by run_id string so admin cancel can look up tasks.
+        _bg_tasks: dict[str, asyncio.Task[None]] = getattr(
+            request.app.state, "_bg_tasks", {}
+        )
         task = asyncio.create_task(
             _run_pipeline_background(
                 run_id=run_id,
@@ -346,8 +349,9 @@ async def start_run(
                 event_bus=event_bus,
             )
         )
-        _bg_tasks.append(task)
-        task.add_done_callback(_bg_tasks.remove)
+        task_key = str(run_id)
+        _bg_tasks[task_key] = task
+        task.add_done_callback(lambda _t: _bg_tasks.pop(task_key, None))
         request.app.state._bg_tasks = _bg_tasks
 
     # 6. Return 202 immediately

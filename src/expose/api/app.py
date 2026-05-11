@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from expose import __version__
+from expose.api.admin import router as admin_router
 from expose.api.credentials import router as credentials_router
 from expose.api.events import router as events_router
 from expose.api.export import router as export_router
@@ -66,11 +67,14 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     ``DatabaseSettings`` (env-driven per ADR-003). On shutdown the engine
     is disposed so connection pools are drained cleanly.
     """
+    from datetime import UTC, datetime  # noqa: PLC0415
+
     settings: DatabaseSettings = app.state.db_settings
     engine: AsyncEngine = create_async_engine_from_settings(settings)
     factory = create_session_factory(engine)
 
     app.state.session_factory = factory
+    app.state.server_started_at = datetime.now(UTC)
     app.dependency_overrides[get_session] = _make_session_dependency(factory)
 
     yield
@@ -123,6 +127,7 @@ def create_app(
     )
 
     # -- Routers ---------------------------------------------------------------
+    app.include_router(admin_router)
     app.include_router(tenant_router)
     app.include_router(runs_router)
     app.include_router(run_log_router)
