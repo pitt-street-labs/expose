@@ -144,6 +144,12 @@ KNOWN_SLOTS: list[_SlotDef] = [
         collector_ids=[],
         backend_key="unmapped.sfp_urlscan.api_key",
     ),
+    _SlotDef(
+        credential_id="chaos_api_key",
+        display_name="ProjectDiscovery Chaos API Key",
+        collector_ids=["dns-chaos"],
+        backend_key="collector.dns-chaos.api_key",
+    ),
 ]
 
 # Lookup tables for fast access
