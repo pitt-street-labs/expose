@@ -79,15 +79,28 @@ _HEALTH_CHECK_DOMAIN = "dns.google"
 
 
 def _parse_spf(txt: str) -> dict[str, Any]:
-    """Extract SPF includes and mechanisms from an SPF record string.
+    """Extract SPF includes, mechanisms, and IP directives from an SPF record.
 
-    Returns a dict with ``includes`` (list of include targets) and
-    ``mechanisms`` (list of all mechanisms after the ``v=spf1`` tag).
+    Returns a dict with ``includes`` (list of include targets),
+    ``mechanisms`` (list of all mechanisms after the ``v=spf1`` tag),
+    ``ip4_addresses`` (list of ``ip4:`` values), and ``ip6_addresses``
+    (list of ``ip6:`` values).
     """
     parts = txt.split()
     includes = [m.split(":", 1)[1] for m in parts if m.startswith("include:")]
     mechanisms = parts[1:]  # skip v=spf1
-    return {"includes": includes, "mechanisms": mechanisms}
+    ip4_addresses = [
+        m.split(":", 1)[1] for m in parts if m.startswith("ip4:")
+    ]
+    ip6_addresses = [
+        m.split(":", 1)[1] for m in parts if m.startswith("ip6:")
+    ]
+    return {
+        "includes": includes,
+        "mechanisms": mechanisms,
+        "ip4_addresses": ip4_addresses,
+        "ip6_addresses": ip6_addresses,
+    }
 
 
 def _parse_dmarc(txt: str) -> dict[str, Any]:
@@ -193,6 +206,8 @@ class EmailAuthCollector(Collector):
             result["spf_record"] = sanitized
             result["spf_includes"] = parsed["includes"]
             result["spf_mechanisms"] = parsed["mechanisms"]
+            result["spf_ip4_addresses"] = parsed["ip4_addresses"]
+            result["spf_ip6_addresses"] = parsed["ip6_addresses"]
         return result
 
     async def _collect_dkim(self, domain: str) -> dict[str, Any]:
@@ -263,6 +278,51 @@ class EmailAuthCollector(Collector):
             observed_at=datetime.now(UTC),
             structured_payload=payload,
         )
+
+        # Emit separate IP observations for each ip4:/ip6: directive found
+        # in the SPF record.  These feed the iterative expansion loop:
+        # domain -> SPF IPs -> BGP/Shodan on those IPs.
+        for ip_val in payload.get("spf_ip4_addresses", []):
+            # Strip CIDR suffix for the identifier value (keep the raw
+            # value with CIDR in the payload for context).
+            ip_bare = ip_val.split("/")[0]
+            yield Observation(
+                collector_id=self.collector_id,
+                collector_version=self.collector_version,
+                tenant_id=self.config.tenant_id,
+                observation_type=ObservationType.DNS_RECORD,
+                subject=ObservationSubject(
+                    identifier_type=ExtendedIdentifierType.IP,
+                    identifier_value=ip_bare,
+                ),
+                observed_at=datetime.now(UTC),
+                structured_payload={
+                    "source": "spf_record",
+                    "domain": canonical,
+                    "mechanism": "ip4",
+                    "raw_value": ip_val,
+                },
+            )
+
+        for ip_val in payload.get("spf_ip6_addresses", []):
+            ip_bare = ip_val.split("/")[0]
+            yield Observation(
+                collector_id=self.collector_id,
+                collector_version=self.collector_version,
+                tenant_id=self.config.tenant_id,
+                observation_type=ObservationType.DNS_RECORD,
+                subject=ObservationSubject(
+                    identifier_type=ExtendedIdentifierType.IP,
+                    identifier_value=ip_bare,
+                ),
+                observed_at=datetime.now(UTC),
+                structured_payload={
+                    "source": "spf_record",
+                    "domain": canonical,
+                    "mechanism": "ip6",
+                    "raw_value": ip_val,
+                },
+            )
 
     async def health_check(self) -> CollectorHealthCheck:
         """Probe DNS resolution by resolving a well-known domain.

@@ -254,6 +254,106 @@ class TestEmailAuthSpfIncludes:
 
 
 @pytest.mark.skipif(not HAS_DNSPYTHON, reason="dnspython not installed")
+class TestEmailAuthSpfIpExtraction:
+    """SPF IP extraction -- ip4:/ip6: directives emitted as IP observations."""
+
+    async def test_ip4_observations_emitted(self) -> None:
+        """ip4: directives in SPF yield separate IP observations."""
+        spf_txt = "v=spf1 ip4:192.0.2.0/24 ip4:198.51.100.5 -all"
+        answers = {
+            "iptest.example.com": _make_txt_answer([spf_txt]),
+        }
+
+        collector = EmailAuthCollector(_config())
+        collector._resolver = _MockResolver(answers)
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="iptest.example.com")
+        observations = [obs async for obs in collector.expand(seed)]
+
+        # 1 summary + 2 IP observations
+        assert len(observations) == 3
+
+        # First observation is the summary.
+        summary = observations[0]
+        assert summary.subject.identifier_type == ExtendedIdentifierType.DOMAIN
+        assert summary.structured_payload["has_spf"] is True
+        assert summary.structured_payload["spf_ip4_addresses"] == [
+            "192.0.2.0/24",
+            "198.51.100.5",
+        ]
+
+        # IP observations.
+        ip_obs = observations[1:]
+        assert ip_obs[0].subject.identifier_type == ExtendedIdentifierType.IP
+        assert ip_obs[0].subject.identifier_value == "192.0.2.0"
+        assert ip_obs[0].structured_payload["source"] == "spf_record"
+        assert ip_obs[0].structured_payload["mechanism"] == "ip4"
+        assert ip_obs[0].structured_payload["domain"] == "iptest.example.com"
+        assert ip_obs[0].structured_payload["raw_value"] == "192.0.2.0/24"
+
+        assert ip_obs[1].subject.identifier_type == ExtendedIdentifierType.IP
+        assert ip_obs[1].subject.identifier_value == "198.51.100.5"
+        assert ip_obs[1].structured_payload["raw_value"] == "198.51.100.5"
+
+    async def test_ip6_observations_emitted(self) -> None:
+        """ip6: directives in SPF yield separate IP observations."""
+        spf_txt = "v=spf1 ip6:2001:db8::/32 -all"
+        answers = {
+            "ip6test.example.com": _make_txt_answer([spf_txt]),
+        }
+
+        collector = EmailAuthCollector(_config())
+        collector._resolver = _MockResolver(answers)
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="ip6test.example.com")
+        observations = [obs async for obs in collector.expand(seed)]
+
+        assert len(observations) == 2
+
+        ip_obs = observations[1]
+        assert ip_obs.subject.identifier_type == ExtendedIdentifierType.IP
+        assert ip_obs.subject.identifier_value == "2001:db8::"
+        assert ip_obs.structured_payload["mechanism"] == "ip6"
+        assert ip_obs.structured_payload["raw_value"] == "2001:db8::/32"
+
+    async def test_no_ip_directives_yields_only_summary(self) -> None:
+        """SPF with no ip4/ip6 directives yields only the summary."""
+        spf_txt = "v=spf1 include:_spf.google.com ~all"
+        answers = {
+            "noip.example.com": _make_txt_answer([spf_txt]),
+        }
+
+        collector = EmailAuthCollector(_config())
+        collector._resolver = _MockResolver(answers)
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="noip.example.com")
+        observations = [obs async for obs in collector.expand(seed)]
+
+        # Only the summary observation.
+        assert len(observations) == 1
+        assert observations[0].subject.identifier_type == ExtendedIdentifierType.DOMAIN
+
+    async def test_mixed_ip4_ip6_observations(self) -> None:
+        """Both ip4: and ip6: directives emit observations."""
+        spf_txt = "v=spf1 ip4:10.0.0.1 ip6:2001:db8::1 include:mail.example.com -all"
+        answers = {
+            "mixed.example.com": _make_txt_answer([spf_txt]),
+        }
+
+        collector = EmailAuthCollector(_config())
+        collector._resolver = _MockResolver(answers)
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="mixed.example.com")
+        observations = [obs async for obs in collector.expand(seed)]
+
+        # 1 summary + 1 ip4 + 1 ip6 = 3
+        assert len(observations) == 3
+        ip_types = [obs.structured_payload["mechanism"] for obs in observations[1:]]
+        assert "ip4" in ip_types
+        assert "ip6" in ip_types
+
+
+@pytest.mark.skipif(not HAS_DNSPYTHON, reason="dnspython not installed")
 class TestEmailAuthDkimDiscovery:
     """Test 4: DKIM selector discovery -- only found selectors reported."""
 
@@ -544,6 +644,38 @@ class TestParseSpf:
         result = _parse_spf("v=spf1 redirect=_spf.example.com")
         assert result["includes"] == []
         assert "redirect=_spf.example.com" in result["mechanisms"]
+
+    def test_spf_ip4_extraction(self) -> None:
+        """ip4: directives are extracted into ip4_addresses list."""
+        result = _parse_spf(
+            "v=spf1 ip4:192.0.2.0/24 ip4:198.51.100.5 include:_spf.google.com -all"
+        )
+        assert result["ip4_addresses"] == ["192.0.2.0/24", "198.51.100.5"]
+        assert result["ip6_addresses"] == []
+
+    def test_spf_ip6_extraction(self) -> None:
+        """ip6: directives are extracted into ip6_addresses list."""
+        result = _parse_spf(
+            "v=spf1 ip6:2001:db8::/32 ip6:2001:db8::1 -all"
+        )
+        assert result["ip6_addresses"] == ["2001:db8::/32", "2001:db8::1"]
+        assert result["ip4_addresses"] == []
+
+    def test_spf_mixed_ip4_ip6(self) -> None:
+        """Both ip4: and ip6: directives extracted together."""
+        result = _parse_spf(
+            "v=spf1 ip4:10.0.0.1 ip6:2001:db8::1 include:_spf.google.com -all"
+        )
+        assert result["ip4_addresses"] == ["10.0.0.1"]
+        assert result["ip6_addresses"] == ["2001:db8::1"]
+
+    def test_spf_no_ip_directives(self) -> None:
+        """SPF record with no ip4/ip6 directives has empty lists."""
+        result = _parse_spf(
+            "v=spf1 include:_spf.google.com ~all"
+        )
+        assert result["ip4_addresses"] == []
+        assert result["ip6_addresses"] == []
 
 
 class TestParseDmarc:
