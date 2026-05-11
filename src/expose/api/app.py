@@ -325,6 +325,13 @@ def create_app(
 
         setup_observability(service_name="expose-api")
 
+        try:
+            from expose.observability.metrics import init_prometheus_reader  # noqa: PLC0415
+
+            init_prometheus_reader()
+        except Exception:
+            pass
+
     # -- CORS ------------------------------------------------------------------
     origins = cors_origins if cors_origins is not None else ["*"]
     app.add_middleware(
