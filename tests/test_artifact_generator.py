@@ -32,6 +32,7 @@ from uuid import UUID
 
 import pytest
 
+from expose.crypto.signing import ArtifactSigner, verify_artifact
 from expose.pipeline.artifact_generator import ArtifactGenerator
 from expose.storage import StorageBackend
 from expose.storage.local import LocalStorageBackend
@@ -120,6 +121,7 @@ def _build_generator(
     relationships: list[MagicMock] | None = None,
     run_row: MagicMock | None = None,
     storage: StorageBackend | None = None,
+    signer: ArtifactSigner | None = None,
 ) -> ArtifactGenerator:
     """Wire up an ArtifactGenerator with mocked dependencies."""
     entity_repo = AsyncMock()
@@ -138,6 +140,7 @@ def _build_generator(
         relationship_repo=relationship_repo,
         run_repo=run_repo,
         storage=storage,
+        signer=signer,
     )
 
 
@@ -483,3 +486,146 @@ async def test_storage_key_follows_convention(tmp_path: Path) -> None:
     expected_key = f"tenant/{TENANT_ID}/artifacts/{RUN_ID}.json"
     keys = await storage.list_keys(prefix=f"tenant/{TENANT_ID}/artifacts/")
     assert expected_key in keys
+
+
+# === Signing integration tests ================================================
+
+
+async def test_generate_with_signer_produces_signature() -> None:
+    """When a signer is configured, the result includes a signature."""
+    signer, key_info = ArtifactSigner.generate_key_pair("ed25519")
+    entities = [_make_entity_row()]
+    gen = _build_generator(entities=entities, signer=signer)
+
+    result = await gen.generate(run_id=RUN_ID, tenant_id=TENANT_ID)
+
+    assert result.signature is not None
+    assert result.signature.algorithm == "ed25519"
+    assert result.signature.key_id == key_info.key_id
+    assert len(result.signature.signature_b64) > 0
+    assert result.signature.signed_at is not None
+    assert len(result.signature.content_hash) == 64
+
+
+async def test_generate_without_signer_has_no_signature() -> None:
+    """When no signer is configured, the result has signature=None."""
+    entities = [_make_entity_row()]
+    gen = _build_generator(entities=entities)
+
+    result = await gen.generate(run_id=RUN_ID, tenant_id=TENANT_ID)
+
+    assert result.signature is None
+
+
+async def test_signature_content_hash_matches_artifact_hash() -> None:
+    """Signature content_hash must match the artifact content_hash."""
+    signer, _key_info = ArtifactSigner.generate_key_pair("ed25519")
+    entities = [_make_entity_row()]
+    gen = _build_generator(entities=entities, signer=signer)
+
+    result = await gen.generate(run_id=RUN_ID, tenant_id=TENANT_ID)
+
+    assert result.signature is not None
+    assert result.signature.content_hash == result.content_hash
+
+
+async def test_signature_verifies_against_json_bytes() -> None:
+    """The signature in the result must verify against result.json_bytes."""
+    signer, key_info = ArtifactSigner.generate_key_pair("ed25519")
+    entities = [_make_entity_row()]
+    gen = _build_generator(entities=entities, signer=signer)
+
+    result = await gen.generate(run_id=RUN_ID, tenant_id=TENANT_ID)
+
+    assert result.signature is not None
+    assert verify_artifact(
+        result.json_bytes,
+        result.signature.signature_b64,
+        key_info.public_key_pem,
+        algorithm="ed25519",
+    )
+
+
+async def test_signature_metadata_structure() -> None:
+    """Signature metadata has the expected manifest-compatible shape."""
+    signer, _key_info = ArtifactSigner.generate_key_pair("ed25519")
+    entities = [_make_entity_row()]
+    gen = _build_generator(entities=entities, signer=signer)
+
+    result = await gen.generate(run_id=RUN_ID, tenant_id=TENANT_ID)
+
+    assert result.signature is not None
+    sig_dict = result.signature.model_dump(mode="json")
+    # Verify all expected keys are present
+    assert set(sig_dict.keys()) == {
+        "algorithm",
+        "key_id",
+        "signature_b64",
+        "signed_at",
+        "content_hash",
+    }
+    assert sig_dict["algorithm"] == "ed25519"
+    assert isinstance(sig_dict["signed_at"], str)  # ISO-8601 string
+
+
+async def test_generate_with_ecdsa_signer() -> None:
+    """ECDSA-P256 signer also produces valid signatures."""
+    signer, key_info = ArtifactSigner.generate_key_pair("ecdsa-p256")
+    entities = [_make_entity_row()]
+    gen = _build_generator(entities=entities, signer=signer)
+
+    result = await gen.generate(run_id=RUN_ID, tenant_id=TENANT_ID)
+
+    assert result.signature is not None
+    assert result.signature.algorithm == "ecdsa-p256"
+    assert verify_artifact(
+        result.json_bytes,
+        result.signature.signature_b64,
+        key_info.public_key_pem,
+        algorithm="ecdsa-p256",
+    )
+
+
+async def test_signer_with_storage_both_work(tmp_path: Path) -> None:
+    """Signing and storage can coexist without interfering."""
+    signer, _key_info = ArtifactSigner.generate_key_pair("ed25519")
+    storage = LocalStorageBackend(root=tmp_path)
+    entities = [_make_entity_row()]
+    gen = _build_generator(entities=entities, storage=storage, signer=signer)
+
+    result = await gen.generate(run_id=RUN_ID, tenant_id=TENANT_ID)
+
+    assert result.signature is not None
+    assert result.storage_uri is not None
+
+
+async def test_fips_gate_compliance() -> None:
+    """Verify that signing.py and artifact_generator.py do not import hashlib or secrets."""
+    import ast
+
+    signing_path = Path(__file__).resolve().parent.parent / "src" / "expose" / "crypto" / "signing.py"
+    generator_path = (
+        Path(__file__).resolve().parent.parent
+        / "src"
+        / "expose"
+        / "pipeline"
+        / "artifact_generator.py"
+    )
+
+    banned = {"hashlib", "secrets"}
+
+    for source_path in [signing_path, generator_path]:
+        source = source_path.read_text()
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    assert alias.name not in banned, (
+                        f"{source_path.name} imports banned module {alias.name!r}"
+                    )
+            elif isinstance(node, ast.ImportFrom):
+                if node.module is not None:
+                    root_module = node.module.split(".")[0]
+                    assert root_module not in banned, (
+                        f"{source_path.name} imports from banned module {node.module!r}"
+                    )

@@ -1252,3 +1252,110 @@ class TestCredentialChainEndToEnd:
         captured = MockConfigCapturingCollector.captured_config
         assert captured is not None
         assert captured.credentials == {}
+
+
+# === Enforcement log integration tests ========================================
+
+
+class TestEnforcementDispatcherIntegration:
+    """Tests for enforcement log wiring into the dispatcher."""
+
+    @pytest.mark.asyncio
+    async def test_enforcement_denied_dispatch_creates_refusal(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """Denied Tier-3 dispatch creates a ScopeRefusalEvent in the enforcement log."""
+        log = EnforcementLog()
+        dispatcher = PipelineDispatcher(
+            registry, scope_empty, TENANT_ID,
+            enforcement_log=log,
+        )
+        result = await dispatcher.dispatch(_make_job("mock-tier3", seed))
+
+        assert result.status == DispatchStatus.DENIED
+        assert log.refusal_count == 1
+        refusal = log.refusals[0]
+        assert refusal.tenant_id == TENANT_ID
+        assert refusal.entity_identifier == "example.com"
+        assert refusal.collector_id == "mock-tier3"
+        assert refusal.attribution_tier is None
+        assert refusal.reason  # non-empty denial reason
+
+    @pytest.mark.asyncio
+    async def test_enforcement_log_none_safe(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """Dispatcher with enforcement_log=None does not crash on denial."""
+        # When enforcement_log is None, __init__ creates a default EnforcementLog.
+        # The dispatch must complete without AttributeError or TypeError.
+        dispatcher = PipelineDispatcher(
+            registry, scope_empty, TENANT_ID,
+            enforcement_log=None,
+        )
+        result = await dispatcher.dispatch(_make_job("mock-tier3", seed))
+        assert result.status == DispatchStatus.DENIED
+        assert result.error_message is not None
+
+        # Also verify that a successful dispatch with no log works fine.
+        result_ok = await dispatcher.dispatch(_make_job("mock-tier1", seed))
+        assert result_ok.status == DispatchStatus.SUCCESS
+
+    @pytest.mark.asyncio
+    async def test_enforcement_refusals_serialized(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """Refusals are serializable via model_dump and contain expected fields."""
+        log = EnforcementLog()
+        dispatcher = PipelineDispatcher(
+            registry, scope_empty, TENANT_ID,
+            enforcement_log=log,
+        )
+        await dispatcher.dispatch(_make_job("mock-tier3", seed))
+
+        assert log.refusal_count == 1
+        serialized = [r.model_dump(mode="json") for r in log.refusals]
+        assert len(serialized) == 1
+        entry = serialized[0]
+        assert entry["entity_identifier"] == "example.com"
+        assert entry["collector_id"] == "mock-tier3"
+        assert entry["tenant_id"] == str(TENANT_ID)
+        assert "reason" in entry
+        assert "timestamp" in entry
+        assert "enforcement_mode" in entry
+
+    @pytest.mark.asyncio
+    async def test_enforcement_tier3_denial_recorded(
+        self,
+        registry: CollectorRegistry,
+        seed: Seed,
+    ) -> None:
+        """Tier-3 denial records refusal with correct enforcement mode from scope."""
+        from expose.collectors.tiers import EnforcementMode  # noqa: PLC0415
+
+        scope = TenantAuthorizationScope(
+            explicit_entity_identifiers=frozenset(),
+            enforcement_mode=EnforcementMode.HARD,
+        )
+        log = EnforcementLog()
+        dispatcher = PipelineDispatcher(
+            registry, scope, TENANT_ID,
+            enforcement_log=log,
+        )
+        result = await dispatcher.dispatch(_make_job("mock-tier3", seed))
+
+        assert result.status == DispatchStatus.DENIED
+        assert log.refusal_count == 1
+        refusal = log.refusals[0]
+        assert refusal.enforcement_mode == EnforcementMode.HARD
+        assert "Tier-3 dispatch denied" in refusal.reason
+        assert refusal.entity_identifier == "example.com"
+        assert refusal.collector_id == "mock-tier3"

@@ -26,6 +26,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 from expose.crypto.fips_adapter import compute_sha256_hex
+from expose.crypto.signing import ArtifactSigner, SignatureResult, sign_artifact
 from expose.db.models import Entity as EntityRow
 from expose.db.models import Relationship as RelationshipRow
 from expose.db.models import Run as RunRow
@@ -95,6 +96,7 @@ class ArtifactResult(BaseModel):
     entity_count: int
     relationship_count: int
     storage_uri: str | None = None
+    signature: SignatureResult | None = None
 
 
 class ArtifactGenerator:
@@ -111,11 +113,13 @@ class ArtifactGenerator:
         relationship_repo: RelationshipRepository,
         run_repo: RunRepository,
         storage: StorageBackend | None = None,
+        signer: ArtifactSigner | None = None,
     ) -> None:
         self._entity_repo = entity_repo
         self._relationship_repo = relationship_repo
         self._run_repo = run_repo
         self._storage = storage
+        self._signer = signer
 
     async def generate(
         self,
@@ -203,7 +207,23 @@ class ArtifactGenerator:
         json_bytes = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
         content_hash = compute_sha256_hex(json_bytes)
 
-        # 11. Persist to object storage when a backend is configured
+        # 11. Sign the serialized artifact when a signer is configured
+        signature: SignatureResult | None = None
+        if self._signer is not None:
+            try:
+                signature = sign_artifact(json_bytes, self._signer)
+                logger.info(
+                    "Artifact signed: algorithm=%s key_id=%s",
+                    signature.algorithm,
+                    signature.key_id,
+                )
+            except Exception:
+                logger.warning(
+                    "Artifact signing failed; producing unsigned artifact",
+                    exc_info=True,
+                )
+
+        # 12. Persist to object storage when a backend is configured
         storage_uri: str | None = None
         if self._storage is not None:
             artifact_key = f"tenant/{tenant_id}/artifacts/{run_id}.json"
@@ -220,6 +240,7 @@ class ArtifactGenerator:
             entity_count=len(entities),
             relationship_count=len(all_relationships),
             storage_uri=storage_uri,
+            signature=signature,
         )
 
 

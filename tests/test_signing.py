@@ -18,8 +18,11 @@ from expose.crypto.fips_adapter import compute_sha256_hex
 from expose.crypto.signing import (
     ArtifactSignature,
     ArtifactSigner,
+    SignatureResult,
     SigningKeyPair,
     SLSAProvenance,
+    sign_artifact,
+    verify_artifact,
 )
 
 # ---------------------------------------------------------------------------
@@ -413,3 +416,144 @@ class TestSLSAProvenance:
             finished_at=started + timedelta(seconds=1),
         )
         assert prov.materials == []
+
+
+# ---------------------------------------------------------------------------
+# sign_artifact / verify_artifact convenience functions
+# ---------------------------------------------------------------------------
+
+
+class TestSignArtifactConvenience:
+    """Tests for the high-level :func:`sign_artifact` convenience function."""
+
+    def test_sign_artifact_returns_signature_result(self) -> None:
+        signer, _key_info = ArtifactSigner.generate_key_pair("ed25519")
+        payload = b'{"schema_version": "expose/v1"}'
+
+        result = sign_artifact(payload, signer)
+
+        assert isinstance(result, SignatureResult)
+        assert result.algorithm == "ed25519"
+        assert len(result.key_id) >= 1
+        assert len(result.signature_b64) > 0
+        assert result.signed_at is not None
+        assert len(result.content_hash) == 64  # SHA-256 hex
+
+    def test_sign_artifact_content_hash_matches_fips(self) -> None:
+        """content_hash in SignatureResult must match FIPS adapter output."""
+        signer, _key_info = ArtifactSigner.generate_key_pair("ed25519")
+        payload = b"fips hash verification payload"
+
+        result = sign_artifact(payload, signer)
+        expected = compute_sha256_hex(payload)
+
+        assert result.content_hash == expected
+
+    def test_sign_artifact_ecdsa(self) -> None:
+        signer, _key_info = ArtifactSigner.generate_key_pair("ecdsa-p256")
+        payload = b"ecdsa convenience test"
+
+        result = sign_artifact(payload, signer)
+
+        assert result.algorithm == "ecdsa-p256"
+        assert isinstance(result, SignatureResult)
+
+
+class TestVerifyArtifactConvenience:
+    """Tests for the high-level :func:`verify_artifact` convenience function."""
+
+    def test_sign_then_verify_roundtrip(self) -> None:
+        signer, key_info = ArtifactSigner.generate_key_pair("ed25519")
+        payload = b"roundtrip via convenience functions"
+
+        sig_result = sign_artifact(payload, signer)
+        assert verify_artifact(
+            payload,
+            sig_result.signature_b64,
+            key_info.public_key_pem,
+            algorithm="ed25519",
+        )
+
+    def test_verify_wrong_key_returns_false(self) -> None:
+        signer, _key_info = ArtifactSigner.generate_key_pair("ed25519")
+        _other_signer, other_key = ArtifactSigner.generate_key_pair("ed25519")
+        payload = b"wrong key test"
+
+        sig_result = sign_artifact(payload, signer)
+        assert not verify_artifact(
+            payload,
+            sig_result.signature_b64,
+            other_key.public_key_pem,
+            algorithm="ed25519",
+        )
+
+    def test_verify_tampered_payload_returns_false(self) -> None:
+        signer, key_info = ArtifactSigner.generate_key_pair("ed25519")
+        payload = b"original payload"
+
+        sig_result = sign_artifact(payload, signer)
+        assert not verify_artifact(
+            b"tampered payload",
+            sig_result.signature_b64,
+            key_info.public_key_pem,
+            algorithm="ed25519",
+        )
+
+    def test_verify_bogus_signature_returns_false(self) -> None:
+        _signer, key_info = ArtifactSigner.generate_key_pair("ed25519")
+        payload = b"bogus sig test"
+
+        assert not verify_artifact(
+            payload,
+            base64.b64encode(b"not-a-real-sig").decode("ascii"),
+            key_info.public_key_pem,
+            algorithm="ed25519",
+        )
+
+    def test_sign_verify_ecdsa_roundtrip(self) -> None:
+        signer, key_info = ArtifactSigner.generate_key_pair("ecdsa-p256")
+        payload = b"ecdsa convenience roundtrip"
+
+        sig_result = sign_artifact(payload, signer)
+        assert verify_artifact(
+            payload,
+            sig_result.signature_b64,
+            key_info.public_key_pem,
+            algorithm="ecdsa-p256",
+        )
+
+
+class TestSignatureResultModel:
+    """Validate the SignatureResult Pydantic model."""
+
+    def test_frozen(self) -> None:
+        sr = SignatureResult(
+            algorithm="ed25519",
+            key_id="k1",
+            signature_b64="dGVzdA==",
+            signed_at=_now(),
+            content_hash="a" * 64,
+        )
+        with pytest.raises(ValidationError):
+            sr.algorithm = "changed"  # type: ignore[misc]
+
+    def test_forbids_extra_fields(self) -> None:
+        with pytest.raises(ValidationError):
+            SignatureResult(
+                algorithm="ed25519",
+                key_id="k1",
+                signature_b64="dGVzdA==",
+                signed_at=_now(),
+                content_hash="a" * 64,
+                bogus="nope",  # type: ignore[call-arg]
+            )
+
+    def test_min_length_key_id(self) -> None:
+        with pytest.raises(ValidationError):
+            SignatureResult(
+                algorithm="ed25519",
+                key_id="",  # min_length=1 violated
+                signature_b64="dGVzdA==",
+                signed_at=_now(),
+                content_hash="a" * 64,
+            )

@@ -272,3 +272,280 @@ class TestEnforcementModeEnum:
         """Values are plain strings for JSON serialization."""
         assert isinstance(EnforcementMode.MEDIUM, str)
         assert isinstance(EnforcementMode.HARD, str)
+
+
+# === Dispatcher integration — enforcement log wiring ==========================
+
+
+class TestEnforcementDispatcherWiring:
+    """Verify that enforcement logging works end-to-end through the dispatcher.
+
+    These tests import the dispatcher and mock collectors to confirm that
+    refusal events flow from denied dispatches into the enforcement log.
+    """
+
+    @pytest.fixture()
+    def _dispatcher_fixtures(self) -> tuple:
+        """Build a dispatcher registry with Tier-1 and Tier-3 mock collectors."""
+        from collections.abc import AsyncIterator  # noqa: PLC0415
+        from uuid import UUID as _UUID  # noqa: PLC0415
+
+        from expose.collectors.base import (  # noqa: PLC0415
+            Collector,
+            CollectorConfig,
+            CollectorHealthCheck,
+            Observation,
+            ObservationSubject,
+            ObservationType,
+            Seed,
+            SeedType,
+        )
+        from expose.collectors.registry import CollectorRegistry  # noqa: PLC0415
+        from expose.collectors.tiers import CollectorTier  # noqa: PLC0415
+        from expose.types.canonical import CollectorStatus, ExtendedIdentifierType  # noqa: PLC0415
+
+        _now = datetime(2026, 5, 10, 12, 0, 0, tzinfo=UTC)
+
+        class _Tier1(Collector):
+            collector_id = "enf-tier1"
+            collector_version = "1.0.0"
+            requires_credentials = False
+            rate_limit_per_minute = None
+            tier = CollectorTier.TIER_1
+
+            async def expand(self, seed: Seed) -> AsyncIterator[Observation]:
+                yield Observation(
+                    collector_id=self.collector_id,
+                    collector_version=self.collector_version,
+                    tenant_id=self.config.tenant_id,
+                    observation_type=ObservationType.DNS_RESOLUTION,
+                    subject=ObservationSubject(
+                        identifier_type=ExtendedIdentifierType.DOMAIN,
+                        identifier_value=seed.value,
+                    ),
+                    observed_at=_now,
+                )
+
+            async def health_check(self) -> CollectorHealthCheck:
+                return CollectorHealthCheck(
+                    collector_id=self.collector_id,
+                    collector_version=self.collector_version,
+                    status=CollectorStatus.SUCCESS,
+                    checked_at=_now,
+                    latency_ms=1.0,
+                )
+
+        class _Tier3(Collector):
+            collector_id = "enf-tier3"
+            collector_version = "1.0.0"
+            requires_credentials = False
+            rate_limit_per_minute = None
+            tier = CollectorTier.TIER_3
+
+            async def expand(self, seed: Seed) -> AsyncIterator[Observation]:
+                yield Observation(
+                    collector_id=self.collector_id,
+                    collector_version=self.collector_version,
+                    tenant_id=self.config.tenant_id,
+                    observation_type=ObservationType.DNS_RESOLUTION,
+                    subject=ObservationSubject(
+                        identifier_type=ExtendedIdentifierType.DOMAIN,
+                        identifier_value=seed.value,
+                    ),
+                    observed_at=_now,
+                )
+
+            async def health_check(self) -> CollectorHealthCheck:
+                return CollectorHealthCheck(
+                    collector_id=self.collector_id,
+                    collector_version=self.collector_version,
+                    status=CollectorStatus.SUCCESS,
+                    checked_at=_now,
+                    latency_ms=1.0,
+                )
+
+        reg = CollectorRegistry()
+        reg.register(_Tier1)
+        reg.register(_Tier3)
+
+        seed = Seed(seed_type=SeedType.DOMAIN, value="target.example")
+
+        return reg, seed, _Tier1, _Tier3
+
+    @pytest.mark.asyncio
+    async def test_enforcement_denied_dispatch_creates_refusal(
+        self,
+        _dispatcher_fixtures: tuple,
+    ) -> None:
+        """Denied Tier-3 dispatch records a ScopeRefusalEvent in the log."""
+        from expose.pipeline.dispatcher import (  # noqa: PLC0415
+            DispatchJob,
+            DispatchStatus,
+            PipelineDispatcher,
+        )
+
+        reg, seed, _, _ = _dispatcher_fixtures
+        scope = TenantAuthorizationScope(
+            explicit_entity_identifiers=frozenset(),
+        )
+        log = EnforcementLog()
+        dispatcher = PipelineDispatcher(
+            reg, scope, TENANT_A, enforcement_log=log,
+        )
+
+        run_id = UUID("018f1f00-0000-7000-8000-00000000E010")
+        job = DispatchJob(
+            collector_id="enf-tier3",
+            seed=seed,
+            run_id=run_id,
+            tenant_id=TENANT_A,
+        )
+        result = await dispatcher.dispatch(job)
+
+        assert result.status == DispatchStatus.DENIED
+        assert log.refusal_count == 1
+        refusal = log.refusals[0]
+        assert refusal.tenant_id == TENANT_A
+        assert refusal.entity_identifier == "target.example"
+        assert refusal.collector_id == "enf-tier3"
+
+    @pytest.mark.asyncio
+    async def test_enforcement_log_none_safe(
+        self,
+        _dispatcher_fixtures: tuple,
+    ) -> None:
+        """Dispatcher with enforcement_log=None does not crash."""
+        from expose.pipeline.dispatcher import (  # noqa: PLC0415
+            DispatchJob,
+            DispatchStatus,
+            PipelineDispatcher,
+        )
+
+        reg, seed, _, _ = _dispatcher_fixtures
+        scope = TenantAuthorizationScope(
+            explicit_entity_identifiers=frozenset(),
+        )
+        dispatcher = PipelineDispatcher(
+            reg, scope, TENANT_A, enforcement_log=None,
+        )
+
+        run_id = UUID("018f1f00-0000-7000-8000-00000000E011")
+        job = DispatchJob(
+            collector_id="enf-tier3",
+            seed=seed,
+            run_id=run_id,
+            tenant_id=TENANT_A,
+        )
+        # Should not raise, even though no external log is provided
+        result = await dispatcher.dispatch(job)
+        assert result.status == DispatchStatus.DENIED
+
+    @pytest.mark.asyncio
+    async def test_enforcement_refusals_serialized(
+        self,
+        _dispatcher_fixtures: tuple,
+    ) -> None:
+        """Refusals serialize to JSON-compatible dicts."""
+        from expose.pipeline.dispatcher import (  # noqa: PLC0415
+            DispatchJob,
+            PipelineDispatcher,
+        )
+
+        reg, seed, _, _ = _dispatcher_fixtures
+        scope = TenantAuthorizationScope(
+            explicit_entity_identifiers=frozenset(),
+        )
+        log = EnforcementLog()
+        dispatcher = PipelineDispatcher(
+            reg, scope, TENANT_A, enforcement_log=log,
+        )
+
+        run_id = UUID("018f1f00-0000-7000-8000-00000000E012")
+        job = DispatchJob(
+            collector_id="enf-tier3",
+            seed=seed,
+            run_id=run_id,
+            tenant_id=TENANT_A,
+        )
+        await dispatcher.dispatch(job)
+
+        serialized = [r.model_dump(mode="json") for r in log.refusals]
+        assert len(serialized) == 1
+        entry = serialized[0]
+        assert isinstance(entry, dict)
+        assert entry["entity_identifier"] == "target.example"
+        assert entry["collector_id"] == "enf-tier3"
+        assert entry["tenant_id"] == str(TENANT_A)
+        assert isinstance(entry["timestamp"], str)
+        assert "enforcement_mode" in entry
+
+    @pytest.mark.asyncio
+    async def test_enforcement_tier3_denial_recorded(
+        self,
+        _dispatcher_fixtures: tuple,
+    ) -> None:
+        """Tier-3 denial records refusal with HARD enforcement mode when scope is HARD."""
+        from expose.pipeline.dispatcher import (  # noqa: PLC0415
+            DispatchJob,
+            DispatchStatus,
+            PipelineDispatcher,
+        )
+
+        reg, seed, _, _ = _dispatcher_fixtures
+        scope = TenantAuthorizationScope(
+            explicit_entity_identifiers=frozenset(),
+            enforcement_mode=EnforcementMode.HARD,
+        )
+        log = EnforcementLog()
+        dispatcher = PipelineDispatcher(
+            reg, scope, TENANT_A, enforcement_log=log,
+        )
+
+        run_id = UUID("018f1f00-0000-7000-8000-00000000E013")
+        job = DispatchJob(
+            collector_id="enf-tier3",
+            seed=seed,
+            run_id=run_id,
+            tenant_id=TENANT_A,
+        )
+        result = await dispatcher.dispatch(job)
+
+        assert result.status == DispatchStatus.DENIED
+        assert log.refusal_count == 1
+        refusal = log.refusals[0]
+        assert refusal.enforcement_mode == EnforcementMode.HARD
+        assert "Tier-3 dispatch denied" in refusal.reason
+        assert refusal.entity_identifier == "target.example"
+
+    @pytest.mark.asyncio
+    async def test_enforcement_allowed_dispatch_no_refusal(
+        self,
+        _dispatcher_fixtures: tuple,
+    ) -> None:
+        """Successful Tier-1 dispatch does not create any refusal events."""
+        from expose.pipeline.dispatcher import (  # noqa: PLC0415
+            DispatchJob,
+            DispatchStatus,
+            PipelineDispatcher,
+        )
+
+        reg, seed, _, _ = _dispatcher_fixtures
+        scope = TenantAuthorizationScope(
+            explicit_entity_identifiers=frozenset(),
+        )
+        log = EnforcementLog()
+        dispatcher = PipelineDispatcher(
+            reg, scope, TENANT_A, enforcement_log=log,
+        )
+
+        run_id = UUID("018f1f00-0000-7000-8000-00000000E014")
+        job = DispatchJob(
+            collector_id="enf-tier1",
+            seed=seed,
+            run_id=run_id,
+            tenant_id=TENANT_A,
+        )
+        result = await dispatcher.dispatch(job)
+
+        assert result.status == DispatchStatus.SUCCESS
+        assert log.refusal_count == 0

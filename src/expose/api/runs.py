@@ -163,6 +163,7 @@ async def _run_pipeline_background(
     from expose.llm.client import SafeLLMClient  # noqa: PLC0415
     from expose.llm.providers import create_llm_provider  # noqa: PLC0415
     from expose.pipeline.dispatcher import PipelineDispatcher  # noqa: PLC0415
+    from expose.pipeline.enforcement import EnforcementLog  # noqa: PLC0415
     from expose.pipeline.enrichment import EnrichmentPipeline  # noqa: PLC0415
     from expose.pipeline.run_executor import RunExecutor  # noqa: PLC0415
     from expose.repositories.entity_repo import EntityRepository  # noqa: PLC0415
@@ -193,6 +194,7 @@ async def _run_pipeline_background(
                     )
 
                 log_sink = make_log_sink(run_id)
+                enforcement_log = EnforcementLog()
 
                 # --- Wire credential resolver from secrets backend ---
                 from expose.pipeline.credential_resolver import CredentialResolver  # noqa: PLC0415
@@ -205,6 +207,7 @@ async def _run_pipeline_background(
                     tenant_scope=scope,
                     tenant_id=tenant_id,
                     egress_profile=DirectEgressProfile(),
+                    enforcement_log=enforcement_log,
                     egress_fallbacks=egress_fallbacks,
                     log_sink=log_sink,
                     credential_resolver=credential_resolver,
@@ -269,6 +272,25 @@ async def _run_pipeline_background(
                     seeds=seeds,
                     collector_ids=collector_ids,
                 )
+
+                # --- Serialize enforcement refusals into run log ---
+                if enforcement_log.refusal_count > 0:
+                    refusals_data = [
+                        r.model_dump(mode="json")
+                        for r in enforcement_log.refusals
+                    ]
+                    logger.info(
+                        "Run %s completed with %d enforcement refusal(s): %s",
+                        run_id,
+                        enforcement_log.refusal_count,
+                        [r["entity_identifier"] for r in refusals_data],
+                    )
+                    if log_sink is not None:
+                        log_sink(
+                            "info",
+                            f"Enforcement: {enforcement_log.refusal_count} "
+                            f"dispatch(es) denied by scope/tier gate",
+                        )
 
                 await session.commit()
             except Exception:

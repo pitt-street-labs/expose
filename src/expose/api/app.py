@@ -7,10 +7,13 @@ an unauthenticated health endpoint.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import weakref
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
+from uuid import UUID
 
 from fastapi import FastAPI
 
@@ -42,6 +45,7 @@ from expose.api.runs import router as runs_router
 from expose.api.tenant_config import router as tenant_config_router
 from expose.api.tenants import get_session
 from expose.api.tenants import router as tenant_router
+from expose.api.scheduler import router as scheduler_router
 from expose.api.webhooks import router as webhooks_router
 from expose.db.engine import (
     DatabaseSettings,
@@ -50,6 +54,121 @@ from expose.db.engine import (
 )
 from expose.ui.router import mount_static
 from expose.ui.router import router as ui_router
+
+
+logger = logging.getLogger(__name__)
+
+# Maximum concurrent runs per tenant enforced by the scheduler trigger.
+_MAX_CONCURRENT_RUNS_PER_TENANT = 1
+
+
+async def _scheduler_run_trigger(
+    tenant_id: UUID,
+    collector_ids: list[str],
+    seeds: list[dict],
+) -> None:
+    """Callback invoked by ``RunScheduler`` when a schedule fires.
+
+    Checks for existing active runs before starting a new one to enforce the
+    per-tenant concurrent run limit.  Delegates to the existing run-start
+    logic from :mod:`expose.api.runs`.
+    """
+    from expose.api.runs import _run_pipeline_background  # noqa: PLC0415
+    from expose.collectors.base import Seed, SeedType  # noqa: PLC0415
+    from expose.db.models import Run  # noqa: PLC0415
+
+    from sqlalchemy import select  # noqa: PLC0415
+
+    app = _app_ref()
+    if app is None:
+        logger.warning("Scheduler trigger fired but app reference is gone")
+        return
+
+    session_factory = getattr(app.state, "session_factory", None)
+    if session_factory is None:
+        logger.warning("Scheduler trigger fired but no session_factory available")
+        return
+
+    # -- Concurrent run limit: check for active runs for this tenant ----------
+    async with session_factory() as session:
+        stmt = select(Run).where(
+            Run.tenant_id == tenant_id,
+            Run.state.in_(["pending", "running"]),
+        )
+        result = await session.execute(stmt)
+        active_runs = list(result.scalars().all())
+
+    if len(active_runs) >= _MAX_CONCURRENT_RUNS_PER_TENANT:
+        logger.info(
+            "Scheduler skipping trigger for tenant %s: %d active run(s) "
+            "(limit %d)",
+            tenant_id,
+            len(active_runs),
+            _MAX_CONCURRENT_RUNS_PER_TENANT,
+        )
+        return
+
+    # -- Build seeds and start the run ----------------------------------------
+    from datetime import UTC, datetime as _datetime  # noqa: PLC0415
+    from uuid import uuid4 as _uuid4  # noqa: PLC0415
+
+    from expose import __version__  # noqa: PLC0415
+
+    seed_objects: list[Seed] = []
+    for raw_seed in seeds:
+        value = raw_seed.get("value", "")
+        seed_type_str = raw_seed.get("seed_type", "DOMAIN")
+        try:
+            st = SeedType(seed_type_str)
+        except ValueError:
+            st = SeedType.DOMAIN
+        seed_objects.append(Seed(seed_type=st, value=value))
+
+    run_id = _uuid4()
+
+    # Insert the Run row.
+    async with session_factory() as session:
+        run = Run(
+            id=run_id,
+            tenant_id=tenant_id,
+            pipeline_version=__version__,
+            state="pending",
+            started_at=_datetime.now(UTC),
+        )
+        session.add(run)
+        await session.commit()
+
+    # Fire the background pipeline.
+    from expose.api.events import get_event_bus  # noqa: PLC0415
+    from expose.api.events import RunEventBus  # noqa: PLC0415
+
+    event_bus: RunEventBus | None = None
+    if hasattr(app.state, "event_bus"):
+        event_bus = get_event_bus(app)
+
+    _bg_tasks: dict[str, asyncio.Task[None]] = getattr(
+        app.state, "_bg_tasks", {}
+    )
+    task = asyncio.create_task(
+        _run_pipeline_background(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            seeds=seed_objects,
+            collector_ids=collector_ids,
+            session_factory=session_factory,
+            event_bus=event_bus,
+        )
+    )
+    task_key = str(run_id)
+    _bg_tasks[task_key] = task
+    task.add_done_callback(lambda _t: _bg_tasks.pop(task_key, None))
+    app.state._bg_tasks = _bg_tasks
+
+    logger.info(
+        "Scheduler triggered run %s for tenant %s",
+        run_id,
+        tenant_id,
+    )
 
 
 def _make_session_dependency(
@@ -96,7 +215,27 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     from expose.api.tenant_config import load_configs_from_db  # noqa: PLC0415
     await load_configs_from_db()
 
+    # -- Run scheduler (Wave 2) -----------------------------------------------
+    from expose.pipeline.scheduler import RunScheduler  # noqa: PLC0415
+
+    scheduler = RunScheduler(on_run_trigger=_scheduler_run_trigger)
+    app.state.run_scheduler = scheduler
+
+    scheduler_shutdown = asyncio.Event()
+    app.state._scheduler_shutdown = scheduler_shutdown
+
+    scheduler_task = asyncio.create_task(scheduler.run(scheduler_shutdown))
+    app.state._scheduler_task = scheduler_task
+
     yield
+
+    # -- Shutdown scheduler ----------------------------------------------------
+    scheduler_shutdown.set()
+    try:
+        await asyncio.wait_for(scheduler_task, timeout=10.0)
+    except (TimeoutError, asyncio.CancelledError):
+        scheduler_task.cancel()
+        logger.warning("Scheduler task did not stop cleanly within timeout")
 
     await engine.dispose()
 
@@ -158,6 +297,12 @@ def create_app(
     app.include_router(findings_router)
     app.include_router(rbac_router)
     app.include_router(webhooks_router)
+
+    # -- Wave 2: Scheduler router (issue #99) ----------------------------------
+    app.include_router(scheduler_router)
+    # -- END Wave 2 scheduler --------------------------------------------------
+    # >> Wave 3 provenance router goes HERE (agent 3D) <<
+
     app.include_router(ui_router)
 
     # -- Static files (CSS, JS for dashboard) ----------------------------------

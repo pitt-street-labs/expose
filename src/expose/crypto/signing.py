@@ -278,9 +278,77 @@ class ArtifactSigner:
         )
 
 
+class SignatureResult(BaseModel):
+    """High-level result from :func:`sign_artifact`.
+
+    Bundles the algorithm, key identifier, base64 signature, ISO-8601
+    timestamp, and SHA-256 content hash into a single record suitable for
+    embedding in a manifest's ``signature`` block.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    algorithm: str
+    key_id: str = Field(min_length=1)
+    signature_b64: str = Field(min_length=1)
+    signed_at: datetime
+    content_hash: str = Field(min_length=1)  # SHA-256 hex via FIPS adapter
+
+
+def sign_artifact(
+    artifact_bytes: bytes,
+    private_key: ArtifactSigner,
+) -> SignatureResult:
+    """Sign arbitrary artifact bytes and return a :class:`SignatureResult`.
+
+    This is the preferred high-level entry point.  It delegates to
+    :meth:`ArtifactSigner.sign` and re-packages the result into the
+    manifest-oriented :class:`SignatureResult` schema.
+
+    All hashing is performed via
+    :func:`~expose.crypto.fips_adapter.compute_sha256_hex`.
+    """
+    sig = private_key.sign(artifact_bytes)
+    return SignatureResult(
+        algorithm=sig.algorithm,
+        key_id=sig.key_id,
+        signature_b64=sig.signature_b64,
+        signed_at=sig.signed_at,
+        content_hash=sig.artifact_hash,
+    )
+
+
+def verify_artifact(
+    artifact_bytes: bytes,
+    signature_b64: str,
+    public_key: str,
+    *,
+    algorithm: str = "ed25519",
+) -> bool:
+    """Verify an artifact signature given raw base64 and a PEM public key.
+
+    This is the convenience counterpart to :func:`sign_artifact`.  It
+    constructs an ephemeral :class:`ArtifactSignature` and delegates to
+    :meth:`ArtifactSigner.verify`.  Returns ``True`` on success,
+    ``False`` on any failure (never raises).
+    """
+    # Build a minimal ArtifactSignature for the static verify path.
+    ephemeral = ArtifactSignature(
+        artifact_hash=compute_sha256_hex(artifact_bytes),
+        signature_b64=signature_b64,
+        key_id="verify-only",
+        algorithm=algorithm,
+        signed_at=datetime.now(UTC),
+    )
+    return ArtifactSigner.verify(artifact_bytes, ephemeral, public_key)
+
+
 __all__ = [
     "ArtifactSignature",
     "ArtifactSigner",
     "SLSAProvenance",
+    "SignatureResult",
     "SigningKeyPair",
+    "sign_artifact",
+    "verify_artifact",
 ]
