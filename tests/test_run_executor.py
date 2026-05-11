@@ -20,6 +20,7 @@ Coverage:
 
 from __future__ import annotations
 
+import socket
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
@@ -51,6 +52,23 @@ from expose.types.canonical import IdentifierType
 TENANT_ID = UUID("018f1f00-0000-7000-8000-00000000A001")
 RUN_ID = UUID("018f1f00-0000-7000-8000-000000000001")
 OBSERVED = datetime(2026, 5, 10, 12, 0, 0, tzinfo=UTC)
+
+
+# === Fixtures ================================================================
+
+
+@pytest.fixture(autouse=True)
+def _dns_resolve_all(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make all DNS lookups succeed by default so unit tests never hit the network.
+
+    Individual tests that need to control DNS resolution override this by
+    monkeypatching ``socket.getaddrinfo`` themselves (the inner monkeypatch
+    wins because pytest processes fixtures before test-level patches).
+    """
+    def _fake_getaddrinfo(host, port, family=0, type_=0):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo)
 
 
 # === Helpers ==================================================================
@@ -1220,3 +1238,179 @@ async def test_no_relationships_for_plain_observation() -> None:
     rel_repo.create_or_update.assert_not_called()
     # Only the subject entity upserted
     assert e_repo.create_or_update.call_count == 1
+
+
+# === DNS filter tests ========================================================
+
+
+async def test_dns_filter_removes_nonresolving_domains(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-resolving domain seeds are removed; resolving ones and non-domain seeds kept."""
+
+    def _fake_getaddrinfo(host, port, family=0, type_=0):
+        if host in ("example.com", "www.example.com"):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+        raise socket.gaierror("NXDOMAIN")
+
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo)
+
+    executor, disp, _r_repo, _e_repo = _build_executor()
+    disp.dispatch = AsyncMock(return_value=_success_result())
+
+    # Organization seed "Korlogos" will expand to korlogos.com, korlogos.net,
+    # korlogos.org, etc. via multi-TLD expansion. Only the ones that resolve
+    # should survive the DNS filter.
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.DOMAIN, value="example.com")],
+        collector_ids=["dns-resolve"],
+    )
+
+    # example.com and www.example.com both resolve -> 2 seeds dispatched
+    assert result.expanded_seeds == 2
+    assert result.total_dispatches == 2
+
+
+async def test_dns_filter_keeps_all_non_domain_seeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """IP, CIDR, ORGANIZATION, ASN, ENTITY seeds bypass DNS filter entirely."""
+
+    def _fail_all_dns(host, port, family=0, type_=0):
+        raise socket.gaierror("should not be called for non-domain seeds")
+
+    monkeypatch.setattr(socket, "getaddrinfo", _fail_all_dns)
+
+    executor, disp, _r_repo, _e_repo = _build_executor()
+    disp.dispatch = AsyncMock(return_value=_success_result())
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[
+            Seed(seed_type=SeedType.IP, value="10.0.0.1"),
+            Seed(seed_type=SeedType.CIDR, value="10.0.0.0/24"),
+            Seed(seed_type=SeedType.ASN, value="AS64496"),
+        ],
+        collector_ids=["scanner"],
+    )
+
+    # 3 non-domain seeds, no expansion -> 3 dispatches
+    assert result.expanded_seeds == 3
+    assert result.total_dispatches == 3
+
+
+async def test_dns_filter_handles_oserror(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Domains that raise OSError during DNS lookup are filtered out."""
+
+    def _oserror_getaddrinfo(host, port, family=0, type_=0):
+        raise OSError("Network is unreachable")
+
+    monkeypatch.setattr(socket, "getaddrinfo", _oserror_getaddrinfo)
+
+    executor, disp, _r_repo, _e_repo = _build_executor()
+    disp.dispatch = AsyncMock(return_value=_success_result())
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.DOMAIN, value="example.com")],
+        collector_ids=["dns-resolve"],
+    )
+
+    # Both example.com and www.example.com fail -> 0 domain seeds survive
+    assert result.expanded_seeds == 0
+    assert result.total_dispatches == 0
+    assert result.final_state == "completed"
+
+
+async def test_dns_filter_org_expansion_filters_nonexistent_tlds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Org expansion generates many TLD variants; DNS filter removes non-resolving ones."""
+
+    # Only korlogos.com resolves; all other TLDs fail.
+    # Note: www.korlogos.com is NOT generated — the www. expansion only applies
+    # to DOMAIN seeds in the original input, not to org-generated domain seeds.
+    _resolving = {"korlogos.com"}
+
+    def _selective_getaddrinfo(host, port, family=0, type_=0):
+        if host in _resolving:
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.1", 0))]
+        raise socket.gaierror("NXDOMAIN")
+
+    monkeypatch.setattr(socket, "getaddrinfo", _selective_getaddrinfo)
+
+    executor, disp, _r_repo, _e_repo = _build_executor()
+    disp.dispatch = AsyncMock(return_value=_success_result())
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.ORGANIZATION, value="Korlogos")],
+        collector_ids=["scanner"],
+    )
+
+    # Original ORGANIZATION seed + korlogos.com (only resolving domain) = 2 seeds
+    # All other TLD variants (korlogos.net, .org, .io, etc.) filtered out
+    assert result.expanded_seeds == 2
+    # 2 seeds x 1 collector = 2 dispatches
+    assert result.total_dispatches == 2
+
+    # Verify that the dispatched seeds are only the resolving ones + org seed
+    dispatched_values = {c.args[0].seed.value for c in disp.dispatch.call_args_list}
+    assert "Korlogos" in dispatched_values
+    assert "korlogos.com" in dispatched_values
+    # Non-resolving domains should NOT be dispatched
+    assert "korlogos.net" not in dispatched_values
+    assert "korlogos.gov" not in dispatched_values
+    assert "korlogos.org" not in dispatched_values
+    assert "korlogos.io" not in dispatched_values
+
+
+async def test_dns_filter_all_domains_resolve() -> None:
+    """When all domains resolve, none are filtered out (autouse fixture resolves all)."""
+
+    executor, disp, _r_repo, _e_repo = _build_executor()
+    disp.dispatch = AsyncMock(return_value=_success_result())
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.DOMAIN, value="example.com")],
+        collector_ids=["dns-resolve"],
+    )
+
+    # example.com + www.example.com both resolve -> 2 seeds
+    assert result.expanded_seeds == 2
+    assert result.total_dispatches == 2
+
+
+async def test_dns_filter_no_domains_resolve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When no domains resolve, all domain seeds are removed."""
+
+    def _none_resolve(host, port, family=0, type_=0):
+        raise socket.gaierror("NXDOMAIN")
+
+    monkeypatch.setattr(socket, "getaddrinfo", _none_resolve)
+
+    executor, disp, _r_repo, _e_repo = _build_executor()
+    disp.dispatch = AsyncMock(return_value=_success_result())
+
+    result = await executor.execute(
+        run_id=RUN_ID,
+        tenant_id=TENANT_ID,
+        seeds=[Seed(seed_type=SeedType.DOMAIN, value="nonexistent.example")],
+        collector_ids=["dns-resolve"],
+    )
+
+    # Both nonexistent.example and www.nonexistent.example filtered out -> 0 seeds
+    assert result.expanded_seeds == 0
+    assert result.total_dispatches == 0
+    assert result.final_state == "completed"

@@ -47,7 +47,7 @@ __all__ = [
 
 # === Storage ==================================================================
 
-_MAX_ENTRIES_PER_RUN = 500
+_MAX_ENTRIES_PER_RUN = 5000
 
 # Module-level storage: run_id (str) -> list of log entry dicts.
 # Thread-safe via _lock for the rare case of concurrent background tasks

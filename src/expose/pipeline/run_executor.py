@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 import time
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -193,6 +194,73 @@ class RunExecutor:
         if self._log_sink is not None:
             self._log_sink(level, msg)
 
+    async def _dns_filter_seeds(self, seeds: list[Seed]) -> list[Seed]:
+        """Remove DOMAIN seeds that do not resolve via DNS.
+
+        Non-DOMAIN seeds (ORGANIZATION, IP, CIDR, ASN, ENTITY, etc.) are
+        always kept. For each DOMAIN seed, a fast ``getaddrinfo`` lookup is
+        performed with a 3-second per-domain timeout. Domains that return
+        any A or AAAA record are kept; those that fail (NXDOMAIN, timeout,
+        socket error) are dropped.
+
+        This prevents the multi-TLD expansion from dispatching 29 collectors
+        against ``korlogos.net``, ``korlogos.gov``, etc. when those domains
+        do not exist.
+        """
+        from expose.collectors.base import SeedType
+
+        domain_seeds: list[Seed] = []
+        non_domain_seeds: list[Seed] = []
+        for seed in seeds:
+            if seed.seed_type == SeedType.DOMAIN:
+                domain_seeds.append(seed)
+            else:
+                non_domain_seeds.append(seed)
+
+        if not domain_seeds:
+            return seeds
+
+        async def _check_domain(seed: Seed) -> Seed | None:
+            """Return the seed if it resolves, None otherwise."""
+            try:
+                result = await asyncio.wait_for(
+                    asyncio.get_event_loop().run_in_executor(
+                        None,
+                        socket.getaddrinfo,
+                        seed.value,
+                        None,
+                        socket.AF_UNSPEC,
+                        socket.SOCK_STREAM,
+                    ),
+                    timeout=3.0,
+                )
+                if result:
+                    return seed
+            except (TimeoutError, socket.gaierror, OSError):
+                pass
+            return None
+
+        results = await asyncio.gather(
+            *[_check_domain(s) for s in domain_seeds],
+        )
+
+        resolved = [s for s in results if s is not None]
+        filtered_count = len(domain_seeds) - len(resolved)
+
+        self._log(
+            "info",
+            f"DNS filter: {len(resolved)} of {len(domain_seeds)} domain seeds resolve"
+            + (f" ({filtered_count} removed)" if filtered_count else ""),
+        )
+        if filtered_count:
+            logger.info(
+                "DNS filter removed %d non-resolving domain seeds out of %d",
+                filtered_count,
+                len(domain_seeds),
+            )
+
+        return non_domain_seeds + resolved
+
     async def execute(  # noqa: PLR0912, PLR0915
         self,
         *,
@@ -277,6 +345,7 @@ class RunExecutor:
 
         # === Stage 1: Seed expansion ==========================================
         expanded = expand_seeds(seeds)
+        expanded = await self._dns_filter_seeds(expanded)
         expanded_count = len(expanded)
         self._log("info", f"Seed expansion: {total_seeds} -> {expanded_count} seeds")
 
@@ -371,8 +440,9 @@ class RunExecutor:
             if not new_seeds:
                 break
 
-            # Expand new seeds and update tracking sets
+            # Expand new seeds, filter non-resolving domains, update tracking
             current_seeds = expand_seeds(new_seeds)
+            current_seeds = await self._dns_filter_seeds(current_seeds)
             expanded_count += len(current_seeds)
             already_scanned.update(
                 (s.seed_type.value, s.value) for s in current_seeds
