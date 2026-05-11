@@ -44,7 +44,18 @@ _health_cache: dict[str, tuple[float, "CollectorHealthCheck"]] = {}
 # dispatches for the same collector_id arrive concurrently, only the first
 # performs the actual health probe; the rest wait on the lock and read the
 # now-cached result.
+#
+# Lock creation uses ``setdefault`` which is atomic in CPython (single
+# bytecode op) — two concurrent coroutines for a new collector_id will
+# always share the same Lock instance.  (Fixes race in #129.)
 _health_locks: dict[str, asyncio.Lock] = {}
+
+# Per-collector-ID consecutive failure counter for the circuit breaker.
+# When a collector fails health checks ``_CIRCUIT_BREAKER_THRESHOLD``
+# times in a row, further dispatches are short-circuited with
+# ``HEALTH_CHECK_FAILED`` until the cache is cleared (next run).
+_health_failure_counts: dict[str, int] = {}
+_CIRCUIT_BREAKER_THRESHOLD: int = 3
 
 # Timeout constants for wait_for wrappers (seconds).
 HEALTH_CHECK_TIMEOUT = 30.0
@@ -376,11 +387,37 @@ class PipelineDispatcher:
         collector: Collector = collector_cls(config)
 
         try:
+            # Circuit breaker: if this collector has failed health checks
+            # N times consecutively, skip it immediately without re-probing.
+            fail_count = _health_failure_counts.get(job.collector_id, 0)
+            if fail_count >= _CIRCUIT_BREAKER_THRESHOLD:
+                logger.info(
+                    "Circuit breaker open for collector %s (%d consecutive "
+                    "failures, threshold %d) — skipping",
+                    job.collector_id,
+                    fail_count,
+                    _CIRCUIT_BREAKER_THRESHOLD,
+                )
+                pipeline_errors_total.add(1, {"component": "dispatcher", "error_type": "CircuitBreakerOpen"})
+                return DispatchResult(
+                    status=DispatchStatus.HEALTH_CHECK_FAILED,
+                    error_message=(
+                        f"Circuit breaker open: {fail_count} consecutive "
+                        f"health-check failures (threshold={_CIRCUIT_BREAKER_THRESHOLD})"
+                    ),
+                    duration_ms=_elapsed_ms(start_ns),
+                )
+
             # Health check with TTL cache + per-collector lock to prevent
             # thundering-herd (issue #156) + 30-second timeout.
-            if job.collector_id not in _health_locks:
-                _health_locks[job.collector_id] = asyncio.Lock()
-            health_lock = _health_locks[job.collector_id]
+            #
+            # ``setdefault`` is atomic in CPython (single bytecode op), so
+            # two concurrent coroutines for a new collector_id will always
+            # see the same Lock instance.  Fixes the check-then-set race
+            # from issue #129.
+            health_lock = _health_locks.setdefault(
+                job.collector_id, asyncio.Lock(),
+            )
 
             async with health_lock:
                 now = time.monotonic()
@@ -400,6 +437,9 @@ class PipelineDispatcher:
                             HEALTH_CHECK_TIMEOUT,
                         )
                         pipeline_errors_total.add(1, {"component": "dispatcher", "error_type": "TimeoutError"})
+                        _health_failure_counts[job.collector_id] = (
+                            _health_failure_counts.get(job.collector_id, 0) + 1
+                        )
                         return DispatchResult(
                             status=DispatchStatus.HEALTH_CHECK_FAILED,
                             error_message=f"Health check timed out after {HEALTH_CHECK_TIMEOUT}s",
@@ -412,12 +452,18 @@ class PipelineDispatcher:
                 CollectorStatus.PARTIAL_SUCCESS,
             ):
                 pipeline_errors_total.add(1, {"component": "dispatcher", "error_type": "HealthCheckFailed"})
+                _health_failure_counts[job.collector_id] = (
+                    _health_failure_counts.get(job.collector_id, 0) + 1
+                )
                 return DispatchResult(
                     status=DispatchStatus.HEALTH_CHECK_FAILED,
                     collector_health=health,
                     error_message=health.error_message,
                     duration_ms=_elapsed_ms(start_ns),
                 )
+
+            # Health check passed — reset the failure counter.
+            _health_failure_counts.pop(job.collector_id, None)
 
             # Run expand and collect observations with 120-second timeout
             try:
@@ -618,13 +664,15 @@ def _elapsed_ms(start_ns: int) -> float:
 
 
 def clear_health_cache() -> None:
-    """Clear the module-level health-check cache and lock map.
+    """Clear the module-level health-check cache, lock map, and failure counters.
 
     Call at the start of each pipeline run to ensure fresh health probes
-    for the first dispatch of each collector.
+    for the first dispatch of each collector and to reset the circuit
+    breaker state.
     """
     _health_cache.clear()
     _health_locks.clear()
+    _health_failure_counts.clear()
 
 
 __all__ = [
@@ -634,6 +682,8 @@ __all__ = [
     "EXPAND_TIMEOUT",
     "HEALTH_CHECK_TIMEOUT",
     "PipelineDispatcher",
+    "_CIRCUIT_BREAKER_THRESHOLD",
+    "_health_failure_counts",
     "_health_locks",
     "clear_health_cache",
     "current_tenant_id",

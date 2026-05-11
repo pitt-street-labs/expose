@@ -54,10 +54,12 @@ from expose.collectors.registry import CollectorNotRegisteredError, CollectorReg
 from expose.collectors.tiers import CollectorTier, TenantAuthorizationScope
 from expose.pipeline.credential_resolver import CredentialResolutionError, CredentialResolver
 from expose.pipeline.dispatcher import (
+    _CIRCUIT_BREAKER_THRESHOLD,
     DispatchJob,
     DispatchResult,
     DispatchStatus,
     PipelineDispatcher,
+    _health_failure_counts,
     _health_locks,
     clear_health_cache,
     current_tenant_id,
@@ -1862,3 +1864,276 @@ class TestHealthCacheThunderingHerd:
         _health_locks["test-collector"] = asyncio.Lock()
         clear_health_cache()
         assert _health_locks == {}
+
+    @pytest.mark.asyncio
+    async def test_concurrent_lock_acquisition_uses_same_lock(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """setdefault ensures concurrent dispatches for a new collector_id share one Lock.
+
+        This is the regression test for the race condition in issue #129:
+        the old ``if key not in dict`` pattern could create two different
+        Lock instances for the same collector_id when two coroutines
+        interleaved at the check-then-set boundary.
+
+        With ``setdefault``, the dict operation is atomic in CPython, so
+        all coroutines always see the same Lock object.
+        """
+        registry.register(MockSlowHealthCollector)
+        MockSlowHealthCollector.health_check_count = 0
+
+        dispatcher = PipelineDispatcher(registry, scope_empty, TENANT_ID)
+
+        # Fire 10 concurrent dispatches — all for the same collector_id.
+        # If separate locks were created, multiple health checks would
+        # execute concurrently.
+        jobs = [_make_job("mock-slow-counted", seed) for _ in range(10)]
+        results = await asyncio.gather(
+            *[dispatcher.dispatch(job) for job in jobs],
+        )
+
+        # All should succeed
+        assert all(r.status == DispatchStatus.SUCCESS for r in results)
+
+        # Exactly one lock should exist for this collector_id
+        assert "mock-slow-counted" in _health_locks
+        lock = _health_locks["mock-slow-counted"]
+        assert isinstance(lock, asyncio.Lock)
+
+        # Only one health check should have been performed
+        assert MockSlowHealthCollector.health_check_count == 1
+
+
+# === Circuit breaker tests (issue #129) =======================================
+
+
+class MockAlwaysUnhealthyCollector(Collector):
+    """Collector whose health check always returns FAILURE.
+
+    Used to test circuit breaker behavior — after N consecutive failures
+    the dispatcher should short-circuit without performing another probe.
+    """
+
+    collector_id = "mock-always-unhealthy"
+    collector_version = "1.0.0"
+    requires_credentials = False
+    rate_limit_per_minute = None
+    tier = CollectorTier.TIER_1
+
+    health_check_count: int = 0
+
+    async def expand(self, seed: Seed) -> AsyncIterator[Observation]:
+        yield _make_observation(  # pragma: no cover — never reached
+            self.collector_id,
+            self.collector_version,
+            self.config.tenant_id,
+            seed.value,
+        )
+
+    async def health_check(self) -> CollectorHealthCheck:
+        MockAlwaysUnhealthyCollector.health_check_count += 1
+        return CollectorHealthCheck(
+            collector_id=self.collector_id,
+            collector_version=self.collector_version,
+            status=CollectorStatus.FAILURE,
+            checked_at=_NOW,
+            error_message="always failing",
+        )
+
+
+class MockRecoveringCollector(Collector):
+    """Collector that fails N times then recovers.
+
+    Used to verify the circuit breaker resets after a successful health check.
+    """
+
+    collector_id = "mock-recovering"
+    collector_version = "1.0.0"
+    requires_credentials = False
+    rate_limit_per_minute = None
+    tier = CollectorTier.TIER_1
+
+    call_count: int = 0
+    fail_until: int = 2  # fail the first N health checks
+
+    async def expand(self, seed: Seed) -> AsyncIterator[Observation]:
+        yield _make_observation(
+            self.collector_id,
+            self.collector_version,
+            self.config.tenant_id,
+            seed.value,
+        )
+
+    async def health_check(self) -> CollectorHealthCheck:
+        MockRecoveringCollector.call_count += 1
+        if MockRecoveringCollector.call_count <= MockRecoveringCollector.fail_until:
+            return CollectorHealthCheck(
+                collector_id=self.collector_id,
+                collector_version=self.collector_version,
+                status=CollectorStatus.FAILURE,
+                checked_at=_NOW,
+                error_message="temporarily failing",
+            )
+        return CollectorHealthCheck(
+            collector_id=self.collector_id,
+            collector_version=self.collector_version,
+            status=CollectorStatus.SUCCESS,
+            checked_at=_NOW,
+            latency_ms=1.0,
+        )
+
+
+class TestCircuitBreaker:
+    """Tests for the health-check circuit breaker (issue #129)."""
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_trips_after_threshold(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """After N consecutive health-check failures, the circuit breaker opens.
+
+        The collector should NOT be probed again once the breaker is open.
+        Instead, the dispatcher returns HEALTH_CHECK_FAILED immediately
+        with a "Circuit breaker open" error message.
+        """
+        registry.register(MockAlwaysUnhealthyCollector)
+        MockAlwaysUnhealthyCollector.health_check_count = 0
+
+        dispatcher = PipelineDispatcher(registry, scope_empty, TENANT_ID)
+
+        # Dispatch N times to trip the breaker.  Each dispatch clears the
+        # health cache entry so the health check is actually re-executed.
+        for i in range(_CIRCUIT_BREAKER_THRESHOLD):
+            # Clear cache to force a fresh health probe each time
+            _health_cache = __import__(
+                "expose.pipeline.dispatcher", fromlist=["_health_cache"]
+            )._health_cache
+            _health_cache.pop("mock-always-unhealthy", None)
+
+            result = await dispatcher.dispatch(
+                _make_job("mock-always-unhealthy", seed),
+            )
+            assert result.status == DispatchStatus.HEALTH_CHECK_FAILED, (
+                f"dispatch {i+1} should be HEALTH_CHECK_FAILED"
+            )
+
+        # Verify the breaker is now open
+        assert _health_failure_counts.get("mock-always-unhealthy", 0) >= _CIRCUIT_BREAKER_THRESHOLD
+
+        # Next dispatch should be short-circuited (no health check call)
+        probes_before = MockAlwaysUnhealthyCollector.health_check_count
+        result = await dispatcher.dispatch(
+            _make_job("mock-always-unhealthy", seed),
+        )
+        assert result.status == DispatchStatus.HEALTH_CHECK_FAILED
+        assert "Circuit breaker open" in (result.error_message or "")
+        # No additional health probe should have been made
+        assert MockAlwaysUnhealthyCollector.health_check_count == probes_before
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_does_not_trip_below_threshold(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """Fewer than N failures does not open the circuit breaker.
+
+        The collector is still probed on each dispatch (after cache
+        eviction).
+        """
+        registry.register(MockAlwaysUnhealthyCollector)
+        MockAlwaysUnhealthyCollector.health_check_count = 0
+
+        dispatcher = PipelineDispatcher(registry, scope_empty, TENANT_ID)
+
+        # Dispatch one fewer than the threshold
+        for _ in range(_CIRCUIT_BREAKER_THRESHOLD - 1):
+            from expose.pipeline.dispatcher import _health_cache as _hc  # noqa: PLC0415
+
+            _hc.pop("mock-always-unhealthy", None)
+            result = await dispatcher.dispatch(
+                _make_job("mock-always-unhealthy", seed),
+            )
+            assert result.status == DispatchStatus.HEALTH_CHECK_FAILED
+
+        # Breaker should NOT be open yet
+        assert (
+            _health_failure_counts.get("mock-always-unhealthy", 0)
+            < _CIRCUIT_BREAKER_THRESHOLD
+        )
+
+        # Next dispatch should still probe the health check (not short-circuited)
+        from expose.pipeline.dispatcher import _health_cache as _hc2  # noqa: PLC0415
+
+        _hc2.pop("mock-always-unhealthy", None)
+        probes_before = MockAlwaysUnhealthyCollector.health_check_count
+        result = await dispatcher.dispatch(
+            _make_job("mock-always-unhealthy", seed),
+        )
+        assert result.status == DispatchStatus.HEALTH_CHECK_FAILED
+        assert "Circuit breaker" not in (result.error_message or "")
+        assert MockAlwaysUnhealthyCollector.health_check_count == probes_before + 1
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_resets_on_success(
+        self,
+        registry: CollectorRegistry,
+        scope_empty: TenantAuthorizationScope,
+        seed: Seed,
+    ) -> None:
+        """A successful health check resets the failure counter to zero.
+
+        If a collector fails twice (below threshold=3), then recovers,
+        the counter is cleared. Subsequent failures start counting from
+        zero again.
+        """
+        registry.register(MockRecoveringCollector)
+        MockRecoveringCollector.call_count = 0
+        MockRecoveringCollector.fail_until = 2
+
+        dispatcher = PipelineDispatcher(registry, scope_empty, TENANT_ID)
+
+        # First two dispatches: health check fails
+        for _ in range(2):
+            from expose.pipeline.dispatcher import _health_cache as _hc  # noqa: PLC0415
+
+            _hc.pop("mock-recovering", None)
+            result = await dispatcher.dispatch(
+                _make_job("mock-recovering", seed),
+            )
+            assert result.status == DispatchStatus.HEALTH_CHECK_FAILED
+
+        assert _health_failure_counts.get("mock-recovering", 0) == 2
+
+        # Third dispatch: health check succeeds
+        from expose.pipeline.dispatcher import _health_cache as _hc3  # noqa: PLC0415
+
+        _hc3.pop("mock-recovering", None)
+        result = await dispatcher.dispatch(
+            _make_job("mock-recovering", seed),
+        )
+        assert result.status == DispatchStatus.SUCCESS
+
+        # Failure counter should be reset
+        assert _health_failure_counts.get("mock-recovering", 0) == 0
+
+    @pytest.mark.asyncio
+    async def test_clear_health_cache_resets_circuit_breaker(self) -> None:
+        """clear_health_cache() also resets the circuit breaker failure counters."""
+        _health_failure_counts["test-collector"] = 99
+        _health_locks["test-collector"] = asyncio.Lock()
+        clear_health_cache()
+        assert _health_failure_counts == {}
+        assert _health_locks == {}
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_threshold_is_three(self) -> None:
+        """Default circuit breaker threshold is 3."""
+        assert _CIRCUIT_BREAKER_THRESHOLD == 3
