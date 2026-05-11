@@ -225,6 +225,30 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     scheduler = RunScheduler(on_run_trigger=_scheduler_run_trigger)
     app.state.run_scheduler = scheduler
 
+    from expose.api.tenant_config import get_tenant_config_data, _configs  # noqa: PLC0415
+
+    for tenant_id, cfg in _configs.items():
+        cron_expr = cfg.get("schedule_cron")
+        if cron_expr:
+            try:
+                scheduler.add_schedule(
+                    tenant_id=tenant_id,
+                    cron_expression=str(cron_expr),
+                    collector_ids=cfg.get("collector_ids", []),
+                    seeds=cfg.get("seeds", []),
+                )
+                logger.info(
+                    "Restored schedule for tenant %s: %s",
+                    tenant_id,
+                    cron_expr,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to restore schedule for tenant %s",
+                    tenant_id,
+                    exc_info=True,
+                )
+
     scheduler_shutdown = asyncio.Event()
     app.state._scheduler_shutdown = scheduler_shutdown
 
