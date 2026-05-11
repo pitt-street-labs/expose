@@ -20,10 +20,17 @@ Coverage:
 14. Health check: success path
 15. Health check: failure path
 16. Connection error -> bucket skipped
-17. Domain seed -> org name derived from first label
+17. Domain seed -> org name derived from second-level domain label
 18. Multiple buckets found across providers
 19. Endpoint extraction from listable bucket
 20. Empty listing body -> no sensitive objects
+21. Domain-to-org extraction: www prefix stripped
+22. Domain-to-org extraction: deep subdomains resolved
+23. Domain-to-org extraction: two-part TLDs (co.uk) handled
+24. Common-word blocklist: bare common words filtered out
+25. Common-word blocklist: compound names with common words preserved
+26. Dedup skip: domain base == org base -> no duplicate candidates
+27. DOMAIN seed with www prefix -> org is second-level label, not "www"
 """
 
 from __future__ import annotations
@@ -44,7 +51,9 @@ from expose.collectors.base import (
     SeedType,
 )
 from expose.collectors.builtin.cloud_storage_exposure import (
+    _COMMON_WORD_BLOCKLIST,
     CloudStorageExposureCollector,
+    _extract_org_from_domain,
     generate_bucket_names,
 )
 from expose.collectors.tiers import CollectorTier
@@ -398,7 +407,7 @@ class TestSeedHandling:
     @respx.mock
     @pytest.mark.asyncio
     async def test_domain_seed_derives_org(self) -> None:
-        """A DOMAIN seed derives org name from the first domain label."""
+        """A DOMAIN seed derives org name from the second-level domain label."""
         seed = Seed(seed_type=SeedType.DOMAIN, value="example.com")
         # All probes 404.
         respx.route(method="HEAD").mock(return_value=httpx.Response(404))
@@ -539,3 +548,129 @@ class TestObservationStructure:
         assert obs[0].tenant_id == TENANT_ID
         assert obs[0].collector_id == "cloud-storage-exposure"
         assert obs[0].structured_payload["discovery_type"] == "cloud_storage_exposure"
+
+
+# === 8. Domain-to-org extraction ==============================================
+
+
+class TestDomainToOrgExtraction:
+    def test_www_prefix_stripped(self) -> None:
+        """www.cyberark.com -> cyberark, not www."""
+        assert _extract_org_from_domain("www.cyberark.com") == "cyberark"
+
+    def test_simple_domain(self) -> None:
+        """cyberark.com -> cyberark."""
+        assert _extract_org_from_domain("cyberark.com") == "cyberark"
+
+    def test_deep_subdomain(self) -> None:
+        """api.staging.cyberark.com -> cyberark."""
+        assert _extract_org_from_domain("api.staging.cyberark.com") == "cyberark"
+
+    def test_two_part_tld_co_uk(self) -> None:
+        """cyberark.co.uk -> cyberark."""
+        assert _extract_org_from_domain("cyberark.co.uk") == "cyberark"
+
+    def test_two_part_tld_com_au(self) -> None:
+        """example.com.au -> example."""
+        assert _extract_org_from_domain("example.com.au") == "example"
+
+    def test_subdomain_with_two_part_tld(self) -> None:
+        """www.example.co.uk -> example."""
+        assert _extract_org_from_domain("www.example.co.uk") == "example"
+
+    def test_case_insensitive(self) -> None:
+        """Mixed case is lowered."""
+        assert _extract_org_from_domain("WWW.CyberArk.COM") == "cyberark"
+
+    def test_single_label(self) -> None:
+        """Bare label with no dots returns the label itself."""
+        assert _extract_org_from_domain("localhost") == "localhost"
+
+
+# === 9. Common-word blocklist =================================================
+
+
+class TestCommonWordBlocklist:
+    def test_bare_common_words_filtered(self) -> None:
+        """Bare common words like 'www', 'dev', 'api' are not in candidates."""
+        candidates = generate_bucket_names("www")
+        assert "www" not in candidates
+        assert "dev" not in candidates
+        assert "api" not in candidates
+
+    def test_compound_names_preserved(self) -> None:
+        """Compound names containing common words are preserved."""
+        candidates = generate_bucket_names("cyberark")
+        assert "cyberark-dev" in candidates
+        assert "cyberark-staging" in candidates
+        assert "cyberark-config" in candidates
+        assert "cyberark-logs" in candidates
+
+    def test_org_suffixed_common_word_preserved(self) -> None:
+        """A suffixed common word like 'www-backups' is filtered (still bare-ish)."""
+        # "www-backups" is NOT in the blocklist — the blocklist only catches
+        # the bare word.  "www-backups" passes through.  But "www" alone does not.
+        candidates = generate_bucket_names("www")
+        assert "www" not in candidates
+        assert "www-backups" in candidates
+
+    def test_blocklist_contents(self) -> None:
+        """Blocklist contains the expected entries."""
+        expected = {
+            "www", "api", "cdn", "mail", "ftp", "dev", "test", "staging",
+            "prod", "app", "static", "assets", "media", "files", "data",
+            "backup", "logs", "config",
+        }
+        assert _COMMON_WORD_BLOCKLIST == expected
+
+
+# === 10. Deduplication: domain base == org base ================================
+
+
+class TestDomainBaseDedup:
+    def test_no_duplicates_when_domain_matches_org(self) -> None:
+        """When domain base equals org name, no domain-based candidates added."""
+        candidates_with_domain = generate_bucket_names("cyberark", domain="cyberark.com")
+        candidates_without_domain = generate_bucket_names("cyberark")
+        # Should be identical — domain_base == base, so domain branch skipped.
+        assert candidates_with_domain == candidates_without_domain
+
+    def test_different_domain_adds_candidates(self) -> None:
+        """When domain base differs from org name, extra candidates are added."""
+        candidates = generate_bucket_names("Acme Corp", domain="acmecorp.com")
+        assert "acmecorp" in candidates
+        assert "acmecorp-backups" in candidates
+        assert "acme-corp" in candidates
+
+
+# === 11. DOMAIN seed with www prefix (integration) ============================
+
+
+class TestDomainSeedWwwPrefix:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_www_domain_seed_uses_sld(self) -> None:
+        """A DOMAIN seed like www.cyberark.com uses 'cyberark' as org, not 'www'."""
+        seed = Seed(seed_type=SeedType.DOMAIN, value="www.cyberark.com")
+        # All probes 404.
+        respx.route(method="HEAD").mock(return_value=httpx.Response(404))
+
+        # Verify the candidate list does NOT contain bare "www" or "www-*".
+        candidates = generate_bucket_names("cyberark", domain="www.cyberark.com")
+        assert "www" not in candidates
+        assert "www-backups" not in candidates
+        assert "www-config" not in candidates
+        # But DOES contain cyberark variants.
+        assert "cyberark" in candidates
+        assert "cyberark-backups" in candidates
+
+        observations = await _collect(seed)
+        assert observations == []
+
+    def test_www_domain_generates_correct_candidates(self) -> None:
+        """generate_bucket_names with www.cyberark.com domain doesn't produce www candidates."""
+        candidates = generate_bucket_names("cyberark", domain="www.cyberark.com")
+        # domain_base is "cyberark" (via _extract_org_from_domain), same as
+        # org base, so no domain-based candidates are added (dedup skip).
+        www_candidates = [c for c in candidates if c.startswith("www")]
+        assert www_candidates == []

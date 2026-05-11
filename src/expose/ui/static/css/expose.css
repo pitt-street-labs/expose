@@ -600,6 +600,115 @@ code, pre, .code-block, .api-key,
 }
 
 
+/* === Entity Detail Panel ================================================= */
+
+@keyframes entity-detail-slide-down {
+    from {
+        opacity: 0;
+        max-height: 0;
+    }
+    to {
+        opacity: 1;
+        max-height: 500px;
+    }
+}
+
+@keyframes entity-detail-slide-up {
+    from {
+        opacity: 1;
+        max-height: 500px;
+    }
+    to {
+        opacity: 0;
+        max-height: 0;
+    }
+}
+
+.entity-row-expanded {
+    background: var(--surface) !important;
+}
+
+.entity-row-expanded td {
+    border-bottom-color: var(--accent-dim);
+}
+
+.entity-detail {
+    animation: entity-detail-slide-down 0.25s ease-out forwards;
+}
+
+.entity-detail-collapsing {
+    animation: entity-detail-slide-up 0.2s ease-in forwards;
+    overflow: hidden;
+}
+
+.entity-detail-cell {
+    padding: 0 !important;
+    border-bottom: 1px solid var(--border-subtle) !important;
+    background: var(--depth);
+    border-left: 3px solid var(--accent);
+}
+
+.entity-detail-content {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: var(--space-md);
+    padding: var(--space-md) var(--space-lg);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+}
+
+.entity-detail-empty {
+    padding: var(--space-md) var(--space-lg);
+    color: var(--text-dim);
+    font-style: italic;
+    font-size: 0.8rem;
+}
+
+.entity-detail-group {
+    min-width: 0;
+}
+
+.entity-detail-group-title {
+    color: var(--text-muted);
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: var(--space-xs);
+    padding-bottom: var(--space-xs);
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.entity-detail-properties {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.entity-detail-prop {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: var(--space-sm);
+    padding: 2px 0;
+}
+
+.entity-detail-label {
+    color: var(--text-dim);
+    font-size: 0.7rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.entity-detail-value {
+    color: var(--text-primary);
+    font-size: 0.75rem;
+    text-align: right;
+    word-break: break-all;
+    min-width: 0;
+}
+
+
 /* === Entity Count Badge ================================================== */
 .entity-count {
     font-size: 0.7rem;

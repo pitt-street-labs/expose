@@ -97,6 +97,60 @@ _SUFFIXES: list[str] = [
     "-internal",
 ]
 
+# Common-word blocklist — bare names that are overwhelmingly false positives.
+# Only the bare word is blocked; compound names like ``cyberark-dev`` are fine.
+_COMMON_WORD_BLOCKLIST: frozenset[str] = frozenset({
+    "www",
+    "api",
+    "cdn",
+    "mail",
+    "ftp",
+    "dev",
+    "test",
+    "staging",
+    "prod",
+    "app",
+    "static",
+    "assets",
+    "media",
+    "files",
+    "data",
+    "backup",
+    "logs",
+    "config",
+})
+
+
+def _extract_org_from_domain(domain: str) -> str:
+    """Extract the second-level domain label as the org-like base.
+
+    Strips common prefixes (``www.``, ``api.``, etc.) and returns the label
+    immediately before the TLD.  For simple two-label domains this is the
+    first label; for deeper subdomains the second-to-last label is used.
+
+    Examples::
+
+        www.cyberark.com      -> cyberark
+        api.staging.acme.com  -> acme
+        cyberark.com          -> cyberark
+        cyberark.co.uk        -> cyberark   (two-part TLD heuristic)
+    """
+    labels = domain.lower().split(".")
+    # Need at least two labels (name + TLD).
+    if len(labels) < 2:  # noqa: PLR2004
+        return labels[0]
+
+    # Heuristic for two-part TLDs (co.uk, com.au, co.jp, etc.).
+    _TWO_PART_TLDS = {"co", "com", "org", "net", "ac", "gov", "edu"}
+    if len(labels) >= 3 and labels[-2] in _TWO_PART_TLDS:  # noqa: PLR2004
+        # e.g. ["cyberark", "co", "uk"] -> "cyberark"
+        return labels[-3]
+
+    # Standard case: label immediately before the TLD.
+    # e.g. ["www", "cyberark", "com"] -> "cyberark"
+    # e.g. ["cyberark", "com"] -> "cyberark"
+    return labels[-2]
+
 
 def generate_bucket_names(org_name: str, domain: str | None = None) -> list[str]:
     """Generate candidate bucket/container names from org and domain.
@@ -105,9 +159,13 @@ def generate_bucket_names(org_name: str, domain: str | None = None) -> list[str]
     and underscores replaced with hyphens). Each suffix from ``_SUFFIXES``
     is appended to produce candidates.
 
-    If a domain is provided, its first label (e.g., ``acme`` from
-    ``acme.com``) is used as an additional base, with the first 10 suffixes
-    appended.
+    If a domain is provided, the second-level domain label (e.g.,
+    ``cyberark`` from ``www.cyberark.com``) is used as an additional base,
+    with the first 10 suffixes appended — but only if it differs from the
+    org-derived base to avoid duplicate candidates.
+
+    Bare candidates matching ``_COMMON_WORD_BLOCKLIST`` (e.g., ``www``,
+    ``dev``, ``api``) are filtered out to reduce false positives.
 
     Returns a deduplicated list preserving insertion order.
     """
@@ -115,11 +173,16 @@ def generate_bucket_names(org_name: str, domain: str | None = None) -> list[str]
     candidates: list[str] = [f"{base}{s}" for s in _SUFFIXES]
 
     if domain:
-        domain_base = domain.split(".")[0].lower()
-        candidates.extend(f"{domain_base}{s}" for s in _SUFFIXES[:10])
+        domain_base = _extract_org_from_domain(domain)
+        # Only add domain-based candidates if they differ from org base.
+        if domain_base != base:
+            candidates.extend(f"{domain_base}{s}" for s in _SUFFIXES[:10])
 
     # Deduplicate while preserving order.
-    return list(dict.fromkeys(candidates))
+    deduped = list(dict.fromkeys(candidates))
+
+    # Filter out bare common-word candidates (false-positive magnets).
+    return [c for c in deduped if c not in _COMMON_WORD_BLOCKLIST]
 
 
 @register_collector
@@ -161,8 +224,9 @@ class CloudStorageExposureCollector(Collector):
             org_name = seed.value
             domain = seed.properties.get("domain")
         elif seed.seed_type == SeedType.DOMAIN:
-            # Use domain's first label as the org-like base.
-            org_name = seed.value.split(".")[0]
+            # Extract second-level domain as the org-like base, not the
+            # first label (which may be "www", "api", etc.).
+            org_name = _extract_org_from_domain(seed.value)
             domain = seed.value
         else:
             return
@@ -414,4 +478,6 @@ def _extract_endpoints(
 __all__ = [
     "CloudStorageExposureCollector",
     "generate_bucket_names",
+    "_extract_org_from_domain",
+    "_COMMON_WORD_BLOCKLIST",
 ]

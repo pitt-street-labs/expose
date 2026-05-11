@@ -1251,6 +1251,297 @@ document.addEventListener("DOMContentLoaded", function () {
 
 
 /* =========================================================================
+   Entity Detail Panel — click-to-expand properties
+   ========================================================================= */
+
+document.addEventListener("DOMContentLoaded", function () {
+    /**
+     * Property category definitions.
+     * Keys shown to the user are mapped into groups for organized display.
+     * Properties starting with _ are hidden except for whitelisted source keys.
+     */
+    var PROPERTY_CATEGORIES = {
+        "Source": ["_collector_id", "_observation_type", "_observed_at"],
+        "Registration": ["registrant_org", "registrar", "nameservers", "creation_date", "expiration_date", "updated_date"],
+        "Cloud": ["bucket_name", "cloud_provider", "region", "account_id", "resource_type"],
+        "DNS": ["resolved_ips", "record_type", "spf_ip4_addresses", "spf_ip6_addresses", "dmarc_policy", "dkim_selector", "mx_records"],
+        "Network": ["open_ports", "asn", "as_name", "cidr_block", "reverse_dns"],
+        "Security": ["waf_detected", "waf_provider", "tls_issuer", "tls_expiry", "security_contact", "vulnerability_disclosure"],
+    };
+
+    /** Human-readable labels for property keys. */
+    var PROPERTY_LABELS = {
+        "_collector_id": "Collector",
+        "_observation_type": "Observation Type",
+        "_observed_at": "Observed At",
+        "registrant_org": "Registrant Org",
+        "registrar": "Registrar",
+        "nameservers": "Nameservers",
+        "creation_date": "Created",
+        "expiration_date": "Expires",
+        "updated_date": "Updated",
+        "bucket_name": "Bucket",
+        "cloud_provider": "Cloud Provider",
+        "region": "Region",
+        "account_id": "Account ID",
+        "resource_type": "Resource Type",
+        "resolved_ips": "Resolved IPs",
+        "record_type": "Record Type",
+        "spf_ip4_addresses": "SPF IPv4",
+        "spf_ip6_addresses": "SPF IPv6",
+        "dmarc_policy": "DMARC Policy",
+        "dkim_selector": "DKIM Selector",
+        "mx_records": "MX Records",
+        "open_ports": "Open Ports",
+        "asn": "ASN",
+        "as_name": "AS Name",
+        "cidr_block": "CIDR Block",
+        "reverse_dns": "Reverse DNS",
+        "waf_detected": "WAF Detected",
+        "waf_provider": "WAF Provider",
+        "tls_issuer": "TLS Issuer",
+        "tls_expiry": "TLS Expiry",
+        "security_contact": "Security Contact",
+        "vulnerability_disclosure": "Vuln Disclosure",
+    };
+
+    /** Set of all categorized keys for quick lookup. */
+    var categorizedKeys = {};
+    for (var cat in PROPERTY_CATEGORIES) {
+        for (var k = 0; k < PROPERTY_CATEGORIES[cat].length; k++) {
+            categorizedKeys[PROPERTY_CATEGORIES[cat][k]] = cat;
+        }
+    }
+
+    /**
+     * Format a property value for display.
+     * Arrays are joined with commas; objects are JSON-stringified;
+     * booleans get yes/no; everything else is toString'd.
+     */
+    function formatValue(val) {
+        if (val === null || val === undefined) return "--";
+        if (Array.isArray(val)) return val.join(", ");
+        if (typeof val === "object") return JSON.stringify(val);
+        if (typeof val === "boolean") return val ? "yes" : "no";
+        return String(val);
+    }
+
+    /**
+     * Create a single property row DOM element (label + value).
+     * Uses textContent exclusively to prevent XSS.
+     *
+     * @param {string} label - Display label
+     * @param {string} value - Formatted value string
+     * @returns {HTMLElement}
+     */
+    function createPropElement(label, value) {
+        var prop = document.createElement("div");
+        prop.className = "entity-detail-prop";
+
+        var labelEl = document.createElement("span");
+        labelEl.className = "entity-detail-label";
+        labelEl.textContent = label;
+
+        var valueEl = document.createElement("span");
+        valueEl.className = "entity-detail-value";
+        valueEl.textContent = value;
+
+        prop.appendChild(labelEl);
+        prop.appendChild(valueEl);
+        return prop;
+    }
+
+    /**
+     * Create a property group DOM element with a title and property rows.
+     *
+     * @param {string} title - Group title (e.g. "Source", "DNS")
+     * @param {Array<{label: string, value: string}>} items - Property items
+     * @returns {HTMLElement}
+     */
+    function createGroupElement(title, items) {
+        var group = document.createElement("div");
+        group.className = "entity-detail-group";
+
+        var titleEl = document.createElement("div");
+        titleEl.className = "entity-detail-group-title";
+        titleEl.textContent = title;
+        group.appendChild(titleEl);
+
+        var propsContainer = document.createElement("div");
+        propsContainer.className = "entity-detail-properties";
+
+        for (var i = 0; i < items.length; i++) {
+            propsContainer.appendChild(
+                createPropElement(items[i].label, items[i].value)
+            );
+        }
+
+        group.appendChild(propsContainer);
+        return group;
+    }
+
+    /**
+     * Build the detail panel DOM from a properties object.
+     * Groups properties by category and renders a two-column layout.
+     * All text content is set via textContent (XSS-safe).
+     *
+     * @param {Object} props - Entity properties dict
+     * @returns {HTMLElement}
+     */
+    function buildDetailDOM(props) {
+        if (!props || Object.keys(props).length === 0) {
+            var empty = document.createElement("div");
+            empty.className = "entity-detail-empty";
+            empty.textContent = "No properties available.";
+            return empty;
+        }
+
+        // Collect properties into categories
+        var grouped = {};
+        var uncategorized = [];
+
+        for (var key in props) {
+            if (!props.hasOwnProperty(key)) continue;
+
+            // Skip internal keys not in whitelist
+            if (key.charAt(0) === "_" && !categorizedKeys[key]) continue;
+
+            if (categorizedKeys[key]) {
+                var catName = categorizedKeys[key];
+                if (!grouped[catName]) grouped[catName] = [];
+                grouped[catName].push(key);
+            } else {
+                uncategorized.push(key);
+            }
+        }
+
+        var content = document.createElement("div");
+        content.className = "entity-detail-content";
+
+        // Render categorized groups
+        var categoryOrder = ["Source", "Registration", "Cloud", "DNS", "Network", "Security"];
+        for (var i = 0; i < categoryOrder.length; i++) {
+            var category = categoryOrder[i];
+            if (!grouped[category] || grouped[category].length === 0) continue;
+
+            var items = [];
+            for (var j = 0; j < grouped[category].length; j++) {
+                var propKey = grouped[category][j];
+                items.push({
+                    label: PROPERTY_LABELS[propKey] || propKey,
+                    value: formatValue(props[propKey]),
+                });
+            }
+            content.appendChild(createGroupElement(category, items));
+        }
+
+        // Render uncategorized properties under "Other"
+        if (uncategorized.length > 0) {
+            var otherItems = [];
+            for (var u = 0; u < uncategorized.length; u++) {
+                var uKey = uncategorized[u];
+                otherItems.push({
+                    label: PROPERTY_LABELS[uKey] || uKey.replace(/_/g, " "),
+                    value: formatValue(props[uKey]),
+                });
+            }
+            content.appendChild(createGroupElement("Other", otherItems));
+        }
+
+        return content;
+    }
+
+    /**
+     * Event delegation handler on #entity-list.
+     * Toggles a detail row below the clicked entity row.
+     */
+    function handleEntityClick(event) {
+        var row = event.target.closest(".entity-row");
+        if (!row) return;
+
+        var entityId = row.getAttribute("data-entity-id");
+        if (!entityId) return;
+
+        // Check if detail row already exists
+        var existingDetail = row.nextElementSibling;
+        if (existingDetail && existingDetail.classList.contains("entity-detail")) {
+            // Toggle off — collapse with animation
+            existingDetail.classList.add("entity-detail-collapsing");
+            row.classList.remove("entity-row-expanded");
+            setTimeout(function () {
+                if (existingDetail.parentNode) {
+                    existingDetail.parentNode.removeChild(existingDetail);
+                }
+            }, 200);
+            return;
+        }
+
+        // Close any other open detail rows
+        var openDetails = document.querySelectorAll("#entity-list .entity-detail");
+        var expandedRows = document.querySelectorAll("#entity-list .entity-row-expanded");
+        for (var i = 0; i < openDetails.length; i++) {
+            openDetails[i].parentNode.removeChild(openDetails[i]);
+        }
+        for (var j = 0; j < expandedRows.length; j++) {
+            expandedRows[j].classList.remove("entity-row-expanded");
+        }
+
+        // Parse properties from the data attribute
+        var propsJSON = row.getAttribute("data-properties") || "{}";
+        var props;
+        try {
+            props = JSON.parse(propsJSON);
+        } catch (e) {
+            console.warn("[EXPOSE] Failed to parse entity properties:", e);
+            props = {};
+        }
+
+        // Determine column count from the header row
+        var table = row.closest("table");
+        var colCount = 4;
+        if (table) {
+            var headerCells = table.querySelectorAll("thead th");
+            if (headerCells.length > 0) colCount = headerCells.length;
+        }
+
+        // Create detail row using safe DOM methods (no innerHTML)
+        var detailRow = document.createElement("tr");
+        detailRow.className = "entity-detail";
+        detailRow.setAttribute("data-detail-for", entityId);
+
+        var detailCell = document.createElement("td");
+        detailCell.setAttribute("colspan", String(colCount));
+        detailCell.className = "entity-detail-cell";
+        detailCell.appendChild(buildDetailDOM(props));
+
+        detailRow.appendChild(detailCell);
+        row.classList.add("entity-row-expanded");
+
+        // Insert after the clicked row
+        if (row.nextSibling) {
+            row.parentNode.insertBefore(detailRow, row.nextSibling);
+        } else {
+            row.parentNode.appendChild(detailRow);
+        }
+    }
+
+    // Attach click listener via delegation on #entity-list
+    var entityList = document.getElementById("entity-list");
+    if (entityList) {
+        entityList.addEventListener("click", handleEntityClick);
+    }
+
+    // Re-attach after HTMX swaps (entity list is HTMX-loaded)
+    document.addEventListener("htmx:afterSwap", function (event) {
+        if (event.detail.target && event.detail.target.id === "entity-list") {
+            // Listener is on the container, no re-attach needed for delegation.
+            // Detail rows are cleared on table refresh (new HTML replaces old).
+        }
+    });
+});
+
+
+/* =========================================================================
    Resize observer — reinitializes graph on container resize
    ========================================================================= */
 

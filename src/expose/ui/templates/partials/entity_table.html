@@ -12,6 +12,7 @@
         {% for entity in entities %}
         <tr class="entity-row"
             data-entity-id="{{ entity.id }}"
+            data-properties="{{ (entity.properties or {})|tojson|e }}"
             data-search-text="{{ entity.canonical_identifier|lower }} {{ entity.entity_type|lower }} {{ entity.attribution_status|lower }}">
             <td class="col-type">
                 <span class="entity-type-badge entity-type-{{ entity.entity_type }}">
