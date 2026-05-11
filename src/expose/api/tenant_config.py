@@ -67,7 +67,7 @@ class ScopeRuleConfig(BaseModel):
 class TenantConfigResponse(BaseModel):
     """Full tenant configuration returned by all config endpoints."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="ignore", frozen=True)
 
     tenant_id: UUID
     scope_rules: list[ScopeRuleConfig]
