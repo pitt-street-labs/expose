@@ -52,6 +52,7 @@ class FindingsResponse(BaseModel):
     findings: list[FindingEntry]
     total_scored: int
     generated_at: datetime
+    is_placeholder: bool = True  # True when findings are placeholder/demo data only
 
 
 # ---------------------------------------------------------------------------
@@ -378,4 +379,5 @@ async def get_findings(
         findings=ranked,
         total_scored=total_scored,
         generated_at=datetime.now(tz=UTC),
+        is_placeholder=len(takeover_findings) == 0,
     )

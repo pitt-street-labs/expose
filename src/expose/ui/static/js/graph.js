@@ -65,7 +65,14 @@ const ExposeGraph = (() => {
         mx_for:          100,
         ns_for:          100,
         depends_on:      120,
+        acquired_by:     110,
         default:         90,
+    };
+
+    /** Per-edge-type stroke colors; unlisted types use the default. */
+    const EDGE_COLORS = {
+        acquired_by: "#c4a35a",
+        default:     "#5b7ca3",
     };
 
     const EMERGE_DURATION    = 800;
@@ -122,6 +129,10 @@ const ExposeGraph = (() => {
 
     function linkDistance(d) {
         return LINK_DISTANCES[d.relationship_type] || LINK_DISTANCES.default;
+    }
+
+    function linkColor(d) {
+        return EDGE_COLORS[d.relationship_type] || EDGE_COLORS.default;
     }
 
     // --- SVG scaffold — defs, filters, groups ------------------------------
@@ -349,7 +360,7 @@ const ExposeGraph = (() => {
         // Enter.
         const linksEnter = links.enter()
             .append("line")
-            .attr("stroke", "#5b7ca3")
+            .attr("stroke", linkColor)
             .attr("stroke-width", 1)
             .attr("stroke-opacity", 0);
 

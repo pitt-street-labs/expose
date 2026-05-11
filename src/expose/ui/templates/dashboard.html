@@ -44,7 +44,7 @@
 
     <!-- ===== Start Scan form ===== -->
     <div class="card scan-form-card" x-data="scanForm()" x-show="selectedTenantId" x-cloak>
-        <h2 class="pane-title" style="margin-bottom: var(--space-sm);">Start Scan</h2>
+        <h2 class="pane-title" style="margin-bottom: var(--space-sm);">Start Scan <span class="help-tip" data-tip="Enter a domain, IP, or CIDR as the primary seed. Organization name enables M&amp;A discovery and certificate organization search. AI-guided selection will optimize collectors based on target infrastructure.">i</span></h2>
         <form @submit.prevent="submitScan()">
             <div style="display: flex; gap: 1rem; align-items: end; flex-wrap: wrap;">
                 <div style="flex: 1; min-width: 200px;">
@@ -83,6 +83,14 @@
             <div x-show="estimateText && !scanning" x-cloak x-text="estimateText"
                  style="margin-top: var(--space-xs); font-size: 0.75rem; color: var(--text-dim); font-family: var(--font-mono);"></div>
         </form>
+    </div>
+    <!-- AI-guided collector selection info — lives in exposeApp() scope
+         so tenantConfig is directly accessible via Alpine scope chain.
+         Shown when collectors are configured or LLM is enabled. -->
+    <div x-show="selectedTenantId && tenantConfig && (tenantConfig.llm_enabled || (tenantConfig.enabled_collectors && tenantConfig.enabled_collectors.length > 0))" x-cloak
+         style="margin: var(--space-xs) var(--space-lg) 0; font-size: 0.7rem; color: var(--text-dim); display: flex; align-items: center; gap: 0.4rem;">
+        <span style="color: var(--accent); font-weight: 600;">&#9670;</span>
+        <span>AI-guided selection active: collectors will be intelligently narrowed between passes based on target infrastructure detection.</span>
     </div>
 
     <!-- ===== Tenant Config panel ===== -->
@@ -259,6 +267,7 @@
              @click="showScanLog = !showScanLog">
             <h2 class="pane-title" style="margin: 0;">
                 Scan Log
+                <span class="help-tip" data-tip="Real-time pipeline execution log. Shows collector dispatch, entity discovery, relationship extraction, and LLM enrichment progress. Green counts indicate new observations.">i</span>
                 <span x-show="scanLogEntries.length > 0" x-cloak
                       style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;"
                       x-text="scanLogEntries.length + ' entries'"></span>
@@ -379,7 +388,7 @@
         <!-- Left pane: observation graph -->
         <section class="pane pane-left" aria-label="Observation graph">
             <div class="pane-header">
-                <h2 class="pane-title">Observation Graph</h2>
+                <h2 class="pane-title">Observation Graph <span class="help-tip" data-tip="Force-directed graph showing discovered entities and their relationships. Nodes = entities (domains, IPs, orgs). Edges = relationships (DNS resolution, CNAME chains, M&amp;A ownership). Click nodes for details.">i</span></h2>
                 <div class="pane-actions">
                     <button class="btn btn-ghost"
                             @click="graphLayout = graphLayout === 'force' ? 'radial' : 'force'"
@@ -436,6 +445,7 @@
             <div class="pane-header">
                 <h2 class="pane-title">
                     Entities
+                    <span class="help-tip" data-tip="All discovered entities with attribution status. Filter by type, search by name. Click any row to expand properties. 'Confirmed Yours' = in-scope assets. 'Third Party' = external dependencies.">i</span>
                     <span class="entity-count" x-show="entityCount > 0" x-text="entityCount" x-cloak></span>
                 </h2>
                 <div class="pane-actions">

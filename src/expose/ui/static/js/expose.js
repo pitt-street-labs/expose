@@ -57,6 +57,7 @@ function exposeApp() {
             socks5_proxy: "",
             llm_enabled: false,
             llm_provider: "",
+            llm_model: "",
             llm_cost_ceiling_per_run: 10.0,
         },
         configSaving: false,
@@ -159,6 +160,7 @@ function exposeApp() {
                 socks5_proxy: "",
                 llm_enabled: false,
                 llm_provider: "",
+                llm_model: "",
                 llm_cost_ceiling_per_run: 10.0,
             };
             this.configMessage = "";
@@ -428,6 +430,15 @@ function exposeApp() {
             setTimeout(function () {
                 self.activeRunId = null;
             }, 2000);
+
+            // Auto-collapse the scan log panel after 8 seconds of idle.
+            // The panel stays visible (scanLogEntries.length > 0) but
+            // collapsed so stale log output doesn't dominate the view.
+            setTimeout(function () {
+                if (!self.activeRunId) {
+                    self.showScanLog = false;
+                }
+            }, 8000);
         },
 
         /**
@@ -489,6 +500,7 @@ function exposeApp() {
                     socks5_proxy: data.socks5_proxy || "",
                     llm_enabled: data.llm_enabled || false,
                     llm_provider: data.llm_provider || "",
+                    llm_model: data.llm_model || "",
                     llm_cost_ceiling_per_run: data.llm_cost_ceiling_per_run || 0,
                 };
                 this._configLoaded = true;
@@ -517,6 +529,7 @@ function exposeApp() {
                     socks5_proxy: this.tenantConfig.socks5_proxy || null,
                     llm_enabled: this.tenantConfig.llm_enabled,
                     llm_provider: this.tenantConfig.llm_provider || null,
+                    llm_model: this.tenantConfig.llm_model || null,
                     llm_cost_ceiling_per_run: this.tenantConfig.llm_cost_ceiling_per_run,
                 };
 
@@ -588,6 +601,22 @@ function exposeApp() {
             } else {
                 this.tenantConfig.egress_fallbacks.push(profileId);
             }
+        },
+
+        /**
+         * Apply sensible defaults when LLM enrichment is first enabled.
+         * Sets provider to "gemini" if empty, cost ceiling to 1.00 if zero,
+         * and clears model to use the provider default.
+         */
+        applyLlmDefaults() {
+            if (!this.tenantConfig) return;
+            if (!this.tenantConfig.llm_provider) {
+                this.tenantConfig.llm_provider = "gemini";
+            }
+            if (!this.tenantConfig.llm_cost_ceiling_per_run || this.tenantConfig.llm_cost_ceiling_per_run <= 0) {
+                this.tenantConfig.llm_cost_ceiling_per_run = 1.00;
+            }
+            // Leave llm_model empty to use provider default
         },
 
         /* ==================================================================
@@ -925,7 +954,13 @@ function exposeApp() {
                 );
                 if (res.ok) {
                     var data = await res.json();
-                    this.findings = data.findings;
+                    // Only show findings when they contain real scored entities
+                    // (takeover risks, real scan data), not placeholder/demo data.
+                    if (data.is_placeholder) {
+                        this.findings = [];
+                    } else {
+                        this.findings = data.findings;
+                    }
                 }
             } catch (e) {
                 console.error("[EXPOSE] Failed to load findings:", e);
@@ -1316,8 +1351,10 @@ function scanForm() {
             var tldExpansion = 3;  // multi-TLD pre-check factor
             var seedCount = baseSeedCount * tldExpansion;
 
-            // Try to get the enabled collector count from the parent app
-            var collectorCount = 13;  // conservative default
+            // Get the enabled collector count from the parent app's tenant config.
+            // If config hasn't been loaded yet, trigger a load so subsequent
+            // estimates use the real value instead of the fallback default.
+            var collectorCount = 0;
             var appEl = document.querySelector("[x-data]");
             if (appEl && appEl._x_dataStack) {
                 var appData = appEl._x_dataStack[0];
@@ -1328,6 +1365,14 @@ function scanForm() {
                 } else if (appData && appData.stats && appData.stats.collectors > 0) {
                     collectorCount = appData.stats.collectors;
                 }
+                // If config not loaded yet and we have a tenant, trigger async load
+                if (collectorCount === 0 && appData && !appData._configLoaded && appData.selectedTenantId) {
+                    appData.loadTenantConfig();
+                }
+            }
+            // Fallback only when no tenant config data is available at all
+            if (collectorCount === 0) {
+                collectorCount = 29;  // total builtin collectors
             }
 
             try {

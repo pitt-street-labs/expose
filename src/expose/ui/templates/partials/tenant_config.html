@@ -18,6 +18,7 @@
         <fieldset style="border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-sm); margin-bottom: var(--space-md);">
             <legend style="color: var(--text-muted); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 0 var(--space-xs);">
                 Scope Rules
+                <span class="help-tip" data-tip="Define which domains, IPs, and ASNs are in-scope for this tenant. Exclusion rules prevent scanning specific assets. Without rules, all discovered assets are in-scope.">i</span>
             </legend>
             <div x-show="tenantConfig && tenantConfig.scope_rules.length === 0"
                  style="color: var(--text-dim); font-size: 0.8rem; padding: var(--space-xs) 0;">
@@ -60,47 +61,161 @@
         <fieldset style="border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-sm); margin-bottom: var(--space-md);">
             <legend style="color: var(--text-muted); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 0 var(--space-xs);">
                 Enabled Collectors
+                <span class="help-tip" data-tip="Select which data collectors run during scans. AI-guided mode will intelligently narrow this list based on target profiling, but only from your enabled set. 'Select All' is recommended for comprehensive coverage.">i</span>
             </legend>
-            <div style="display: flex; flex-wrap: wrap; gap: var(--space-sm);">
-                {#
-                    Collector IDs are hard-coded here to match the 14 builtins.
-                    When the collector registry API is added (Phase 3), this
-                    list should be populated dynamically.
-                #}
-                {% set collector_ids = [
-                    "active-dns-resolve",
-                    "active-http-fingerprint",
-                    "active-port-surface",
-                    "active-tls-handshake",
-                    "bgp-he-toolkit",
-                    "bgp-ripestat",
-                    "bgp-team-cymru",
-                    "ct-certstream",
-                    "ct-crtsh",
-                    "favicon-hash",
-                    "github-exposed",
-                    "rdap-whois",
-                    "spf-dkim-dmarc"
-                ] %}
-                {% for cid in collector_ids %}
-                <label style="display: flex; align-items: center; gap: 0.25rem; font-size: 0.75rem; color: var(--text-secondary); cursor: pointer; min-width: 180px;">
-                    <input type="checkbox"
-                           :checked="tenantConfig && tenantConfig.enabled_collectors.indexOf('{{ cid }}') >= 0"
-                           @change="toggleCollector('{{ cid }}')"
-                           style="accent-color: var(--accent);">
-                    {{ cid }}
-                </label>
-                {% endfor %}
-                <div style="display: flex; gap: 0.5rem; margin-top: var(--space-sm); width: 100%;">
-                    <button type="button" class="btn btn-ghost" style="font-size: 0.7rem;"
-                            @click="tenantConfig.enabled_collectors = [{% for cid in collector_ids %}'{{ cid }}'{{ ',' if not loop.last }}{% endfor %}]">
-                        Select All
-                    </button>
-                    <button type="button" class="btn btn-ghost" style="font-size: 0.7rem;"
-                            @click="tenantConfig.enabled_collectors = []">
-                        Deselect All
-                    </button>
+            {#
+                All 38 registered builtin collectors, grouped by function.
+                When the collector registry API is added (Phase 3), this
+                list should be populated dynamically.
+            #}
+            {% set collector_ids = [
+                "active-dns-resolve",
+                "active-http-fingerprint",
+                "active-port-surface",
+                "active-tls-handshake",
+                "bgp-he-toolkit",
+                "bgp-ripestat",
+                "bgp-team-cymru",
+                "cloud-ranges",
+                "cloud-storage-exposure",
+                "common-crawl",
+                "ct-censys",
+                "ct-certspotter",
+                "ct-certstream",
+                "ct-crtsh",
+                "dns-blacklist",
+                "dns-chaos",
+                "dns-passive-history",
+                "dns-reverse-ptr",
+                "dns-subdomain-enum",
+                "dns-zone-transfer",
+                "favicon-hash",
+                "git-commit-emails",
+                "github-exposed",
+                "ma-discovery",
+                "mail-headers",
+                "otx-alienvault",
+                "paste-monitor",
+                "rdap-whois",
+                "robots-txt",
+                "scan-binaryedge",
+                "scan-censys",
+                "scan-shodan",
+                "security-txt",
+                "sip-discovery",
+                "spf-dkim-dmarc",
+                "waf-detection",
+                "wayback-machine",
+                "wikipedia-edits"
+            ] %}
+
+            {# --- DNS / Network --- #}
+            <div style="margin-bottom: var(--space-xs);">
+                <div style="font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin-bottom: 4px; padding-left: 2px;">DNS / Network</div>
+                <div style="display: flex; flex-wrap: wrap; gap: var(--space-sm);">
+                    {% set dns_net = [
+                        "active-dns-resolve", "active-tls-handshake", "bgp-he-toolkit",
+                        "bgp-ripestat", "bgp-team-cymru", "cloud-ranges", "dns-blacklist",
+                        "dns-chaos", "dns-passive-history", "dns-reverse-ptr",
+                        "dns-subdomain-enum", "dns-zone-transfer", "spf-dkim-dmarc"
+                    ] %}
+                    {% for cid in dns_net %}
+                    <label style="display: flex; align-items: center; gap: 0.25rem; font-size: 0.75rem; color: var(--text-secondary); cursor: pointer; min-width: 180px;">
+                        <input type="checkbox"
+                               :checked="tenantConfig && tenantConfig.enabled_collectors.indexOf('{{ cid }}') >= 0"
+                               @change="toggleCollector('{{ cid }}')"
+                               style="accent-color: var(--accent);">
+                        {{ cid }}
+                    </label>
+                    {% endfor %}
                 </div>
+            </div>
+
+            {# --- Certificate Transparency --- #}
+            <div style="margin-bottom: var(--space-xs);">
+                <div style="font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin-bottom: 4px; padding-left: 2px;">Certificate Transparency</div>
+                <div style="display: flex; flex-wrap: wrap; gap: var(--space-sm);">
+                    {% set ct = ["ct-censys", "ct-certspotter", "ct-certstream", "ct-crtsh"] %}
+                    {% for cid in ct %}
+                    <label style="display: flex; align-items: center; gap: 0.25rem; font-size: 0.75rem; color: var(--text-secondary); cursor: pointer; min-width: 180px;">
+                        <input type="checkbox"
+                               :checked="tenantConfig && tenantConfig.enabled_collectors.indexOf('{{ cid }}') >= 0"
+                               @change="toggleCollector('{{ cid }}')"
+                               style="accent-color: var(--accent);">
+                        {{ cid }}
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+
+            {# --- Passive Intelligence --- #}
+            <div style="margin-bottom: var(--space-xs);">
+                <div style="font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin-bottom: 4px; padding-left: 2px;">Passive Intelligence</div>
+                <div style="display: flex; flex-wrap: wrap; gap: var(--space-sm);">
+                    {% set passive = [
+                        "common-crawl", "otx-alienvault", "paste-monitor", "rdap-whois",
+                        "wayback-machine", "wikipedia-edits"
+                    ] %}
+                    {% for cid in passive %}
+                    <label style="display: flex; align-items: center; gap: 0.25rem; font-size: 0.75rem; color: var(--text-secondary); cursor: pointer; min-width: 180px;">
+                        <input type="checkbox"
+                               :checked="tenantConfig && tenantConfig.enabled_collectors.indexOf('{{ cid }}') >= 0"
+                               @change="toggleCollector('{{ cid }}')"
+                               style="accent-color: var(--accent);">
+                        {{ cid }}
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+
+            {# --- Active Scanning --- #}
+            <div style="margin-bottom: var(--space-xs);">
+                <div style="font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin-bottom: 4px; padding-left: 2px;">Active Scanning</div>
+                <div style="display: flex; flex-wrap: wrap; gap: var(--space-sm);">
+                    {% set active_scan = [
+                        "active-http-fingerprint", "active-port-surface", "favicon-hash",
+                        "github-exposed", "git-commit-emails", "mail-headers", "robots-txt",
+                        "scan-binaryedge", "scan-censys", "scan-shodan", "security-txt",
+                        "sip-discovery", "waf-detection", "cloud-storage-exposure"
+                    ] %}
+                    {% for cid in active_scan %}
+                    <label style="display: flex; align-items: center; gap: 0.25rem; font-size: 0.75rem; color: var(--text-secondary); cursor: pointer; min-width: 180px;">
+                        <input type="checkbox"
+                               :checked="tenantConfig && tenantConfig.enabled_collectors.indexOf('{{ cid }}') >= 0"
+                               @change="toggleCollector('{{ cid }}')"
+                               style="accent-color: var(--accent);">
+                        {{ cid }}
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+
+            {# --- Organization / M&A --- #}
+            <div style="margin-bottom: var(--space-xs);">
+                <div style="font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin-bottom: 4px; padding-left: 2px;">Organization / M&amp;A</div>
+                <div style="display: flex; flex-wrap: wrap; gap: var(--space-sm);">
+                    {% set org_ma = ["ma-discovery"] %}
+                    {% for cid in org_ma %}
+                    <label style="display: flex; align-items: center; gap: 0.25rem; font-size: 0.75rem; color: var(--text-secondary); cursor: pointer; min-width: 180px;">
+                        <input type="checkbox"
+                               :checked="tenantConfig && tenantConfig.enabled_collectors.indexOf('{{ cid }}') >= 0"
+                               @change="toggleCollector('{{ cid }}')"
+                               style="accent-color: var(--accent);">
+                        {{ cid }}
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 0.5rem; margin-top: var(--space-sm); width: 100%;">
+                <button type="button" class="btn btn-ghost" style="font-size: 0.7rem;"
+                        @click="tenantConfig.enabled_collectors = [{% for cid in collector_ids %}'{{ cid }}'{{ ',' if not loop.last }}{% endfor %}]">
+                    Select All
+                </button>
+                <button type="button" class="btn btn-ghost" style="font-size: 0.7rem;"
+                        @click="tenantConfig.enabled_collectors = []">
+                    Deselect All
+                </button>
             </div>
         </fieldset>
 
@@ -111,6 +226,7 @@
             <fieldset style="border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-sm); flex: 1; min-width: 200px;">
                 <legend style="color: var(--text-muted); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 0 var(--space-xs);">
                     Schedule (Cron)
+                    <span class="help-tip" data-tip="Automate recurring scans with a cron expression. Leave blank for manual-only. Example: '0 2 * * *' runs daily at 2:00 AM UTC.">i</span>
                 </legend>
                 <input type="text"
                        x-model="tenantConfig.schedule_cron"
@@ -126,6 +242,7 @@
             <fieldset style="border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-sm); flex: 1; min-width: 200px;">
                 <legend style="color: var(--text-muted); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 0 var(--space-xs);">
                     Egress Profile
+                    <span class="help-tip" data-tip="Controls how collector traffic reaches external targets. 'direct' uses the server's network. 'socks5' routes through a SOCKS5 proxy (e.g., Tor). Fallbacks retry failed requests through alternate paths.">i</span>
                 </legend>
                 <select x-model="tenantConfig.egress_profile" class="selector-input"
                         style="width: 100%; font-size: 0.75rem;">
@@ -147,6 +264,7 @@
             <fieldset style="border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-sm); flex: 1; min-width: 200px;">
                 <legend style="color: var(--text-muted); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 0 var(--space-xs);">
                     Egress Fallbacks
+                    <span class="help-tip" data-tip="When a collector fails due to network errors, retry through these egress paths in order. Useful for targets that block datacenter IPs.">i</span>
                 </legend>
                 <div style="color: var(--text-dim); font-size: 0.7rem; margin-bottom: var(--space-xs);">
                     On source-unreachable errors, retry through these egress profiles (in order).
@@ -169,6 +287,7 @@
             <fieldset style="border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-sm); flex: 1; min-width: 260px;">
                 <legend style="color: var(--text-muted); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 0 var(--space-xs);">
                     SOCKS5 Proxy URL
+                    <span class="help-tip" data-tip="The SOCKS5 proxy address for egress. Default Tor: socks5://localhost:9050. Requires the 'socksio' Python package.">i</span>
                 </legend>
                 <input type="text"
                        x-model="tenantConfig.socks5_proxy"
@@ -186,11 +305,13 @@
         <fieldset style="border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-sm); margin-bottom: var(--space-md);">
             <legend style="color: var(--text-muted); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 0 var(--space-xs);">
                 LLM Enrichment (Stage 4b)
+                <span class="help-tip" data-tip="Stage 4b: After collection, an LLM classifies each discovered entity as noise vs. actionable finding. Gemini 2.5 Flash recommended for speed and cost. Cost ceiling caps per-run spend. Set to $0 for unlimited (not recommended).">i</span>
             </legend>
             <div style="display: flex; gap: var(--space-md); align-items: start; flex-wrap: wrap;">
                 <!-- Enable toggle -->
                 <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; color: var(--text-secondary); cursor: pointer; min-width: 120px;">
                     <input type="checkbox" x-model="tenantConfig.llm_enabled"
+                           @change="if (tenantConfig.llm_enabled) { applyLlmDefaults(); }"
                            style="accent-color: var(--accent);">
                     Enable LLM
                 </label>
@@ -200,17 +321,30 @@
                     <select x-model="tenantConfig.llm_provider" class="selector-input"
                             style="width: 100%; font-size: 0.75rem;">
                         <option value="">None</option>
+                        <option value="gemini">Gemini</option>
                         <option value="openai">OpenAI</option>
                         <option value="anthropic">Anthropic</option>
                         <option value="ollama">Ollama (local)</option>
-                        <option value="azure_openai">Azure OpenAI</option>
                     </select>
+                </div>
+                <!-- Model -->
+                <div style="flex: 1; min-width: 180px;" x-show="tenantConfig.llm_enabled">
+                    <label style="font-size: 0.7rem; color: var(--text-muted); display: block; margin-bottom: 2px;">Model</label>
+                    <input type="text" x-model="tenantConfig.llm_model"
+                           :placeholder="tenantConfig.llm_provider === 'gemini' ? 'gemini-2.5-flash' :
+                                         tenantConfig.llm_provider === 'openai' ? 'gpt-4o' :
+                                         tenantConfig.llm_provider === 'anthropic' ? 'claude-sonnet-4-20250514' :
+                                         tenantConfig.llm_provider === 'ollama' ? 'qwen2.5:7b' : 'model name'"
+                           class="filter-input" style="width: 100%;">
+                    <div style="color: var(--text-dim); font-size: 0.65rem; margin-top: 2px;">
+                        Leave blank for provider default.
+                    </div>
                 </div>
                 <!-- Cost ceiling -->
                 <div style="flex: 0 0 140px;" x-show="tenantConfig.llm_enabled">
                     <label style="font-size: 0.7rem; color: var(--text-muted); display: block; margin-bottom: 2px;">Cost Ceiling ($/run)</label>
                     <input type="number" x-model.number="tenantConfig.llm_cost_ceiling_per_run"
-                           min="0" step="0.01" placeholder="0.00"
+                           min="0" step="0.01" placeholder="1.00"
                            class="filter-input" style="width: 100%;">
                 </div>
             </div>

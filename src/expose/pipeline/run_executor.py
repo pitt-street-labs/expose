@@ -46,6 +46,7 @@ from expose.pipeline.entity_seed_converter import (
     entities_to_seeds,
     extract_org_seeds_from_properties,
 )
+from expose.pipeline.ma_expansion import expand_ma_seeds
 from expose.pipeline.seed_expansion import expand_seeds
 from expose.pipeline.target_profile import build_target_profile
 from expose.quotas.tracker import QuotaExceededError, QuotaTracker
@@ -527,6 +528,16 @@ class RunExecutor:
             new_seeds.extend(
                 extract_org_seeds_from_properties(entities, already_scanned)
             )
+
+            # --- M&A seed expansion -------------------------------------------
+            # Convert M&A observations into domain/organization seeds for
+            # acquired companies so subsequent passes explore their attack
+            # surface.
+            ma_seeds = expand_ma_seeds(pass_obs)
+            for ms in ma_seeds:
+                key = (ms.seed_type.value, ms.value)
+                if key not in already_scanned:
+                    new_seeds.append(ms)
 
             if not new_seeds:
                 break
@@ -1023,6 +1034,23 @@ class RunExecutor:
                     (from_canonical, "domain", str(ns), "ns_for", obs)
                 )
 
+            # --- M&A acquired_by from ma-discovery ----------------------------
+            if (
+                payload.get("_collector_id") == "ma-discovery"
+                and payload.get("relationship_type") == "acquired_by"
+            ):
+                parent_org = payload.get("parent_organization")
+                acquired_org = payload.get("acquired_organization")
+                if parent_org and acquired_org:
+                    all_related.append(
+                        (parent_org, "organization", acquired_org, "acquired_by", obs)
+                    )
+                for acq_domain in payload.get("acquired_domains", []):
+                    if acq_domain and parent_org:
+                        all_related.append(
+                            (parent_org, "domain", str(acq_domain), "acquired_by", obs)
+                        )
+
         if not all_related:
             return
 
@@ -1153,6 +1181,19 @@ class RunExecutor:
         # --- NS nameservers from active_dns ----------------------------------
         for ns in payload.get("nameservers", []):
             related.append(("domain", str(ns), "ns_for"))
+
+        # --- M&A acquired_by from ma-discovery -------------------------------
+        if (
+            payload.get("_collector_id") == "ma-discovery"
+            and payload.get("relationship_type") == "acquired_by"
+        ):
+            parent_org = payload.get("parent_organization")
+            acquired_org = payload.get("acquired_organization")
+            if parent_org and acquired_org:
+                related.append(("organization", acquired_org, "acquired_by"))
+            for acq_domain in payload.get("acquired_domains", []):
+                if acq_domain:
+                    related.append(("domain", str(acq_domain), "acquired_by"))
 
         # --- Create entities and relationships for each related reference -----
         for entity_type, identifier, edge_type in related:
