@@ -104,17 +104,23 @@ CREDENTIAL_SPECS: dict[str, CollectorCredentialSpec] = {
         collector_id="active-http-fingerprint",
         required_keys=[],
     ),
-    "shodan-iwide": CollectorCredentialSpec(
-        collector_id="shodan-iwide",
-        required_keys=["api_key"],
+    "scan-shodan": CollectorCredentialSpec(
+        collector_id="scan-shodan",
+        required_keys=["shodan_api_key"],
+        key_mapping={"shodan_api_key": "collector.shodan-iwide.api_key"},
     ),
     "scan-censys": CollectorCredentialSpec(
         collector_id="scan-censys",
-        required_keys=["api_id", "api_secret"],
+        required_keys=["censys_api_id", "censys_api_secret"],
+        key_mapping={
+            "censys_api_id": "collector.scan-censys.api_id",
+            "censys_api_secret": "collector.scan-censys.api_secret",
+        },
     ),
     "scan-binaryedge": CollectorCredentialSpec(
         collector_id="scan-binaryedge",
-        required_keys=["api_key"],
+        required_keys=["binaryedge_api_key"],
+        key_mapping={"binaryedge_api_key": "collector.scan-binaryedge.api_key"},
     ),
     "pdns-securitytrails": CollectorCredentialSpec(
         collector_id="pdns-securitytrails",
@@ -144,7 +150,7 @@ CREDENTIAL_SPECS: dict[str, CollectorCredentialSpec] = {
     ),
     "dns-chaos": CollectorCredentialSpec(
         collector_id="dns-chaos",
-        required_keys=[],
+        required_keys=["api_key"],
     ),
 }
 
