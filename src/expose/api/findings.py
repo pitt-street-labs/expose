@@ -268,8 +268,9 @@ async def get_findings(
 
     Findings are always sorted by score descending (highest risk first).
     """
-    return _build_placeholder_findings(
-        tenant_id,
-        limit=limit,
-        min_score=min_score,
+    return FindingsResponse(
+        tenant_id=tenant_id,
+        findings=[],
+        total_scored=0,
+        generated_at=datetime.now(tz=UTC),
     )

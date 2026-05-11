@@ -46,7 +46,15 @@ function exposeApp() {
 
         // Tenant config panel
         showConfigPanel: false,
-        tenantConfig: null,
+        tenantConfig: {
+            scope_rules: [],
+            enabled_collectors: [],
+            schedule_cron: "",
+            egress_profile: "direct",
+            llm_enabled: false,
+            llm_provider: "",
+            llm_cost_ceiling_per_run: 10.0,
+        },
         configSaving: false,
         configMessage: "",
 
@@ -56,7 +64,7 @@ function exposeApp() {
 
         // Credential management panel
         showCredentialsPanel: false,
-        credentialSlots: null,
+        credentialSlots: [],
         credentialConfiguredCount: 0,
         credentialTotalCount: 0,
         credentialMessage: "",

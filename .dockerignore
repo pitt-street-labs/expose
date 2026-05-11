@@ -54,6 +54,11 @@ secrets.yaml
 docs/
 *.md
 !README.md
+!SECURITY.md
+!ETHICS.md
+!LICENSE
+!CONTRIBUTING.md
+!CODE_OF_CONDUCT.md
 
 # Helm chart (deployed separately)
 deploy/

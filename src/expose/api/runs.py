@@ -208,6 +208,7 @@ async def start_run(
     )
     session.add(run)
     await session.flush()
+    await session.commit()
 
     # 5. Start background pipeline execution
     sf = getattr(request.app.state, "session_factory", None)

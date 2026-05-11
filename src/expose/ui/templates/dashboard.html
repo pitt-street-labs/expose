@@ -23,7 +23,7 @@
                         class="selector-input">
                     <option value="">Select tenant...</option>
                     <!-- Populated dynamically; placeholder for noscript -->
-                    <option value="00000000-0000-0000-0000-000000000001">default</option>
+                    <option value="00000000-0000-0000-0000-000000000000">default</option>
                 </select>
             </div>
         </div>
@@ -370,7 +370,7 @@
     </main>
 
     <!-- ===== Export panel ===== -->
-    <div class="card" style="margin-top: 12px;" x-show="entities.length > 0 || entityCount > 0" x-cloak>
+    <div class="card" style="margin-top: 12px;" x-show="entityCount > 0" x-cloak>
         <div style="display: flex; justify-content: space-between; align-items: center;">
             <span class="pane-title">Export</span>
             <div style="display: flex; gap: 8px; align-items: center;">
