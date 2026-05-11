@@ -71,10 +71,14 @@ This repository (`pitt-street-labs/ff6k` on internal Gitea — repo path retains
 | Helm chart | `deploy/helm-chart/` (skeleton — full per-component manifests land Sprint 5+) |
 | CI workflow | `.github/workflows/ci.yml` (lint + test + schema-sync + FIPS gate + helm-lint + multi-arch container build + ci-gate aggregator) |
 | Pre-commit | `.pre-commit-config.yaml` (ruff + gitleaks + check-jsonschema + helm lint) |
-| Tests | `tests/` — **3590+ tests as of cad9f94.** 100+ test files. Conftest provides `pg_container` + `nats_container` shared session fixtures. aiosqlite for fast API unit tests. #73 fixed. |
+| Tests | `tests/` — **3617+ tests as of edf445f.** 100+ test files. Conftest provides `pg_container` + `nats_container` shared session fixtures. aiosqlite for fast API unit tests. #73 fixed. |
 | Deploy artifacts | `deploy/helm-chart/` (NetworkPolicy + PodSecurity hardened), `deploy/cosign-keypair-setup.md`, `deploy/grafana/` (2 dashboards + README), `scripts/generate-sbom.sh` |
 | Strategy docs | `docs/strategy/` — postgres-deployment-guide, lab-to-production-runbook, network-security-guide, sbom-and-signing-guide, air-gap-deployment-guide, persona-analysis, competitive-analysis, framework-annotation, sdlp, federal-customer-deployment-guide, critical-path, commercial-moat-and-revenue, framework-mapping |
-| GitHub-launch docs | `README.md` (public-facing), `CHANGELOG.md`, `ROADMAP.md`, `GOVERNANCE.md`, `CONTRIBUTING.md` (rewritten for public), `docs/collectors.md` (14-collector catalog), `docs/quickstart.md`, `docs/why-expose.md`, `docs/use-cases.md` |
+| GitHub-launch docs | `README.md` (public-facing), `CHANGELOG.md` (v0.2.0), `ROADMAP.md`, `GOVERNANCE.md`, `CONTRIBUTING.md` (rewritten for public), `docs/collectors.md` (41-collector catalog), `docs/quickstart.md` (full API catalog), `docs/why-expose.md` (12-axis comparison), `docs/use-cases.md` (8 persona workflows), `docs/user-guide.md` (1298-line feature walkthrough) |
+| Egress profiles | `src/expose/egress/` — direct, socks5, http_connect, wireguard, **tor** (circuit rotation, auto-rotate, control port auth) |
+| Example outputs | `examples/outputs/` — scan report, findings, provenance, graph, audit log, eval report, Splunk HEC events |
+| Example workflows | `examples/workflows/` — basic-scan.sh, scheduled-monitoring.sh, siem-integration.sh, eval-rulepack.sh |
+| Architecture diagrams | `docs/architecture/90-egress-flow.md`, `docs/architecture/95-dependency-map.md` (4 Mermaid diagrams) |
 | GitHub templates | `.github/ISSUE_TEMPLATE/` (bug, feature, collector request), `.github/PULL_REQUEST_TEMPLATE.md`, `.github/DISCUSSION_TEMPLATE/` (ideas, Q&A, show-and-tell) |
 | SpiderFoot credentials | `spiderfoot-creds.txt` (gitignored, 31 API keys — Censys, Shodan, SecurityTrails, BinaryEdge, GreyNoise, VirusTotal, PassiveTotal, AlienVault, + 23 more) |
 | Example rule packs | `examples/rulepacks/` — baseline + cloud-first + conservative (3 packs, auto-validated) |
