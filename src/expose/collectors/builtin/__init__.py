@@ -36,3 +36,5 @@ import expose.collectors.builtin.wikipedia_edits  # noqa: F401
 import expose.collectors.builtin.git_commit_emails  # noqa: F401
 import expose.collectors.builtin.paste_monitor  # noqa: F401
 import expose.collectors.builtin.mail_header_analyzer  # noqa: F401
+import expose.collectors.builtin.otx_alienvault  # noqa: F401
+import expose.collectors.builtin.common_crawl  # noqa: F401

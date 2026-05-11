@@ -20,8 +20,11 @@ FIPS gate: This module does not import ``hashlib`` or ``secrets``
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import re
+import shutil
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
@@ -52,6 +55,11 @@ from expose.types.canonical import CollectorStatus, IdentifierType
 # RDAP bootstrap base URL.  rdap.org is the IANA-blessed bootstrap service
 # that redirects to the authoritative RIR/registrar RDAP server.
 _RDAP_BOOTSTRAP_BASE = "https://rdap.org"
+
+_log = logging.getLogger(__name__)
+
+# Timeout for the ``whois`` CLI subprocess (seconds).
+_WHOIS_CLI_TIMEOUT_SECONDS = 15
 
 # Heuristic for detecting personal names vs. organization names.
 # Organizations typically contain one of these indicators.
@@ -206,6 +214,85 @@ def _sanitize_org_string(value: str | None) -> str | None:
     return result.value if result.value else None
 
 
+# --------------------------------------------------------------------------- #
+# WHOIS CLI text-parsing helpers                                               #
+# --------------------------------------------------------------------------- #
+
+# Regex patterns for extracting fields from ``whois`` CLI text output.
+# Each pattern captures the *value* portion of a ``Key: Value`` line.
+_WHOIS_REGISTRANT_ORG_RE = re.compile(
+    r"^\s*Registrant\s+Org(?:anization)?:\s*(.+)$",
+    re.MULTILINE | re.IGNORECASE,
+)
+_WHOIS_REGISTRAR_RE = re.compile(
+    r"^\s*Registrar:\s*(.+)$",
+    re.MULTILINE | re.IGNORECASE,
+)
+_WHOIS_CREATION_DATE_RE = re.compile(
+    r"^\s*(?:Creation Date|Created):\s*(.+)$",
+    re.MULTILINE | re.IGNORECASE,
+)
+_WHOIS_EXPIRATION_DATE_RE = re.compile(
+    r"^\s*(?:Registry Expiry Date|Expiration Date):\s*(.+)$",
+    re.MULTILINE | re.IGNORECASE,
+)
+_WHOIS_NAMESERVER_RE = re.compile(
+    r"^\s*Name\s+Server:\s*(.+)$",
+    re.MULTILINE | re.IGNORECASE,
+)
+_WHOIS_STATUS_RE = re.compile(
+    r"^\s*Domain\s+Status:\s*(.+)$",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+
+def _parse_whois_text(text: str) -> dict[str, Any] | None:
+    """Parse key registration fields from raw ``whois`` CLI output.
+
+    Returns a dict with the parsed fields (matching the RDAP structured
+    payload key names) or ``None`` if the output contains no useful data.
+    """
+    payload: dict[str, Any] = {}
+
+    m = _WHOIS_REGISTRANT_ORG_RE.search(text)
+    if m and m.group(1).strip():
+        payload["registrant_org"] = m.group(1).strip()
+
+    m = _WHOIS_REGISTRAR_RE.search(text)
+    if m and m.group(1).strip():
+        payload["registrar"] = m.group(1).strip()
+
+    m = _WHOIS_CREATION_DATE_RE.search(text)
+    if m and m.group(1).strip():
+        payload["registration_date"] = m.group(1).strip()
+
+    m = _WHOIS_EXPIRATION_DATE_RE.search(text)
+    if m and m.group(1).strip():
+        payload["expiration_date"] = m.group(1).strip()
+
+    nameservers = _WHOIS_NAMESERVER_RE.findall(text)
+    if nameservers:
+        payload["nameservers"] = [ns.strip().lower() for ns in nameservers if ns.strip()]
+
+    statuses = _WHOIS_STATUS_RE.findall(text)
+    if statuses:
+        # WHOIS status lines often include a URL after the status code —
+        # e.g. "clientDeleteProhibited https://icann.org/epp#...".
+        # Strip the URL and keep only the human-readable code.
+        cleaned: list[str] = []
+        for s in statuses:
+            code = s.strip().split()[0] if s.strip() else ""
+            if code:
+                cleaned.append(code)
+        if cleaned:
+            payload["status"] = cleaned
+
+    if not payload:
+        return None
+
+    return payload
+
+
 @register_collector
 class RdapWhoisCollector(Collector):
     """RDAP/WHOIS registration data collector (Tier 1, passive).
@@ -266,11 +353,30 @@ class RdapWhoisCollector(Collector):
         return suffix2
 
     async def _expand_domain(self, seed: Seed) -> AsyncIterator[Observation]:
-        """Query RDAP for a domain seed (stripped to apex)."""
+        """Query RDAP for a domain seed (stripped to apex).
+
+        Falls back to the ``whois`` CLI tool if the RDAP server is
+        unreachable (network error, timeout, HTTP 4xx/5xx).
+        """
         canonical = canonicalize_domain(seed.value)
         apex = self._to_apex(canonical)
         url = f"{_RDAP_BOOTSTRAP_BASE}/domain/{apex}"
-        data = await self._fetch_rdap(url)
+
+        try:
+            data = await self._fetch_rdap(url)
+        except CollectorSourceUnreachableError as rdap_exc:
+            # RDAP failed — attempt WHOIS CLI fallback.
+            _log.warning(
+                "RDAP unreachable for %s, trying whois CLI fallback: %s",
+                apex,
+                rdap_exc,
+            )
+            fallback = await self._whois_cli_fallback(apex)
+            if fallback is None:
+                # Both sources failed; re-raise the original RDAP error.
+                raise
+            yield fallback
+            return
 
         observation = self._parse_rdap_response(
             data=data,
@@ -314,6 +420,116 @@ class RdapWhoisCollector(Collector):
         except (httpx.HTTPError, httpx.StreamError) as exc:
             msg = f"RDAP query failed for {url}: {exc}"
             raise CollectorSourceUnreachableError(msg) from exc
+
+    async def _whois_cli_fallback(self, domain: str) -> Observation | None:
+        """Shell out to the ``whois`` CLI tool and parse the text output.
+
+        Returns an ``Observation`` with ``"source": "whois_cli_fallback"``
+        in the structured payload, or ``None`` if the whois command fails
+        or returns no useful data.
+
+        Uses ``asyncio.create_subprocess_exec`` (not ``shell=True``) so the
+        domain argument is passed directly to the ``whois`` binary without
+        shell interpolation — no injection risk.
+        """
+        if shutil.which("whois") is None:
+            _log.warning("whois CLI not found on PATH; cannot fall back")
+            return None
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "whois",
+                domain,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=_WHOIS_CLI_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            _log.warning(
+                "whois CLI timed out after %ds for %s",
+                _WHOIS_CLI_TIMEOUT_SECONDS,
+                domain,
+            )
+            return None
+        except OSError as exc:
+            _log.warning("whois CLI exec failed for %s: %s", domain, exc)
+            return None
+
+        if proc.returncode != 0:
+            _log.warning(
+                "whois CLI returned exit code %d for %s: %s",
+                proc.returncode,
+                domain,
+                stderr.decode("utf-8", errors="replace").strip()[:200],
+            )
+            return None
+
+        text = stdout.decode("utf-8", errors="replace")
+        parsed = _parse_whois_text(text)
+        if parsed is None:
+            _log.warning("whois CLI returned no useful data for %s", domain)
+            return None
+
+        # Sanitize org strings through the same pipeline as RDAP.
+        if "registrant_org" in parsed:
+            parsed["registrant_org"] = _sanitize_org_string(
+                parsed["registrant_org"],
+            )
+            if parsed["registrant_org"] is None:
+                del parsed["registrant_org"]
+        if "registrar" in parsed:
+            parsed["registrar"] = _sanitize_org_string(parsed["registrar"])
+            if parsed["registrar"] is None:
+                del parsed["registrar"]
+
+        # Canonicalize nameservers.
+        if "nameservers" in parsed:
+            canonical_ns: list[str] = []
+            for ns in parsed["nameservers"]:
+                try:
+                    canonical_ns.append(canonicalize_domain(ns))
+                except CanonicalizationError:
+                    canonical_ns.append(ns)
+            parsed["nameservers"] = canonical_ns
+
+        # Sanitize status values.
+        if "status" in parsed:
+            parsed["status"] = [
+                sanitize_field(s, SanitizationFieldKind.GENERIC).value
+                for s in parsed["status"]
+            ]
+
+        # Tag the payload so downstream consumers know this came from the
+        # CLI fallback rather than RDAP proper.
+        parsed["source"] = "whois_cli_fallback"
+
+        warnings: list[str] = [
+            "Data sourced from whois CLI fallback (RDAP was unreachable)",
+        ]
+        if "registrant_org" not in parsed:
+            warnings.append(
+                "No registrant organization extracted "
+                "(privacy-redacted or personal name filtered)",
+            )
+
+        return Observation(
+            collector_id=self.collector_id,
+            collector_version=self.collector_version,
+            tenant_id=self.config.tenant_id,
+            observation_type=ObservationType.RDAP_REGISTRATION,
+            subject=ObservationSubject(
+                identifier_type=IdentifierType.DOMAIN,
+                identifier_value=domain,
+            ),
+            observed_at=datetime.now(UTC),
+            evidence_blob=text.encode("utf-8"),
+            evidence_blob_content_type="text/plain",
+            structured_payload=parsed,
+            warnings=warnings,
+        )
 
     def _parse_rdap_response(
         self,
@@ -404,8 +620,14 @@ class RdapWhoisCollector(Collector):
         )
 
     async def health_check(self) -> CollectorHealthCheck:
-        """HEAD request to rdap.org to verify reachability."""
+        """HEAD request to rdap.org to verify reachability.
+
+        Also checks whether the ``whois`` CLI is available on PATH (used
+        as a fallback when RDAP is unreachable).  The result is reported
+        in the ``detail`` dict as ``whois_cli_available``.
+        """
         checked_at = datetime.now(UTC)
+        whois_available = shutil.which("whois") is not None
         try:
             async with httpx.AsyncClient(
                 timeout=self.config.request_timeout_seconds,
@@ -424,6 +646,7 @@ class RdapWhoisCollector(Collector):
                         status=CollectorStatus.SUCCESS,
                         checked_at=checked_at,
                         latency_ms=elapsed_ms,
+                        detail={"whois_cli_available": whois_available},
                     )
                 return CollectorHealthCheck(
                     collector_id=self.collector_id,
@@ -432,6 +655,7 @@ class RdapWhoisCollector(Collector):
                     checked_at=checked_at,
                     latency_ms=elapsed_ms,
                     error_message=f"RDAP bootstrap returned HTTP {response.status_code}",
+                    detail={"whois_cli_available": whois_available},
                 )
         except (httpx.HTTPError, httpx.StreamError) as exc:
             return CollectorHealthCheck(
@@ -440,6 +664,7 @@ class RdapWhoisCollector(Collector):
                 status=CollectorStatus.FAILURE,
                 checked_at=checked_at,
                 error_message=f"RDAP bootstrap unreachable: {exc}",
+                detail={"whois_cli_available": whois_available},
             )
 
 
