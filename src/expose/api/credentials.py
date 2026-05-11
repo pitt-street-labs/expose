@@ -191,6 +191,29 @@ _SF_BACKEND_KEY_TO_SLOT: dict[str, str] = {
     slot.backend_key: slot.credential_id for slot in KNOWN_SLOTS
 }
 
+# Direct SpiderFoot key → (backend_key, slot_id) overrides for collectors
+# where the SpiderFoot opt name doesn't match the EXPOSE slot convention.
+# e.g. sfp_haveibeenpwned.api_key needs to land in the hibp_api_key slot,
+# not a generic "api_key" under the dark-web-indicators collector.
+_SF_KEY_OVERRIDES: dict[str, tuple[str, str]] = {
+    "sfp_haveibeenpwned.api_key": (
+        "collector.dark-web-indicators.hibp_api_key",
+        "hibp_api_key",
+    ),
+    "sfp_intelx.api_key": (
+        "collector.dark-web-indicators.intelx_api_key",
+        "intelx_api_key",
+    ),
+    "sfp_dehashed.api_key": (
+        "collector.dark-web-indicators.dehashed_api_key",
+        "dehashed_api_key",
+    ),
+    "sfp_dehashed.api_email": (
+        "collector.dark-web-indicators.dehashed_email",
+        "dehashed_email",
+    ),
+}
+
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -369,22 +392,28 @@ async def import_spiderfoot(
             errors.append(f"Empty value for key {sf_key!r}")
             continue
 
-        # Parse the SpiderFoot key format: "sfp_<module>.<opt>" or just "sfp_<module>"
-        parts = sf_key.split(".", 1)
-        sf_module = parts[0]
-        sf_opt = parts[1] if len(parts) > 1 else "api_key"
-
-        # Look up the module in the SpiderFoot map
-        collector_id = SPIDERFOOT_MODULE_MAP.get(sf_module)
-
-        # Build the backend key following the same convention as SpiderFootImporter
-        if collector_id is not None:
-            backend_key = f"collector.{collector_id}.{sf_opt}"
+        # Check for direct override first (multi-key collectors like dark-web-indicators)
+        override = _SF_KEY_OVERRIDES.get(sf_key)
+        if override is not None:
+            backend_key, _slot_id = override
+            slot_def = _SLOTS_BY_ID.get(_slot_id)
         else:
-            backend_key = f"unmapped.{sf_module}.{sf_opt}"
+            # Parse the SpiderFoot key format: "sfp_<module>.<opt>" or just "sfp_<module>"
+            parts = sf_key.split(".", 1)
+            sf_module = parts[0]
+            sf_opt = parts[1] if len(parts) > 1 else "api_key"
 
-        # Check if this backend key maps to a known slot
-        slot_def = _SLOTS_BY_BACKEND_KEY.get(backend_key)
+            # Look up the module in the SpiderFoot map
+            collector_id = SPIDERFOOT_MODULE_MAP.get(sf_module)
+
+            # Build the backend key following the same convention as SpiderFootImporter
+            if collector_id is not None:
+                backend_key = f"collector.{collector_id}.{sf_opt}"
+            else:
+                backend_key = f"unmapped.{sf_module}.{sf_opt}"
+
+            # Check if this backend key maps to a known slot
+            slot_def = _SLOTS_BY_BACKEND_KEY.get(backend_key)
         if slot_def is not None:
             await _backend.set(tenant_id=tenant_id, key=backend_key, value=value.strip())
             imported_count += 1
