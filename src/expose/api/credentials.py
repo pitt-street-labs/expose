@@ -40,14 +40,14 @@ from expose.import_.credential_bundle import (
     mask_value,
 )
 from expose.secrets.backend import SecretNotFoundError, SecretsBackend
-from expose.secrets.memory_backend import InMemoryBackend
+from expose.secrets.memory_backend import InMemoryBackend, _DEFAULT_PERSIST_PATH
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Module-level backend (Phase 1: in-memory; orchestrator replaces at startup)
 # ---------------------------------------------------------------------------
-_backend: SecretsBackend = InMemoryBackend()
+_backend: SecretsBackend = InMemoryBackend(persist_path=_DEFAULT_PERSIST_PATH)
 
 
 def set_backend(backend: SecretsBackend) -> None:

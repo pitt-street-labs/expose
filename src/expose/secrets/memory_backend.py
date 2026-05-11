@@ -1,15 +1,8 @@
-"""In-memory :class:`SecretsBackend` implementation.
+"""In-memory :class:`SecretsBackend` with optional file persistence.
 
-NOT FOR PRODUCTION. Loses all data on process exit, holds plaintext in process
-memory, no audit log, no encryption-at-rest. The implementation exists so that:
-
-- Unit tests do not require a Vault / KMS dependency to exercise the dispatcher
-  contract.
-- Local development (``expose run --tenant default``) can wire up collector
-  credentials without standing up secret infrastructure first.
-- The :file:`tests/test_secrets.py` suite has a concrete subject that validates
-  the abstract contract — production backends inherit and pass the same tests
-  via parametrization (Sprint 5+).
+Holds plaintext in process memory with automatic save/load to a JSON file
+so credentials survive server restarts. NOT FOR PRODUCTION — no audit log,
+no encryption-at-rest. For production, use the Vault or cloud-KMS backends.
 
 Per-tenant isolation is enforced by keying internally on ``(tenant_id, key)``
 rather than allowing tenant A queries to ever see tenant B's storage.
@@ -17,83 +10,80 @@ rather than allowing tenant A queries to ever see tenant B's storage.
 
 from __future__ import annotations
 
+import json
+import logging
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Final
 from uuid import UUID
 
 from expose.secrets.backend import SecretNotFoundError, SecretsBackend
 
+logger = logging.getLogger(__name__)
+
+_DEFAULT_PERSIST_PATH = Path.home() / ".expose-credentials.json"
+
 
 class InMemoryBackend(SecretsBackend):
-    """In-memory :class:`SecretsBackend` for tests + local dev only.
+    """In-memory :class:`SecretsBackend` with optional file persistence.
 
-    Internal layout: a ``dict`` keyed on ``(tenant_id_str, key)`` -> value.
-    The tenant component is stringified to its canonical UUID form so that
-    equivalent UUIDs (e.g., constructed via different hex/byte paths) resolve
-    to the same storage slot.
-
-    Thread/async safety: this implementation is NOT thread-safe and not
-    designed for concurrent ``set`` from many tasks. Production backends will
-    delegate concurrency to their backing store. For the current single-task
-    test suite and local-dev path, the bare ``dict`` is sufficient.
-
-    The :meth:`__repr__` deliberately includes only structural counts; secret
-    values and even the keys are never serialized into the repr to prevent
-    accidental disclosure via ``logging.debug(backend)`` or REPL inspection.
+    When ``persist_path`` is provided, credentials are saved to a JSON file
+    on every ``set()`` and loaded from disk on initialization. This ensures
+    credentials survive server restarts without requiring Vault infrastructure.
     """
 
-    # The store value type is plain ``str`` because every method returns
-    # ``str`` and we never want a richer object accidentally getting
-    # ``__repr__``-ed somewhere it could leak.
     _STORE_KEY_TYPE: Final[type[tuple[str, str]]] = tuple
 
-    def __init__(self) -> None:
-        """Initialize an empty in-memory store."""
+    def __init__(self, persist_path: Path | None = None) -> None:
         self._store: dict[tuple[str, str], str] = {}
+        self._persist_path = persist_path
+        if persist_path:
+            self._load_from_disk()
+
+    def _load_from_disk(self) -> None:
+        if not self._persist_path or not self._persist_path.exists():
+            return
+        try:
+            data = json.loads(self._persist_path.read_text())
+            for entry in data:
+                self._store[(entry["t"], entry["k"])] = entry["v"]
+            logger.info(
+                "Loaded %d credentials from %s", len(data), self._persist_path
+            )
+        except Exception:
+            logger.warning("Failed to load credentials from %s", self._persist_path, exc_info=True)
+
+    def _save_to_disk(self) -> None:
+        if not self._persist_path:
+            return
+        try:
+            data = [{"t": t, "k": k, "v": v} for (t, k), v in self._store.items()]
+            self._persist_path.write_text(json.dumps(data))
+            self._persist_path.chmod(0o600)
+        except Exception:
+            logger.warning("Failed to save credentials to %s", self._persist_path, exc_info=True)
 
     async def get(self, *, tenant_id: UUID, key: str) -> str:
-        """Return the stored value for ``(tenant_id, key)``.
-
-        Raises:
-            SecretNotFoundError: when no value is stored for ``key``.
-        """
         try:
             return self._store[(str(tenant_id), key)]
         except KeyError:
-            # Build the message without including any value-side state.
             raise SecretNotFoundError(
                 f"No secret stored for tenant {tenant_id} key {key!r}"
             ) from None
 
     async def set(self, *, tenant_id: UUID, key: str, value: str) -> None:
-        """Store ``value`` under ``(tenant_id, key)``, overwriting any prior value."""
         self._store[(str(tenant_id), key)] = value
+        self._save_to_disk()
 
     async def delete(self, *, tenant_id: UUID, key: str) -> None:
-        """Remove the value stored under ``(tenant_id, key)``.
-
-        No-op when no value is stored (idempotent per the ABC contract).
-        """
         self._store.pop((str(tenant_id), key), None)
+        self._save_to_disk()
 
     async def list_keys(self, *, tenant_id: UUID) -> Sequence[str]:
-        """Return the keys stored for ``tenant_id`` (sorted for determinism).
-
-        Sorted output makes test assertions stable across Python dict-ordering
-        changes; production backends are not required to sort but doing so is
-        cheap and aids debugging.
-        """
         target = str(tenant_id)
         return sorted(k for (t, k) in self._store if t == target)
 
     def __repr__(self) -> str:
-        """Render structural counts only — no tenant IDs, keys, or values.
-
-        Format: ``InMemoryBackend(tenants=N, total_keys=M)``. The repr is the
-        only string surface that can leak via ``logging.debug(self)`` or REPL
-        echo, so it deliberately excludes the underlying store contents. See
-        :file:`tests/test_secrets.py::test_repr_does_not_leak_values`.
-        """
         tenants = {tenant for (tenant, _key) in self._store}
         return (
             f"InMemoryBackend(tenants={len(tenants)}, total_keys={len(self._store)})"
