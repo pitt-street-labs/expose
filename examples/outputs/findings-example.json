@@ -1,0 +1,145 @@
+{
+  "tenant_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "findings": [
+    {
+      "rank": 1,
+      "entity_identifier": "staging.acme-corp.com",
+      "entity_type": "domain",
+      "score": 92,
+      "priority_tier": "critical",
+      "justification": "Staging environment exposed to internet with no TLS, directory listing enabled, and default credentials detected. Immediate remediation required.",
+      "signals": [
+        { "signal": "no_tls", "weight": 30 },
+        { "signal": "directory_listing", "weight": 25 },
+        { "signal": "default_credentials", "weight": 20 },
+        { "signal": "non_production_exposed", "weight": 17 }
+      ]
+    },
+    {
+      "rank": 2,
+      "entity_identifier": "203.0.113.42",
+      "entity_type": "ip_address",
+      "score": 85,
+      "priority_tier": "critical",
+      "justification": "Server with open management ports (SSH on 22, RDP on 3389) and weak cipher suites (3DES-CBC). Reverse PTR matches org pattern. High risk of unauthorized access.",
+      "signals": [
+        { "signal": "open_management_ports", "weight": 35 },
+        { "signal": "weak_ciphers", "weight": 25 },
+        { "signal": "unattributed_asset", "weight": 15 },
+        { "signal": "ptr_match", "weight": 10 }
+      ]
+    },
+    {
+      "rank": 3,
+      "entity_identifier": "*.acme-corp.com",
+      "entity_type": "certificate",
+      "score": 74,
+      "priority_tier": "high",
+      "justification": "Wildcard certificate expiring in 12 days (2026-06-30). Covers 7 known subdomains including API and admin portals. Renewal failure would cause widespread service disruption.",
+      "signals": [
+        { "signal": "cert_expiry_imminent", "weight": 40 },
+        { "signal": "wildcard_scope", "weight": 20 },
+        { "signal": "covers_critical_services", "weight": 14 }
+      ]
+    },
+    {
+      "rank": 4,
+      "entity_identifier": "admin.acme-corp.com",
+      "entity_type": "domain",
+      "score": 71,
+      "priority_tier": "high",
+      "justification": "Administrative portal accessible without VPN. Basic auth only with no MFA detected. Linked to 3 internal management endpoints. Credential stuffing risk.",
+      "signals": [
+        { "signal": "admin_portal_exposed", "weight": 30 },
+        { "signal": "no_mfa", "weight": 25 },
+        { "signal": "basic_auth_only", "weight": 16 }
+      ]
+    },
+    {
+      "rank": 5,
+      "entity_identifier": "api.acme-corp.com",
+      "entity_type": "domain",
+      "score": 63,
+      "priority_tier": "high",
+      "justification": "API endpoint returning verbose error messages including Java stack traces with internal class paths. CORS misconfigured with wildcard origin allowing any domain to make authenticated requests.",
+      "signals": [
+        { "signal": "verbose_errors", "weight": 25 },
+        { "signal": "cors_wildcard", "weight": 20 },
+        { "signal": "stack_trace_leak", "weight": 18 }
+      ]
+    },
+    {
+      "rank": 6,
+      "entity_identifier": "198.51.100.7",
+      "entity_type": "ip_address",
+      "score": 48,
+      "priority_tier": "medium",
+      "justification": "Legacy server with expired DigiCert certificate and TLS 1.0 still enabled alongside TLS 1.3. WHOIS-confirmed Acme Corp ownership. Apache 2.2 end-of-life software.",
+      "signals": [
+        { "signal": "expired_certificate", "weight": 22 },
+        { "signal": "legacy_tls", "weight": 18 },
+        { "signal": "eol_software", "weight": 16 },
+        { "signal": "confirmed_ownership", "weight": -8 }
+      ]
+    },
+    {
+      "rank": 7,
+      "entity_identifier": "mail.acme-corp.com",
+      "entity_type": "domain",
+      "score": 41,
+      "priority_tier": "medium",
+      "justification": "Mail server with DMARC policy set to 'none' (monitoring only, not enforcing). SPF record uses ~all (soft fail) instead of -all (hard fail). Email spoofing risk.",
+      "signals": [
+        { "signal": "dmarc_none", "weight": 20 },
+        { "signal": "spf_permissive", "weight": 15 },
+        { "signal": "open_relay_check_pass", "weight": 11 },
+        { "signal": "valid_mx", "weight": -5 }
+      ]
+    },
+    {
+      "rank": 8,
+      "entity_identifier": "vpn.acme-corp.com",
+      "entity_type": "domain",
+      "score": 28,
+      "priority_tier": "low",
+      "justification": "VPN gateway with current TLS 1.3 and strong ciphers. Minor information disclosure: server banner reveals Palo Alto GlobalProtect version, enabling targeted CVE lookup.",
+      "signals": [
+        { "signal": "banner_disclosure", "weight": 15 },
+        { "signal": "vpn_gateway_identified", "weight": 8 },
+        { "signal": "strong_tls", "weight": -10 },
+        { "signal": "confirmed_ownership", "weight": -5 }
+      ]
+    },
+    {
+      "rank": 9,
+      "entity_identifier": "Acme Corp",
+      "entity_type": "organization",
+      "score": 15,
+      "priority_tier": "low",
+      "justification": "Seed anchor organization. WHOIS registrant confirmed across 4 domains. No direct exposure signals; score reflects attribution completeness only.",
+      "signals": [
+        { "signal": "seed_anchor", "weight": 5 },
+        { "signal": "whois_confirmed", "weight": 5 },
+        { "signal": "attribution_complete", "weight": 5 }
+      ]
+    },
+    {
+      "rank": 10,
+      "entity_identifier": "acme-corp.com",
+      "entity_type": "domain",
+      "score": 12,
+      "priority_tier": "low",
+      "justification": "Apex domain with valid DNSSEC, strong TLS 1.3, HSTS preload, and proper security headers (CSP, X-Frame-Options, X-Content-Type-Options). Low residual score from public DNS exposure only.",
+      "signals": [
+        { "signal": "public_dns_exposure", "weight": 10 },
+        { "signal": "caa_record_present", "weight": 5 },
+        { "signal": "dnssec_valid", "weight": -10 },
+        { "signal": "security_headers_present", "weight": -8 },
+        { "signal": "hsts_preload", "weight": -5 }
+      ]
+    }
+  ],
+  "total_scored": 18,
+  "generated_at": "2026-05-11T02:35:12Z",
+  "is_placeholder": false
+}

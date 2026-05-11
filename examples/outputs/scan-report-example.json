@@ -1,0 +1,1206 @@
+{
+  "schema_version": "expose/v1",
+  "run": {
+    "run_id": "a1b2c3d4-5678-4e9f-a012-3456789abcde",
+    "started_at": "2026-05-11T02:30:00Z",
+    "completed_at": "2026-05-11T02:34:47Z",
+    "pipeline_version": "e3a1f9c0d4b2a8e6f1c3d5b7a9e1f3c5d7b9a1e3",
+    "rule_pack_version": "baseline-v2.1.0",
+    "scope_version": "acme-scope-v3"
+  },
+  "tenant": {
+    "tenant_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    "tenant_name": "Acme Corp",
+    "deployment_id": "prod-us-east-1"
+  },
+  "targets": [
+    {
+      "target_id": "10000001-0001-4000-8000-000000000001",
+      "primary_identifier": { "type": "domain", "value": "acme-corp.com" },
+      "secondary_identifiers": [
+        {
+          "type": "domain",
+          "value": "acme-corp.com",
+          "first_observed_at": "2026-05-11T02:30:12Z",
+          "last_observed_at": "2026-05-11T02:34:00Z"
+        }
+      ],
+      "attribution": {
+        "tier": "confirmed",
+        "confidence": 0.99,
+        "reasoning": "Seed anchor domain. WHOIS registrant matches tenant organization name. SOA and NS records consistent with scope definition.",
+        "decision_path": [
+          {
+            "rule_id": "seed-anchor-promote",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.50
+          },
+          {
+            "rule_id": "whois-registrant-match",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.49
+          }
+        ],
+        "scope_match": {
+          "in_scope": true,
+          "matched_scope_entries": ["acme-corp.com"]
+        }
+      },
+      "exposure": {
+        "open_ports": [
+          {
+            "port": 443,
+            "protocol": "tcp",
+            "service_banner": "nginx/1.24.0",
+            "first_observed_at": "2026-05-11T02:30:22Z",
+            "last_observed_at": "2026-05-11T02:30:22Z"
+          },
+          {
+            "port": 80,
+            "protocol": "tcp",
+            "service_banner": "nginx/1.24.0 (301 redirect)",
+            "first_observed_at": "2026-05-11T02:30:22Z",
+            "last_observed_at": "2026-05-11T02:30:22Z"
+          }
+        ],
+        "tls_certificates": [
+          {
+            "fingerprint_sha256": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
+            "issuer": "CN=R11, O=Let's Encrypt, C=US",
+            "subject": "CN=acme-corp.com",
+            "subject_alt_names": [
+              "acme-corp.com",
+              "www.acme-corp.com",
+              "api.acme-corp.com",
+              "mail.acme-corp.com",
+              "admin.acme-corp.com",
+              "staging.acme-corp.com",
+              "vpn.acme-corp.com"
+            ],
+            "not_before": "2026-04-01T00:00:00Z",
+            "not_after": "2026-06-30T23:59:59Z",
+            "is_expired": false,
+            "is_self_signed": false,
+            "ct_log_entries": [
+              "https://ct.googleapis.com/logs/us1/argon2026/ct/v1/get-entries?start=98234&end=98234"
+            ]
+          }
+        ],
+        "dns_records": [
+          { "record_type": "A", "value": "203.0.113.10", "ttl": 300, "first_observed_at": "2026-05-11T02:30:14Z", "last_observed_at": "2026-05-11T02:30:14Z" },
+          { "record_type": "AAAA", "value": "2001:db8::1", "ttl": 300, "first_observed_at": "2026-05-11T02:30:14Z", "last_observed_at": "2026-05-11T02:30:14Z" },
+          { "record_type": "MX", "value": "10 mail.acme-corp.com", "ttl": 3600, "first_observed_at": "2026-05-11T02:30:14Z", "last_observed_at": "2026-05-11T02:30:14Z" },
+          { "record_type": "NS", "value": "ns1.acmedns.net", "ttl": 86400, "first_observed_at": "2026-05-11T02:30:14Z", "last_observed_at": "2026-05-11T02:30:14Z" },
+          { "record_type": "NS", "value": "ns2.acmedns.net", "ttl": 86400, "first_observed_at": "2026-05-11T02:30:14Z", "last_observed_at": "2026-05-11T02:30:14Z" },
+          { "record_type": "TXT", "value": "v=spf1 include:_spf.google.com ~all", "ttl": 3600, "first_observed_at": "2026-05-11T02:30:14Z", "last_observed_at": "2026-05-11T02:30:14Z" },
+          { "record_type": "TXT", "value": "v=DMARC1; p=quarantine; rua=mailto:dmarc@acme-corp.com", "ttl": 3600, "first_observed_at": "2026-05-11T02:30:14Z", "last_observed_at": "2026-05-11T02:30:14Z" },
+          { "record_type": "CAA", "value": "0 issue \"letsencrypt.org\"", "ttl": 3600, "first_observed_at": "2026-05-11T02:30:14Z", "last_observed_at": "2026-05-11T02:30:14Z" }
+        ],
+        "http_endpoints": [
+          {
+            "url": "https://acme-corp.com/",
+            "status_code": 200,
+            "server_header": "nginx/1.24.0",
+            "title": "Acme Corp - Building the Future",
+            "first_observed_at": "2026-05-11T02:30:25Z",
+            "last_observed_at": "2026-05-11T02:30:25Z"
+          }
+        ],
+        "exposure_indicators": [
+          { "indicator": "dnssec_valid", "severity": "info", "evidence_ref": "dns-collector-dnssec-check" },
+          { "indicator": "security_headers_present", "severity": "info", "evidence_ref": "http-collector-header-check" }
+        ]
+      },
+      "tech_stack": {
+        "components": [
+          { "name": "nginx", "version": "1.24.0", "category": "web_server", "confidence": 0.95, "evidence_refs": ["server-header-match"] },
+          { "name": "Cloudflare", "category": "cdn", "confidence": 0.90, "evidence_refs": ["cf-ray-header"] },
+          { "name": "React", "version": "18.2", "category": "framework", "confidence": 0.80, "evidence_refs": ["wappalyzer-dom-pattern"] }
+        ],
+        "fingerprint_method": "combined",
+        "confidence": 0.88
+      },
+      "cloud_resource": {
+        "provider": "aws",
+        "service_category": "cdn",
+        "region": "us-east-1",
+        "ip_range_match": {
+          "manifest_source": "aws-ip-ranges-2026-05-01.json",
+          "matched_range": "203.0.113.0/24",
+          "service_tag": "CLOUDFRONT"
+        }
+      },
+      "lead_score": {
+        "score": 12.0,
+        "formula_version": "v1.2",
+        "inputs": {
+          "attribution_confidence": 0.99,
+          "exposure_severity_max": "info",
+          "tech_stack_risk_indicators": [],
+          "freshness_days": 0,
+          "cloud_provider_factor": 0.1
+        },
+        "category": "low_priority"
+      },
+      "provenance": {
+        "sources": [
+          { "collector_id": "dns-resolver", "collector_version": "1.4.0", "first_observed_at": "2026-05-11T02:30:12Z", "last_observed_at": "2026-05-11T02:30:14Z", "observation_count": 8 },
+          { "collector_id": "ct-log-monitor", "collector_version": "2.1.0", "first_observed_at": "2026-05-11T02:30:18Z", "last_observed_at": "2026-05-11T02:30:18Z", "observation_count": 1 },
+          { "collector_id": "http-prober", "collector_version": "1.2.0", "first_observed_at": "2026-05-11T02:30:22Z", "last_observed_at": "2026-05-11T02:30:25Z", "observation_count": 3 }
+        ],
+        "evidence_refs": [
+          "sha256:a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
+          "sha256:b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3"
+        ]
+      },
+      "first_observed_at": "2026-05-11T02:30:12Z",
+      "last_observed_at": "2026-05-11T02:34:00Z"
+    },
+    {
+      "target_id": "10000001-0001-4000-8000-000000000002",
+      "primary_identifier": { "type": "subdomain", "value": "staging.acme-corp.com" },
+      "attribution": {
+        "tier": "confirmed",
+        "confidence": 0.97,
+        "reasoning": "Subdomain of confirmed seed anchor acme-corp.com. DNS A record resolves to IP in same /24 CIDR as apex domain. Certificate SAN includes this subdomain.",
+        "decision_path": [
+          {
+            "rule_id": "subdomain-of-seed-promote",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.60
+          },
+          {
+            "rule_id": "cert-san-match",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.37
+          }
+        ],
+        "scope_match": { "in_scope": true, "matched_scope_entries": ["*.acme-corp.com"] }
+      },
+      "exposure": {
+        "open_ports": [
+          { "port": 80, "protocol": "tcp", "service_banner": "Apache/2.4.58", "first_observed_at": "2026-05-11T02:31:10Z", "last_observed_at": "2026-05-11T02:31:10Z" },
+          { "port": 8080, "protocol": "tcp", "service_banner": "Jetty/9.4.51", "first_observed_at": "2026-05-11T02:31:10Z", "last_observed_at": "2026-05-11T02:31:10Z" }
+        ],
+        "http_endpoints": [
+          {
+            "url": "http://staging.acme-corp.com/",
+            "status_code": 200,
+            "server_header": "Apache/2.4.58",
+            "title": "Index of /",
+            "first_observed_at": "2026-05-11T02:31:12Z",
+            "last_observed_at": "2026-05-11T02:31:12Z"
+          }
+        ],
+        "exposure_indicators": [
+          { "indicator": "no_tls", "severity": "high", "evidence_ref": "http-prober-no-https" },
+          { "indicator": "directory_listing", "severity": "high", "evidence_ref": "http-prober-index-of" },
+          { "indicator": "non_production_exposed", "severity": "critical", "evidence_ref": "subdomain-classifier-staging" },
+          { "indicator": "default_credentials", "severity": "critical", "evidence_ref": "http-prober-default-auth" }
+        ],
+        "dns_records": [
+          { "record_type": "A", "value": "203.0.113.42", "ttl": 300, "first_observed_at": "2026-05-11T02:31:05Z", "last_observed_at": "2026-05-11T02:31:05Z" }
+        ]
+      },
+      "lead_score": {
+        "score": 92.0,
+        "formula_version": "v1.2",
+        "inputs": {
+          "attribution_confidence": 0.97,
+          "exposure_severity_max": "critical",
+          "tech_stack_risk_indicators": ["directory_listing", "no_tls", "default_credentials"],
+          "freshness_days": 0,
+          "cloud_provider_factor": 0.0
+        },
+        "category": "critical_priority"
+      },
+      "provenance": {
+        "sources": [
+          { "collector_id": "dns-resolver", "collector_version": "1.4.0", "first_observed_at": "2026-05-11T02:31:05Z", "last_observed_at": "2026-05-11T02:31:05Z", "observation_count": 1 },
+          { "collector_id": "http-prober", "collector_version": "1.2.0", "first_observed_at": "2026-05-11T02:31:10Z", "last_observed_at": "2026-05-11T02:31:12Z", "observation_count": 2 }
+        ],
+        "evidence_refs": [
+          "sha256:c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4"
+        ]
+      },
+      "first_observed_at": "2026-05-11T02:31:05Z",
+      "last_observed_at": "2026-05-11T02:31:12Z",
+      "requires_analyst_review": true,
+      "review_reasons": ["high_value_target_low_confidence"]
+    },
+    {
+      "target_id": "10000001-0001-4000-8000-000000000003",
+      "primary_identifier": { "type": "subdomain", "value": "admin.acme-corp.com" },
+      "attribution": {
+        "tier": "confirmed",
+        "confidence": 0.96,
+        "reasoning": "Subdomain of confirmed seed. Certificate SAN match. HTTP response contains Acme Corp branding.",
+        "decision_path": [
+          {
+            "rule_id": "subdomain-of-seed-promote",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.60
+          },
+          {
+            "rule_id": "cert-san-match",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.36
+          }
+        ],
+        "scope_match": { "in_scope": true, "matched_scope_entries": ["*.acme-corp.com"] }
+      },
+      "exposure": {
+        "open_ports": [
+          { "port": 443, "protocol": "tcp", "service_banner": "nginx/1.24.0", "first_observed_at": "2026-05-11T02:31:20Z", "last_observed_at": "2026-05-11T02:31:20Z" }
+        ],
+        "http_endpoints": [
+          {
+            "url": "https://admin.acme-corp.com/login",
+            "status_code": 200,
+            "server_header": "nginx/1.24.0",
+            "title": "Acme Admin Portal",
+            "first_observed_at": "2026-05-11T02:31:22Z",
+            "last_observed_at": "2026-05-11T02:31:22Z"
+          }
+        ],
+        "exposure_indicators": [
+          { "indicator": "admin_portal_exposed", "severity": "high", "evidence_ref": "http-prober-admin-path" },
+          { "indicator": "no_mfa", "severity": "high", "evidence_ref": "http-prober-basic-auth-only" },
+          { "indicator": "basic_auth_only", "severity": "medium", "evidence_ref": "http-prober-www-authenticate" }
+        ],
+        "dns_records": [
+          { "record_type": "A", "value": "203.0.113.10", "ttl": 300, "first_observed_at": "2026-05-11T02:31:18Z", "last_observed_at": "2026-05-11T02:31:18Z" }
+        ]
+      },
+      "lead_score": {
+        "score": 71.0,
+        "formula_version": "v1.2",
+        "inputs": {
+          "attribution_confidence": 0.96,
+          "exposure_severity_max": "high",
+          "tech_stack_risk_indicators": ["admin_portal_exposed", "no_mfa"],
+          "freshness_days": 0
+        },
+        "category": "high_priority"
+      },
+      "provenance": {
+        "sources": [
+          { "collector_id": "dns-resolver", "collector_version": "1.4.0", "first_observed_at": "2026-05-11T02:31:18Z", "last_observed_at": "2026-05-11T02:31:18Z", "observation_count": 1 },
+          { "collector_id": "http-prober", "collector_version": "1.2.0", "first_observed_at": "2026-05-11T02:31:20Z", "last_observed_at": "2026-05-11T02:31:22Z", "observation_count": 2 }
+        ],
+        "evidence_refs": [
+          "sha256:d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5"
+        ]
+      },
+      "first_observed_at": "2026-05-11T02:31:18Z",
+      "last_observed_at": "2026-05-11T02:31:22Z"
+    },
+    {
+      "target_id": "10000001-0001-4000-8000-000000000004",
+      "primary_identifier": { "type": "subdomain", "value": "api.acme-corp.com" },
+      "attribution": {
+        "tier": "confirmed",
+        "confidence": 0.95,
+        "reasoning": "Subdomain of confirmed seed. Certificate SAN match. API responses include Acme Corp branding in error pages.",
+        "decision_path": [
+          {
+            "rule_id": "subdomain-of-seed-promote",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.60
+          },
+          {
+            "rule_id": "cert-san-match",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.35
+          }
+        ],
+        "scope_match": { "in_scope": true, "matched_scope_entries": ["*.acme-corp.com"] }
+      },
+      "exposure": {
+        "open_ports": [
+          { "port": 443, "protocol": "tcp", "service_banner": "nginx/1.24.0", "first_observed_at": "2026-05-11T02:31:30Z", "last_observed_at": "2026-05-11T02:31:30Z" }
+        ],
+        "http_endpoints": [
+          {
+            "url": "https://api.acme-corp.com/v2/status",
+            "status_code": 200,
+            "server_header": "nginx/1.24.0",
+            "title": "Acme API v2",
+            "first_observed_at": "2026-05-11T02:31:32Z",
+            "last_observed_at": "2026-05-11T02:31:32Z"
+          }
+        ],
+        "exposure_indicators": [
+          { "indicator": "verbose_errors", "severity": "medium", "evidence_ref": "http-prober-stack-trace-in-500" },
+          { "indicator": "cors_wildcard", "severity": "medium", "evidence_ref": "http-prober-cors-origin-star" },
+          { "indicator": "stack_trace_leak", "severity": "high", "evidence_ref": "http-prober-java-trace" }
+        ],
+        "dns_records": [
+          { "record_type": "A", "value": "203.0.113.10", "ttl": 300, "first_observed_at": "2026-05-11T02:31:28Z", "last_observed_at": "2026-05-11T02:31:28Z" },
+          { "record_type": "CNAME", "value": "api-lb.acme-corp.com", "ttl": 300, "first_observed_at": "2026-05-11T02:31:28Z", "last_observed_at": "2026-05-11T02:31:28Z" }
+        ]
+      },
+      "tech_stack": {
+        "components": [
+          { "name": "nginx", "version": "1.24.0", "category": "web_server", "confidence": 0.95, "evidence_refs": ["server-header-match"] },
+          { "name": "Spring Boot", "version": "3.2", "category": "framework", "confidence": 0.75, "evidence_refs": ["stack-trace-class-path"] },
+          { "name": "Java", "version": "21", "category": "language", "confidence": 0.70, "evidence_refs": ["stack-trace-class-path"] }
+        ],
+        "fingerprint_method": "combined",
+        "confidence": 0.80
+      },
+      "lead_score": {
+        "score": 63.0,
+        "formula_version": "v1.2",
+        "inputs": {
+          "attribution_confidence": 0.95,
+          "exposure_severity_max": "high",
+          "tech_stack_risk_indicators": ["verbose_errors", "cors_wildcard"],
+          "freshness_days": 0
+        },
+        "category": "high_priority"
+      },
+      "provenance": {
+        "sources": [
+          { "collector_id": "dns-resolver", "collector_version": "1.4.0", "first_observed_at": "2026-05-11T02:31:28Z", "last_observed_at": "2026-05-11T02:31:28Z", "observation_count": 2 },
+          { "collector_id": "http-prober", "collector_version": "1.2.0", "first_observed_at": "2026-05-11T02:31:30Z", "last_observed_at": "2026-05-11T02:31:32Z", "observation_count": 2 }
+        ],
+        "evidence_refs": [
+          "sha256:e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6"
+        ]
+      },
+      "first_observed_at": "2026-05-11T02:31:28Z",
+      "last_observed_at": "2026-05-11T02:31:32Z"
+    },
+    {
+      "target_id": "10000001-0001-4000-8000-000000000005",
+      "primary_identifier": { "type": "subdomain", "value": "www.acme-corp.com" },
+      "attribution": {
+        "tier": "confirmed",
+        "confidence": 0.99,
+        "reasoning": "www CNAME to apex domain. Identical content and TLS certificate.",
+        "decision_path": [
+          {
+            "rule_id": "cname-to-confirmed-promote",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.99
+          }
+        ],
+        "scope_match": { "in_scope": true, "matched_scope_entries": ["*.acme-corp.com"] }
+      },
+      "exposure": {
+        "open_ports": [
+          { "port": 443, "protocol": "tcp", "service_banner": "nginx/1.24.0", "first_observed_at": "2026-05-11T02:31:35Z", "last_observed_at": "2026-05-11T02:31:35Z" }
+        ],
+        "dns_records": [
+          { "record_type": "CNAME", "value": "acme-corp.com", "ttl": 3600, "first_observed_at": "2026-05-11T02:31:34Z", "last_observed_at": "2026-05-11T02:31:34Z" }
+        ]
+      },
+      "lead_score": {
+        "score": 8.0,
+        "formula_version": "v1.2",
+        "inputs": { "attribution_confidence": 0.99, "exposure_severity_max": "info", "freshness_days": 0 },
+        "category": "informational"
+      },
+      "provenance": {
+        "sources": [
+          { "collector_id": "dns-resolver", "collector_version": "1.4.0", "first_observed_at": "2026-05-11T02:31:34Z", "last_observed_at": "2026-05-11T02:31:35Z", "observation_count": 2 }
+        ],
+        "evidence_refs": [
+          "sha256:f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7"
+        ]
+      },
+      "first_observed_at": "2026-05-11T02:31:34Z",
+      "last_observed_at": "2026-05-11T02:31:35Z"
+    },
+    {
+      "target_id": "10000001-0001-4000-8000-000000000006",
+      "primary_identifier": { "type": "ip", "value": "203.0.113.10" },
+      "attribution": {
+        "tier": "high",
+        "confidence": 0.88,
+        "reasoning": "Resolves from 4 confirmed subdomains. AWS IP range match for CloudFront. WHOIS references Acme Corp ASN.",
+        "decision_path": [
+          {
+            "rule_id": "reverse-dns-multi-confirmed",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.55
+          },
+          {
+            "rule_id": "cloud-ip-range-match",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.33
+          }
+        ]
+      },
+      "exposure": {
+        "open_ports": [
+          { "port": 443, "protocol": "tcp", "first_observed_at": "2026-05-11T02:32:00Z", "last_observed_at": "2026-05-11T02:32:00Z" },
+          { "port": 80, "protocol": "tcp", "first_observed_at": "2026-05-11T02:32:00Z", "last_observed_at": "2026-05-11T02:32:00Z" }
+        ]
+      },
+      "cloud_resource": {
+        "provider": "aws",
+        "service_category": "cdn",
+        "region": "us-east-1",
+        "ip_range_match": {
+          "manifest_source": "aws-ip-ranges-2026-05-01.json",
+          "matched_range": "203.0.113.0/24",
+          "service_tag": "CLOUDFRONT"
+        }
+      },
+      "lead_score": {
+        "score": 22.0,
+        "formula_version": "v1.2",
+        "inputs": { "attribution_confidence": 0.88, "exposure_severity_max": "info", "freshness_days": 0, "cloud_provider_factor": 0.2 },
+        "category": "low_priority"
+      },
+      "provenance": {
+        "sources": [
+          { "collector_id": "dns-resolver", "collector_version": "1.4.0", "first_observed_at": "2026-05-11T02:30:14Z", "last_observed_at": "2026-05-11T02:32:00Z", "observation_count": 4 },
+          { "collector_id": "cloud-ip-ranger", "collector_version": "1.0.0", "first_observed_at": "2026-05-11T02:32:10Z", "last_observed_at": "2026-05-11T02:32:10Z", "observation_count": 1 }
+        ],
+        "evidence_refs": [
+          "sha256:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2021"
+        ]
+      },
+      "first_observed_at": "2026-05-11T02:30:14Z",
+      "last_observed_at": "2026-05-11T02:32:10Z"
+    },
+    {
+      "target_id": "10000001-0001-4000-8000-000000000007",
+      "primary_identifier": { "type": "ip", "value": "203.0.113.42" },
+      "attribution": {
+        "tier": "high",
+        "confidence": 0.82,
+        "reasoning": "Resolves from staging.acme-corp.com. Same /24 CIDR as confirmed apex IP. PTR record matches org pattern (host42.acme-corp.com).",
+        "decision_path": [
+          {
+            "rule_id": "reverse-dns-single-confirmed",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.45
+          },
+          {
+            "rule_id": "same-cidr-as-confirmed",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.25
+          },
+          {
+            "rule_id": "ptr-org-pattern-match",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.12
+          }
+        ]
+      },
+      "exposure": {
+        "open_ports": [
+          { "port": 80, "protocol": "tcp", "service_banner": "Apache/2.4.58", "first_observed_at": "2026-05-11T02:32:15Z", "last_observed_at": "2026-05-11T02:32:15Z" },
+          { "port": 8080, "protocol": "tcp", "service_banner": "Jetty/9.4.51", "first_observed_at": "2026-05-11T02:32:15Z", "last_observed_at": "2026-05-11T02:32:15Z" },
+          { "port": 22, "protocol": "tcp", "service_banner": "OpenSSH_8.9p1", "first_observed_at": "2026-05-11T02:32:15Z", "last_observed_at": "2026-05-11T02:32:15Z" },
+          { "port": 3389, "protocol": "tcp", "service_banner": "Microsoft Terminal Services", "first_observed_at": "2026-05-11T02:32:15Z", "last_observed_at": "2026-05-11T02:32:15Z" }
+        ],
+        "exposure_indicators": [
+          { "indicator": "open_management_ports", "severity": "critical", "evidence_ref": "port-scanner-ssh-rdp" },
+          { "indicator": "weak_ciphers", "severity": "high", "evidence_ref": "tls-checker-3des-cbc" }
+        ]
+      },
+      "lead_score": {
+        "score": 85.0,
+        "formula_version": "v1.2",
+        "inputs": {
+          "attribution_confidence": 0.82,
+          "exposure_severity_max": "critical",
+          "tech_stack_risk_indicators": ["open_management_ports", "weak_ciphers"],
+          "freshness_days": 0
+        },
+        "category": "critical_priority"
+      },
+      "provenance": {
+        "sources": [
+          { "collector_id": "dns-resolver", "collector_version": "1.4.0", "first_observed_at": "2026-05-11T02:31:05Z", "last_observed_at": "2026-05-11T02:31:05Z", "observation_count": 1 },
+          { "collector_id": "port-scanner", "collector_version": "1.1.0", "first_observed_at": "2026-05-11T02:32:15Z", "last_observed_at": "2026-05-11T02:32:15Z", "observation_count": 4 }
+        ],
+        "evidence_refs": [
+          "sha256:2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f4041"
+        ]
+      },
+      "first_observed_at": "2026-05-11T02:31:05Z",
+      "last_observed_at": "2026-05-11T02:32:15Z"
+    },
+    {
+      "target_id": "10000001-0001-4000-8000-000000000008",
+      "primary_identifier": { "type": "subdomain", "value": "mail.acme-corp.com" },
+      "attribution": {
+        "tier": "high",
+        "confidence": 0.90,
+        "reasoning": "MX record for confirmed apex domain. Certificate SAN match. Google Workspace SPF include confirmed.",
+        "decision_path": [
+          {
+            "rule_id": "mx-record-of-confirmed-promote",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.50
+          },
+          {
+            "rule_id": "cert-san-match",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.40
+          }
+        ]
+      },
+      "exposure": {
+        "open_ports": [
+          { "port": 25, "protocol": "tcp", "service_banner": "ESMTP Postfix", "first_observed_at": "2026-05-11T02:32:30Z", "last_observed_at": "2026-05-11T02:32:30Z" },
+          { "port": 587, "protocol": "tcp", "service_banner": "ESMTP Postfix", "first_observed_at": "2026-05-11T02:32:30Z", "last_observed_at": "2026-05-11T02:32:30Z" },
+          { "port": 993, "protocol": "tcp", "service_banner": "Dovecot IMAP", "first_observed_at": "2026-05-11T02:32:30Z", "last_observed_at": "2026-05-11T02:32:30Z" }
+        ],
+        "exposure_indicators": [
+          { "indicator": "dmarc_none", "severity": "medium", "evidence_ref": "dns-resolver-dmarc-policy" },
+          { "indicator": "spf_permissive", "severity": "medium", "evidence_ref": "dns-resolver-spf-tilde-all" }
+        ],
+        "dns_records": [
+          { "record_type": "A", "value": "198.51.100.25", "ttl": 300, "first_observed_at": "2026-05-11T02:32:28Z", "last_observed_at": "2026-05-11T02:32:28Z" }
+        ]
+      },
+      "lead_score": {
+        "score": 41.0,
+        "formula_version": "v1.2",
+        "inputs": {
+          "attribution_confidence": 0.90,
+          "exposure_severity_max": "medium",
+          "tech_stack_risk_indicators": ["dmarc_none", "spf_permissive"],
+          "freshness_days": 0
+        },
+        "category": "medium_priority"
+      },
+      "provenance": {
+        "sources": [
+          { "collector_id": "dns-resolver", "collector_version": "1.4.0", "first_observed_at": "2026-05-11T02:32:28Z", "last_observed_at": "2026-05-11T02:32:30Z", "observation_count": 3 }
+        ],
+        "evidence_refs": [
+          "sha256:4142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f6061"
+        ]
+      },
+      "first_observed_at": "2026-05-11T02:32:28Z",
+      "last_observed_at": "2026-05-11T02:32:30Z"
+    },
+    {
+      "target_id": "10000001-0001-4000-8000-000000000009",
+      "primary_identifier": { "type": "subdomain", "value": "vpn.acme-corp.com" },
+      "attribution": {
+        "tier": "high",
+        "confidence": 0.91,
+        "reasoning": "Subdomain of confirmed seed. Certificate SAN match. VPN service banner confirms organizational deployment.",
+        "decision_path": [
+          {
+            "rule_id": "subdomain-of-seed-promote",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.55
+          },
+          {
+            "rule_id": "cert-san-match",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.36
+          }
+        ]
+      },
+      "exposure": {
+        "open_ports": [
+          { "port": 443, "protocol": "tcp", "service_banner": "Palo Alto GlobalProtect", "first_observed_at": "2026-05-11T02:32:40Z", "last_observed_at": "2026-05-11T02:32:40Z" },
+          { "port": 4443, "protocol": "udp", "service_banner": "IKEv2/IPsec", "first_observed_at": "2026-05-11T02:32:40Z", "last_observed_at": "2026-05-11T02:32:40Z" }
+        ],
+        "exposure_indicators": [
+          { "indicator": "banner_disclosure", "severity": "low", "evidence_ref": "port-scanner-vpn-product-version" }
+        ],
+        "dns_records": [
+          { "record_type": "A", "value": "203.0.113.50", "ttl": 300, "first_observed_at": "2026-05-11T02:32:38Z", "last_observed_at": "2026-05-11T02:32:38Z" }
+        ]
+      },
+      "lead_score": {
+        "score": 28.0,
+        "formula_version": "v1.2",
+        "inputs": {
+          "attribution_confidence": 0.91,
+          "exposure_severity_max": "low",
+          "tech_stack_risk_indicators": ["banner_disclosure"],
+          "freshness_days": 0
+        },
+        "category": "low_priority"
+      },
+      "provenance": {
+        "sources": [
+          { "collector_id": "dns-resolver", "collector_version": "1.4.0", "first_observed_at": "2026-05-11T02:32:38Z", "last_observed_at": "2026-05-11T02:32:40Z", "observation_count": 2 },
+          { "collector_id": "port-scanner", "collector_version": "1.1.0", "first_observed_at": "2026-05-11T02:32:40Z", "last_observed_at": "2026-05-11T02:32:40Z", "observation_count": 2 }
+        ],
+        "evidence_refs": [
+          "sha256:6162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f8081"
+        ]
+      },
+      "first_observed_at": "2026-05-11T02:32:38Z",
+      "last_observed_at": "2026-05-11T02:32:40Z"
+    },
+    {
+      "target_id": "10000001-0001-4000-8000-000000000010",
+      "primary_identifier": { "type": "subdomain", "value": "dev.acme-corp.com" },
+      "attribution": {
+        "tier": "medium",
+        "confidence": 0.65,
+        "reasoning": "Subdomain of confirmed seed but DNS resolves to third-party CI/CD provider IP. No certificate SAN match. Likely a CNAME to external service.",
+        "decision_path": [
+          {
+            "rule_id": "subdomain-of-seed-promote",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.40
+          },
+          {
+            "rule_id": "third-party-ip-demote",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_demote",
+            "confidence_contribution": -0.15
+          }
+        ]
+      },
+      "exposure": {
+        "dns_records": [
+          { "record_type": "CNAME", "value": "acme-corp.netlify.app", "ttl": 300, "first_observed_at": "2026-05-11T02:33:00Z", "last_observed_at": "2026-05-11T02:33:00Z" }
+        ]
+      },
+      "lead_score": {
+        "score": 35.0,
+        "formula_version": "v1.2",
+        "inputs": { "attribution_confidence": 0.65, "exposure_severity_max": "info", "freshness_days": 0 },
+        "category": "medium_priority"
+      },
+      "provenance": {
+        "sources": [
+          { "collector_id": "dns-resolver", "collector_version": "1.4.0", "first_observed_at": "2026-05-11T02:33:00Z", "last_observed_at": "2026-05-11T02:33:00Z", "observation_count": 1 }
+        ],
+        "evidence_refs": [
+          "sha256:8182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1"
+        ]
+      },
+      "first_observed_at": "2026-05-11T02:33:00Z",
+      "last_observed_at": "2026-05-11T02:33:00Z"
+    },
+    {
+      "target_id": "10000001-0001-4000-8000-000000000011",
+      "primary_identifier": { "type": "subdomain", "value": "blog.acme-corp.com" },
+      "attribution": {
+        "tier": "medium",
+        "confidence": 0.62,
+        "reasoning": "Subdomain of confirmed seed. CNAME to WordPress.com hosted blog. Content references Acme Corp but IP is shared hosting.",
+        "decision_path": [
+          {
+            "rule_id": "subdomain-of-seed-promote",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.40
+          },
+          {
+            "rule_id": "shared-hosting-demote",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_demote",
+            "confidence_contribution": -0.10
+          },
+          {
+            "rule_id": "content-branding-match",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_neutral",
+            "confidence_contribution": 0.05
+          }
+        ]
+      },
+      "exposure": {
+        "dns_records": [
+          { "record_type": "CNAME", "value": "acme-corp.wordpress.com", "ttl": 3600, "first_observed_at": "2026-05-11T02:33:05Z", "last_observed_at": "2026-05-11T02:33:05Z" }
+        ],
+        "http_endpoints": [
+          {
+            "url": "https://blog.acme-corp.com/",
+            "status_code": 200,
+            "server_header": "nginx",
+            "title": "Acme Corp Engineering Blog",
+            "first_observed_at": "2026-05-11T02:33:08Z",
+            "last_observed_at": "2026-05-11T02:33:08Z"
+          }
+        ]
+      },
+      "lead_score": {
+        "score": 18.0,
+        "formula_version": "v1.2",
+        "inputs": { "attribution_confidence": 0.62, "exposure_severity_max": "info", "freshness_days": 0 },
+        "category": "low_priority"
+      },
+      "provenance": {
+        "sources": [
+          { "collector_id": "dns-resolver", "collector_version": "1.4.0", "first_observed_at": "2026-05-11T02:33:05Z", "last_observed_at": "2026-05-11T02:33:05Z", "observation_count": 1 },
+          { "collector_id": "http-prober", "collector_version": "1.2.0", "first_observed_at": "2026-05-11T02:33:08Z", "last_observed_at": "2026-05-11T02:33:08Z", "observation_count": 1 }
+        ],
+        "evidence_refs": [
+          "sha256:a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0"
+        ]
+      },
+      "first_observed_at": "2026-05-11T02:33:05Z",
+      "last_observed_at": "2026-05-11T02:33:08Z"
+    },
+    {
+      "target_id": "10000001-0001-4000-8000-000000000012",
+      "primary_identifier": { "type": "subdomain", "value": "status.acme-corp.com" },
+      "attribution": {
+        "tier": "medium",
+        "confidence": 0.60,
+        "reasoning": "Subdomain of confirmed seed. CNAME to Atlassian Statuspage. Branded content but third-party hosting.",
+        "decision_path": [
+          {
+            "rule_id": "subdomain-of-seed-promote",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.40
+          },
+          {
+            "rule_id": "third-party-ip-demote",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_demote",
+            "confidence_contribution": -0.10
+          }
+        ]
+      },
+      "exposure": {
+        "dns_records": [
+          { "record_type": "CNAME", "value": "acme-corp.statuspage.io", "ttl": 3600, "first_observed_at": "2026-05-11T02:33:12Z", "last_observed_at": "2026-05-11T02:33:12Z" }
+        ]
+      },
+      "lead_score": {
+        "score": 15.0,
+        "formula_version": "v1.2",
+        "inputs": { "attribution_confidence": 0.60, "exposure_severity_max": "info", "freshness_days": 0 },
+        "category": "low_priority"
+      },
+      "provenance": {
+        "sources": [
+          { "collector_id": "dns-resolver", "collector_version": "1.4.0", "first_observed_at": "2026-05-11T02:33:12Z", "last_observed_at": "2026-05-11T02:33:12Z", "observation_count": 1 }
+        ],
+        "evidence_refs": [
+          "sha256:c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0"
+        ]
+      },
+      "first_observed_at": "2026-05-11T02:33:12Z",
+      "last_observed_at": "2026-05-11T02:33:12Z"
+    },
+    {
+      "target_id": "10000001-0001-4000-8000-000000000013",
+      "primary_identifier": { "type": "ip", "value": "198.51.100.25" },
+      "attribution": {
+        "tier": "requires_review",
+        "confidence": 0.45,
+        "reasoning": "Resolves from mail.acme-corp.com only. IP belongs to a shared hosting provider. WHOIS registrant does not match Acme Corp. Possible shared mail infrastructure.",
+        "decision_path": [
+          {
+            "rule_id": "reverse-dns-single-confirmed",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.30
+          },
+          {
+            "rule_id": "shared-hosting-demote",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_demote",
+            "confidence_contribution": -0.20
+          }
+        ]
+      },
+      "exposure": {
+        "open_ports": [
+          { "port": 25, "protocol": "tcp", "first_observed_at": "2026-05-11T02:33:20Z", "last_observed_at": "2026-05-11T02:33:20Z" },
+          { "port": 587, "protocol": "tcp", "first_observed_at": "2026-05-11T02:33:20Z", "last_observed_at": "2026-05-11T02:33:20Z" }
+        ]
+      },
+      "lead_score": {
+        "score": 30.0,
+        "formula_version": "v1.2",
+        "inputs": { "attribution_confidence": 0.45, "exposure_severity_max": "info", "freshness_days": 0 },
+        "category": "medium_priority"
+      },
+      "provenance": {
+        "sources": [
+          { "collector_id": "dns-resolver", "collector_version": "1.4.0", "first_observed_at": "2026-05-11T02:32:28Z", "last_observed_at": "2026-05-11T02:33:20Z", "observation_count": 2 }
+        ],
+        "evidence_refs": [
+          "sha256:e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff00"
+        ]
+      },
+      "first_observed_at": "2026-05-11T02:32:28Z",
+      "last_observed_at": "2026-05-11T02:33:20Z",
+      "requires_analyst_review": true,
+      "review_reasons": ["ambiguous_attribution"]
+    },
+    {
+      "target_id": "10000001-0001-4000-8000-000000000014",
+      "primary_identifier": { "type": "ip", "value": "203.0.113.50" },
+      "attribution": {
+        "tier": "requires_review",
+        "confidence": 0.48,
+        "reasoning": "Resolves from vpn.acme-corp.com only. Same /24 CIDR as apex domain. Dedicated VPN appliance IP. WHOIS registrant inconclusive.",
+        "decision_path": [
+          {
+            "rule_id": "reverse-dns-single-confirmed",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.35
+          },
+          {
+            "rule_id": "same-cidr-as-confirmed",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.13
+          }
+        ]
+      },
+      "exposure": {
+        "open_ports": [
+          { "port": 443, "protocol": "tcp", "first_observed_at": "2026-05-11T02:33:30Z", "last_observed_at": "2026-05-11T02:33:30Z" }
+        ]
+      },
+      "lead_score": {
+        "score": 25.0,
+        "formula_version": "v1.2",
+        "inputs": { "attribution_confidence": 0.48, "exposure_severity_max": "info", "freshness_days": 0 },
+        "category": "low_priority"
+      },
+      "provenance": {
+        "sources": [
+          { "collector_id": "dns-resolver", "collector_version": "1.4.0", "first_observed_at": "2026-05-11T02:32:38Z", "last_observed_at": "2026-05-11T02:33:30Z", "observation_count": 2 }
+        ],
+        "evidence_refs": [
+          "sha256:0011223344556677889900aabbccddeeff0011223344556677889900aabbccddee"
+        ]
+      },
+      "first_observed_at": "2026-05-11T02:32:38Z",
+      "last_observed_at": "2026-05-11T02:33:30Z",
+      "requires_analyst_review": true,
+      "review_reasons": ["ambiguous_attribution"]
+    },
+    {
+      "target_id": "10000001-0001-4000-8000-000000000015",
+      "primary_identifier": { "type": "cloud_resource_id", "value": "arn:aws:s3:::acme-corp-public-assets" },
+      "attribution": {
+        "tier": "requires_review",
+        "confidence": 0.52,
+        "reasoning": "S3 bucket named acme-corp-public-assets discovered via CT log certificate entries. Name matches organization pattern but AWS account ownership not verified.",
+        "decision_path": [
+          {
+            "rule_id": "cloud-resource-name-pattern-match",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_neutral",
+            "confidence_contribution": 0.20
+          }
+        ]
+      },
+      "exposure": {
+        "exposure_indicators": [
+          { "indicator": "public_s3_bucket", "severity": "medium", "evidence_ref": "cloud-scanner-bucket-acl" }
+        ]
+      },
+      "cloud_resource": {
+        "provider": "aws",
+        "service_category": "object_storage",
+        "region": "us-east-1",
+        "resource_identifier": "arn:aws:s3:::acme-corp-public-assets"
+      },
+      "lead_score": {
+        "score": 48.0,
+        "formula_version": "v1.2",
+        "inputs": {
+          "attribution_confidence": 0.52,
+          "exposure_severity_max": "medium",
+          "tech_stack_risk_indicators": ["public_s3_bucket"],
+          "freshness_days": 0,
+          "cloud_provider_factor": 0.3
+        },
+        "category": "medium_priority"
+      },
+      "provenance": {
+        "sources": [
+          { "collector_id": "ct-log-monitor", "collector_version": "2.1.0", "first_observed_at": "2026-05-11T02:33:40Z", "last_observed_at": "2026-05-11T02:33:40Z", "observation_count": 1 },
+          { "collector_id": "cloud-scanner", "collector_version": "1.0.0", "first_observed_at": "2026-05-11T02:33:45Z", "last_observed_at": "2026-05-11T02:33:45Z", "observation_count": 1 }
+        ],
+        "evidence_refs": [
+          "sha256:aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
+        ]
+      },
+      "first_observed_at": "2026-05-11T02:33:40Z",
+      "last_observed_at": "2026-05-11T02:33:45Z",
+      "requires_analyst_review": true,
+      "review_reasons": ["ambiguous_attribution", "high_value_target_low_confidence"]
+    },
+    {
+      "target_id": "10000001-0001-4000-8000-000000000016",
+      "primary_identifier": { "type": "subdomain", "value": "ns1.acmedns.net" },
+      "attribution": {
+        "tier": "requires_review",
+        "confidence": 0.40,
+        "reasoning": "NS record for confirmed apex domain acme-corp.com. Different registrable domain (acmedns.net). Could be a managed DNS provider or an Acme-owned DNS infrastructure domain.",
+        "decision_path": [
+          {
+            "rule_id": "ns-record-of-confirmed",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_neutral",
+            "confidence_contribution": 0.15
+          }
+        ]
+      },
+      "exposure": {
+        "open_ports": [
+          { "port": 53, "protocol": "tcp", "first_observed_at": "2026-05-11T02:33:50Z", "last_observed_at": "2026-05-11T02:33:50Z" },
+          { "port": 53, "protocol": "udp", "first_observed_at": "2026-05-11T02:33:50Z", "last_observed_at": "2026-05-11T02:33:50Z" }
+        ],
+        "dns_records": [
+          { "record_type": "A", "value": "198.51.100.53", "ttl": 86400, "first_observed_at": "2026-05-11T02:33:50Z", "last_observed_at": "2026-05-11T02:33:50Z" }
+        ]
+      },
+      "lead_score": {
+        "score": 10.0,
+        "formula_version": "v1.2",
+        "inputs": { "attribution_confidence": 0.40, "exposure_severity_max": "info", "freshness_days": 0 },
+        "category": "informational"
+      },
+      "provenance": {
+        "sources": [
+          { "collector_id": "dns-resolver", "collector_version": "1.4.0", "first_observed_at": "2026-05-11T02:30:14Z", "last_observed_at": "2026-05-11T02:33:50Z", "observation_count": 2 }
+        ],
+        "evidence_refs": [
+          "sha256:1122334455667788990011223344556677889900112233445566778899001122"
+        ]
+      },
+      "first_observed_at": "2026-05-11T02:30:14Z",
+      "last_observed_at": "2026-05-11T02:33:50Z",
+      "requires_analyst_review": true,
+      "review_reasons": ["ambiguous_attribution"]
+    },
+    {
+      "target_id": "10000001-0001-4000-8000-000000000017",
+      "primary_identifier": { "type": "subdomain", "value": "ns2.acmedns.net" },
+      "attribution": {
+        "tier": "requires_review",
+        "confidence": 0.40,
+        "reasoning": "Secondary NS record for confirmed apex domain. Same analysis as ns1.acmedns.net.",
+        "decision_path": [
+          {
+            "rule_id": "ns-record-of-confirmed",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_neutral",
+            "confidence_contribution": 0.15
+          }
+        ]
+      },
+      "exposure": {
+        "open_ports": [
+          { "port": 53, "protocol": "tcp", "first_observed_at": "2026-05-11T02:33:55Z", "last_observed_at": "2026-05-11T02:33:55Z" },
+          { "port": 53, "protocol": "udp", "first_observed_at": "2026-05-11T02:33:55Z", "last_observed_at": "2026-05-11T02:33:55Z" }
+        ],
+        "dns_records": [
+          { "record_type": "A", "value": "198.51.100.54", "ttl": 86400, "first_observed_at": "2026-05-11T02:33:55Z", "last_observed_at": "2026-05-11T02:33:55Z" }
+        ]
+      },
+      "lead_score": {
+        "score": 10.0,
+        "formula_version": "v1.2",
+        "inputs": { "attribution_confidence": 0.40, "exposure_severity_max": "info", "freshness_days": 0 },
+        "category": "informational"
+      },
+      "provenance": {
+        "sources": [
+          { "collector_id": "dns-resolver", "collector_version": "1.4.0", "first_observed_at": "2026-05-11T02:30:14Z", "last_observed_at": "2026-05-11T02:33:55Z", "observation_count": 2 }
+        ],
+        "evidence_refs": [
+          "sha256:2233445566778899aabbccddeeff001122334455667788990011223344556677"
+        ]
+      },
+      "first_observed_at": "2026-05-11T02:30:14Z",
+      "last_observed_at": "2026-05-11T02:33:55Z",
+      "requires_analyst_review": true,
+      "review_reasons": ["ambiguous_attribution"]
+    },
+    {
+      "target_id": "10000001-0001-4000-8000-000000000018",
+      "primary_identifier": { "type": "ip", "value": "198.51.100.7" },
+      "attribution": {
+        "tier": "requires_review",
+        "confidence": 0.42,
+        "reasoning": "Discovered via CT log alternate certificate with acme-corp.com SAN. WHOIS confirms Acme Corp ownership but the IP serves legacy infrastructure with TLS 1.0.",
+        "decision_path": [
+          {
+            "rule_id": "ct-san-match",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.30
+          },
+          {
+            "rule_id": "whois-registrant-match",
+            "rule_version": "baseline-v2.1.0",
+            "outcome": "matched_promote",
+            "confidence_contribution": 0.12
+          }
+        ]
+      },
+      "exposure": {
+        "open_ports": [
+          { "port": 443, "protocol": "tcp", "service_banner": "Apache/2.2.34", "first_observed_at": "2026-05-11T02:34:00Z", "last_observed_at": "2026-05-11T02:34:00Z" }
+        ],
+        "tls_certificates": [
+          {
+            "fingerprint_sha256": "b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3",
+            "issuer": "CN=DigiCert SHA2 Secure Server CA",
+            "subject": "CN=legacy.acme-corp.com",
+            "subject_alt_names": ["legacy.acme-corp.com", "acme-corp.com"],
+            "not_before": "2025-01-15T00:00:00Z",
+            "not_after": "2026-01-15T23:59:59Z",
+            "is_expired": true,
+            "is_self_signed": false
+          }
+        ],
+        "exposure_indicators": [
+          { "indicator": "legacy_tls", "severity": "medium", "evidence_ref": "tls-checker-tls10-enabled" },
+          { "indicator": "mixed_tls_versions", "severity": "low", "evidence_ref": "tls-checker-multi-version" },
+          { "indicator": "expired_certificate", "severity": "high", "evidence_ref": "cert-checker-expired" }
+        ]
+      },
+      "lead_score": {
+        "score": 55.0,
+        "formula_version": "v1.2",
+        "inputs": {
+          "attribution_confidence": 0.42,
+          "exposure_severity_max": "high",
+          "tech_stack_risk_indicators": ["legacy_tls", "expired_certificate"],
+          "freshness_days": 0
+        },
+        "category": "medium_priority"
+      },
+      "provenance": {
+        "sources": [
+          { "collector_id": "ct-log-monitor", "collector_version": "2.1.0", "first_observed_at": "2026-05-11T02:33:50Z", "last_observed_at": "2026-05-11T02:33:50Z", "observation_count": 1 },
+          { "collector_id": "port-scanner", "collector_version": "1.1.0", "first_observed_at": "2026-05-11T02:34:00Z", "last_observed_at": "2026-05-11T02:34:00Z", "observation_count": 1 }
+        ],
+        "evidence_refs": [
+          "sha256:3344556677889900aabbccddeeff00112233445566778899aabbccddeeff0011"
+        ]
+      },
+      "first_observed_at": "2026-05-11T02:33:50Z",
+      "last_observed_at": "2026-05-11T02:34:00Z",
+      "requires_analyst_review": true,
+      "review_reasons": ["ambiguous_attribution"]
+    }
+  ],
+  "delta_from_previous_run": {
+    "previous_run_id": null,
+    "added": [
+      { "target_id": "10000001-0001-4000-8000-000000000001", "primary_identifier": { "type": "domain", "value": "acme-corp.com" }, "discovery_path": ["seed"] },
+      { "target_id": "10000001-0001-4000-8000-000000000002", "primary_identifier": { "type": "subdomain", "value": "staging.acme-corp.com" }, "discovery_path": ["seed", "cert-san-expansion"] },
+      { "target_id": "10000001-0001-4000-8000-000000000003", "primary_identifier": { "type": "subdomain", "value": "admin.acme-corp.com" }, "discovery_path": ["seed", "cert-san-expansion"] },
+      { "target_id": "10000001-0001-4000-8000-000000000006", "primary_identifier": { "type": "ip", "value": "203.0.113.10" }, "discovery_path": ["seed", "dns-resolution"] },
+      { "target_id": "10000001-0001-4000-8000-000000000007", "primary_identifier": { "type": "ip", "value": "203.0.113.42" }, "discovery_path": ["seed", "cert-san-expansion", "dns-resolution"] },
+      { "target_id": "10000001-0001-4000-8000-000000000015", "primary_identifier": { "type": "cloud_resource_id", "value": "arn:aws:s3:::acme-corp-public-assets" }, "discovery_path": ["seed", "ct-log-expansion", "cloud-scan"] }
+    ],
+    "removed": [],
+    "changed": []
+  },
+  "collector_health": {
+    "collectors": [
+      {
+        "collector_id": "dns-resolver",
+        "collector_version": "1.4.0",
+        "status": "success",
+        "started_at": "2026-05-11T02:30:10Z",
+        "completed_at": "2026-05-11T02:34:00Z",
+        "observations_collected": 42
+      },
+      {
+        "collector_id": "ct-log-monitor",
+        "collector_version": "2.1.0",
+        "status": "success",
+        "started_at": "2026-05-11T02:30:15Z",
+        "completed_at": "2026-05-11T02:33:50Z",
+        "observations_collected": 8
+      },
+      {
+        "collector_id": "http-prober",
+        "collector_version": "1.2.0",
+        "status": "success",
+        "started_at": "2026-05-11T02:30:20Z",
+        "completed_at": "2026-05-11T02:33:10Z",
+        "observations_collected": 15
+      },
+      {
+        "collector_id": "port-scanner",
+        "collector_version": "1.1.0",
+        "status": "success",
+        "started_at": "2026-05-11T02:32:00Z",
+        "completed_at": "2026-05-11T02:34:05Z",
+        "observations_collected": 12
+      },
+      {
+        "collector_id": "cloud-ip-ranger",
+        "collector_version": "1.0.0",
+        "status": "success",
+        "started_at": "2026-05-11T02:32:05Z",
+        "completed_at": "2026-05-11T02:32:15Z",
+        "observations_collected": 3
+      },
+      {
+        "collector_id": "cloud-scanner",
+        "collector_version": "1.0.0",
+        "status": "partial_success",
+        "started_at": "2026-05-11T02:33:30Z",
+        "completed_at": "2026-05-11T02:34:10Z",
+        "observations_collected": 2,
+        "errors": [
+          {
+            "error_type": "rate_limit",
+            "message": "AWS API rate limit exceeded for S3 ListBuckets; retried 3 times",
+            "occurred_at": "2026-05-11T02:33:48Z"
+          }
+        ]
+      },
+      {
+        "collector_id": "whois-resolver",
+        "collector_version": "1.3.0",
+        "status": "success",
+        "started_at": "2026-05-11T02:30:30Z",
+        "completed_at": "2026-05-11T02:34:20Z",
+        "observations_collected": 6
+      }
+    ]
+  },
+  "manifest_ref": "sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+  "tenant_quota_warnings": [
+    {
+      "quota_type": "collector_api_rate_limit",
+      "severity": "warning",
+      "details": "cloud-scanner hit AWS API rate limit; 2 of 5 enumeration calls throttled",
+      "occurred_at": "2026-05-11T02:33:48Z"
+    }
+  ],
+  "outside_authorized_scope_summary": {
+    "total_outside_scope_observations": 3,
+    "outside_scope_targets_in_artifact": 0,
+    "scope_enforcement_mode": "medium"
+  }
+}

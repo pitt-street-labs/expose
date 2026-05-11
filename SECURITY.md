@@ -105,6 +105,23 @@ We use a CVSS-aligned classification:
 
 **Secrets never logged; credentials fetched just-in-time.** The secrets backend abstraction ensures credentials are retrieved at the point of use and never serialized to logs, artifacts, or diagnostic output.
 
+## Audit Logging
+
+EXPOSE emits structured audit events for all security-relevant operations per NIST SP 800-53 AU-2/AU-3. The audit schema (`src/expose/observability/audit_schema.py`) captures:
+
+- **Run lifecycle** -- run creation, state transitions, completion, failure.
+- **Entity and relationship CRUD** -- graph mutations with tenant context.
+- **Scope enforcement decisions** -- authorization scope evaluations, out-of-scope warnings.
+- **Tenant management** -- tenant creation, configuration changes.
+- **Credential operations** -- credential resolution, rotation, health checks (values never logged).
+- **Data lifecycle** -- retention pruning, artifact generation, evidence storage.
+- **Configuration changes** -- rule pack updates, collector enablement, scope modifications.
+- **Artifact signing** -- signing operations, verification outcomes.
+
+Each audit event records timestamp (UTC), actor identity, action description, affected resource, and outcome (success/failure). Events are emitted via the OpenTelemetry pipeline and can be routed to the operator's SIEM. The audit log path is configurable via the `EXPOSE_AUDIT_LOG_PATH` environment variable (default: `./audit.log`).
+
+Operators deploying into regulated environments should configure retention policies per their compliance framework (AU-11 retention categories are embedded in the schema).
+
 ## SBOM and Supply Chain
 
 We publish SBOMs (SPDX format) for all container images via `syft`. Build provenance attestations target SLSA Level 2, with Level 3 as an ongoing improvement target.

@@ -2,11 +2,57 @@
 
 All notable changes to EXPOSE are documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-This project has not yet reached its first tagged release; all entries below
-are under **Unreleased**.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-05-11
+
+### Added
+
+- Rule evaluation engine with 12 attribution predicates and customizable rule packs
+- Lead scoring with priority tiers wired into pipeline
+- SSE event publishing for real-time run monitoring
+- Run scheduling API with cron expressions and concurrent run limits
+- Enforcement logging for scope denial audit trail
+- Ed25519/ECDSA artifact signing with FIPS-compliant hashing
+- MITRE ATT&CK technique mapping for all 31 collectors
+- Seed entity attribution (confirmed/1.0 for seeds)
+- Tier-3 dispatch gating on attribution status
+- Graph edge types: certificate_for, hosts, belongs_to
+- Provenance chain API and UI
+- NIST AU-2/AU-3 audit logging schema
+- Screenshot vision collector with Stage 4c analysis
+- Eval harness CLI (`expose eval`) with P/R/F1 metrics
+- WAF origin discovery collector (5 methods, 6 CDN vendors)
+- Grafana dashboards (overview + tenant, 24 panels)
+- Content-addressed evidence storage
+- Dark web indicator module (HIBP, IntelX, DeHashed)
+- SIEM adapters complete (Splunk HEC, Sentinel, Chronicle)
+- Identity surface module (registrant pivot, org graph)
+- Type safety: Pydantic models for core pipeline data structures
+
+### Fixed
+
+- Scheduler API authentication (CVSS 9.1)
+- Circuit breaker race condition
+- Egress profile mutation race
+- Background task cleanup on shutdown
+- SSRF endpoint validation in SIEM adapters
+- Cross-tenant data leakage in SIEM delivery
+- HTTP connection pooling in collectors
+- Batch upsert deduplication (CardinalityViolationError)
+- Relationship batch_create constraint reference
+- State determination: skipped vs failed classification
+- Test isolation bug in ct-crtsh cache
+
+### Security
+
+- Auth middleware on scheduler endpoints
+- SSRF validation blocks internal IPs
+- Tenant correlation on SIEM delivery
+- Dispatch/enrichment timeouts (120s/60s)
+
+## [0.1.0] - 2026-05-10
 
 ### Added
 

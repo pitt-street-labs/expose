@@ -130,6 +130,7 @@ Commercial module. Private repository. Consumes Core's signed artifact, produces
 
 - APT targeting profile correlation.
 - Dark-web IoAc (Indicators of Activity Against), IoI (Indicators of Interest), IoP (Indicators of Proof of Concept) collection and correlation, with its own ethics surface.
+- **Dark web threat intelligence enricher** (`src/expose/modules/threat_context/dark_web.py`) — queries public aggregator APIs (HIBP, IntelX, DeHashed) to surface breach data, credential leaks, and dark web mentions. Indicator taxonomy: IoC (compromise), IoI (interest), IoAc (activity), IoP (preparation). Each indicator carries type, source, first/last seen, confidence, and description.
 - Historical point-in-time enrichment (cert history, DNS history, banner history, screenshot history).
 - Adversary infrastructure detection — MITRE ATT&CK Resource Development tactic monitoring (typosquats, staging infrastructure, leaked credentials in markets).
 - Risk-prioritized lens combining Core attribution with threat actor targeting context.
@@ -140,6 +141,8 @@ License: Korlogos commercial EULA. Available to commercial and federal customers
 
 Commercial module. Private repository. Off by default; requires explicit per-tenant authorization scope acknowledgment with an additional attestation beyond Core's authorization scope. Includes:
 
+- **Registrant pivot** (`src/expose/modules/identity_surface/registrant_pivot.py`) — clusters domains by shared WHOIS/RDAP registrant identity using fuzzy string matching (`difflib.SequenceMatcher`). Correlates registrant data across domains to find assets registered by the same entity despite name variations, different registrars, or partial redaction. Pivot dimensions: org name, email domain, address, name server. Ethics gate: operations are refused unless `per_tenant_authorization=True`.
+- **Organization graph** (`src/expose/modules/identity_surface/org_graph.py`) — directed graph of parent/subsidiary, org-to-domain, org-to-IP-range, and org-to-email-infrastructure relationships. Built from registrant pivot results, M&A discovery data, and DNS relationship data. Ethics gate: same authorization requirement.
 - WHOIS-personnel correlation beyond what Core does (registrant graph analysis, historical registrant pivots).
 - Authorized social-media tangential target discovery (LinkedIn, Twitter/X, Mastodon, Bluesky, scope-gated, for authorized red team operations).
 - Personnel-graph attribution (organizational hierarchy inference from public signals).
@@ -153,9 +156,20 @@ Public dataset offering. Includes:
 - Periodic published reference graph datasets — anonymized or fully synthetic depending on dataset.
 - Reference rule packs demonstrating attribution patterns.
 - Benchmark datasets for evaluating EASI tools, attribution accuracy, and AI enrichment quality.
+- **Eval harness CLI** (`expose eval` subcommand) — runs attribution functions against held-out datasets and produces precision/recall/F1 metrics. Four dataset categories ship in `examples/eval-datasets/`: `confirmed_yours`, `confirmed_not_yours`, `ambiguous`, `adversarial`. The harness accepts injectable attribution functions including `RuleEvaluator`-backed functions for benchmarking real rule packs.
 - Dataset documentation, schemas, and reproducibility metadata.
 
 License: Creative Commons Attribution 4.0 (CC BY 4.0) for the data; Apache 2.0 for any companion tooling. Anyone can use, redistribute, modify with attribution. The data published is sourced from operator-authorized research targets (Korlogos's own infrastructure, partnered research domains) or from synthetic generation; **never from customer deployments**.
+
+## Planned product outputs (backlog)
+
+Two additional product outputs are tracked in the issue backlog:
+
+- **SOC Threat Package** (Gitea #115) — a packaged export of Core + Threat Context enrichment results formatted for SOC team consumption. Intended for direct ingestion into SIEM platforms (Splunk, Sentinel, Chronicle) via the existing integration adapters in `src/expose/integrations/`. Includes attribution-annotated IoCs, threat context indicators, and risk-prioritized entity lists. This is a commercial Threat Context surface deliverable.
+
+- **CISO Report** (Gitea #113) — a periodic executive-summary report generated from pipeline run data. Intended to provide security directors with attack surface trends, attribution coverage metrics, new discovery highlights, and risk posture changes over time. Formatting and delivery mechanism TBD; the concept anchors the Security Director persona's procurement justification.
+
+Both are tracked as backlog items and do not yet have implementations.
 
 ## Why open-core
 

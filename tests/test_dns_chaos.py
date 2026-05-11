@@ -301,8 +301,8 @@ class TestDnsChaosApiKey:
 
     def test_api_key_returns_authorization_header(self) -> None:
         creds = {
-            "api_key": CollectorCredential(
-                name="api_key", secret_value="test-key-12345"
+            "chaos_api_key": CollectorCredential(
+                name="chaos_api_key", secret_value="test-key-12345"
             )
         }
         collector = DnsChaosCollector(_config(credentials=creds))
@@ -311,7 +311,7 @@ class TestDnsChaosApiKey:
 
     def test_empty_api_key_returns_empty_headers(self) -> None:
         creds = {
-            "api_key": CollectorCredential(name="api_key", secret_value="")
+            "chaos_api_key": CollectorCredential(name="chaos_api_key", secret_value="")
         }
         collector = DnsChaosCollector(_config(credentials=creds))
         assert collector._get_auth_headers() == {}

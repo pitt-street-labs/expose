@@ -167,7 +167,8 @@ CREDENTIAL_SPECS: dict[str, CollectorCredentialSpec] = {
     "dns-chaos": CollectorCredentialSpec(
         collector_id="dns-chaos",
         required_keys=[],
-        optional_keys=["api_key"],
+        optional_keys=["chaos_api_key"],
+        key_mapping={"chaos_api_key": "collector.dns-chaos.api_key"},
     ),
     "dark-web-indicators": CollectorCredentialSpec(
         collector_id="dark-web-indicators",

@@ -1,109 +1,113 @@
-# EXPOSE
+<p align="center">
+  <img src="assets/branding/expose-icon.png" alt="EXPOSE" width="128" />
+</p>
 
+<h1 align="center">EXPOSE</h1>
+
+<p align="center">
 Continuous external attack surface intelligence with signed, attributed artifacts.
+</p>
 
-[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB.svg)](https://www.python.org/)
-[![Tests: ~1800 passing](https://img.shields.io/badge/tests-~1800%20passing-brightgreen.svg)](#project-status)
-[![Coverage: 91%](https://img.shields.io/badge/coverage-91%25-brightgreen.svg)](#project-status)
-[![Status: Pre-release](https://img.shields.io/badge/status-pre--release-yellow.svg)](#project-status)
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License: Apache 2.0" /></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12%2B-3776AB.svg" alt="Python 3.12+" /></a>
+  <a href="#project-status"><img src="https://img.shields.io/badge/tests-3590%2B%20passing-brightgreen.svg" alt="Tests: 3590+ passing" /></a>
+  <a href="#project-status"><img src="https://img.shields.io/badge/status-pre--release-yellow.svg" alt="Status: Pre-release" /></a>
+</p>
+
+---
 
 ## What is EXPOSE?
 
-EXPOSE is an open-source External Attack Surface Intelligence (EASI) platform that discovers, attributes, and continuously monitors an organization's internet-facing surface. It produces cryptographically signed JSON artifacts with full provenance chains -- every claim traceable to the collector, observation, and rule that justified it. Built for both defensive CTEM workflows and authorized red team operations, EXPOSE is self-hostable and designed to run inside your own authorization boundary. See [`docs/SPEC.md`](docs/SPEC.md) for the full specification.
+EXPOSE is an open-core External Attack Surface Intelligence (EASI) platform that discovers, attributes, and continuously monitors an organization's internet-facing surface. It produces cryptographically signed JSON artifacts with full provenance chains -- every claim is traceable to the collector, observation, and rule that justified it. Built for both defensive CTEM workflows and authorized red team operations, EXPOSE is self-hostable and designed to run inside your own authorization boundary.
+
+No other EASM tool -- commercial or open-source -- produces tamper-evident, cryptographically signed deliverables with auditable attribution logic.
 
 ## Key Differentiators
 
-- **Signed artifacts with provenance.** Every artifact is signed with Ed25519 or ECDSA P-256, with SLSA-aligned provenance attestations and FIPS SHA-256 content hashing. Downstream consumers verify integrity offline. No other EASM tool -- commercial or open-source -- produces tamper-evident, cryptographically signed deliverables.
+- **Signed artifacts with provenance.** Every artifact is signed with Ed25519 or ECDSA P-256, content-hashed with FIPS SHA-256, and wrapped in SLSA-aligned provenance envelopes. Downstream consumers verify integrity offline -- no trust-the-vendor required.
 
-- **Open, auditable attribution.** Confidence tiers (`confirmed`, `high`, `medium`, `requires_review`) with numeric scores and full evidence chains back to source observations. Attribution logic is defined as declarative, JSON Schema-validated rule packs -- data, not code. Every finding carries the ATT&CK Reconnaissance technique IDs that contributed to its attribution.
+- **Auditable attribution engine.** A rule-based evaluation engine with 12 predicates, AND/OR/NOT condition trees, and four confidence tiers (`confirmed`, `high`, `medium`, `requires_review`). Attribution logic ships as declarative, JSON Schema-validated rule packs -- data, not code. Every finding carries the MITRE ATT&CK Reconnaissance technique IDs that contributed to its score.
 
-- **Operator-controlled LLM enrichment.** Four provider adapters (Anthropic, OpenAI, Gemini, Ollama) behind a SafeLLMClient that enforces structured-output schemas, per-run cost ceilings, prompt-injection defenses, and per-call audit logging. The operator chooses the provider, sees the prompts, and sets the budget. Run fully offline with Ollama.
+- **SOC-ready output.** SIEM push adapters for Splunk HEC, Microsoft Sentinel, and Google Chronicle ship out of the box. Lead scoring with priority tiers routes analyst attention to what matters first.
 
-- **Federal-ready open core.** Apache 2.0 engine with FedRAMP-ready architecture. FIPS 140-3 validated cryptography, NIST 800-53 control alignment, AU-family audit logging. Self-host inside your own ATO boundary without waiting for vendor authorization.
+- **Federal-ready open core.** FIPS 140-3 validated cryptography, NIST SP 800-53 AU-2/AU-3 audit logging, air-gap deployment capability, and content-addressed evidence storage with integrity verification. Self-host inside your own ATO boundary without waiting for vendor authorization.
 
-- **Dual-audience architecture.** A single platform serves both defensive CTEM teams and authorized red team operators. Authorization scope enforcement with configurable medium/hard modes separates who can scan what from what role they serve.
+- **Operator-controlled LLM enrichment.** Four provider adapters (Anthropic, OpenAI, Gemini, Ollama) behind a SafeLLMClient that enforces structured-output schemas, per-run cost ceilings, and per-call audit logging. Run fully offline with Ollama.
 
-- **Deterministic, reproducible output.** Same seeds, same rule pack, same configuration yields the same canonical artifact. Reproducibility enables academic citation, audit evidence, and delta tracking across runs.
+## Feature Highlights
 
-## Features
+### Discovery -- 41 Collectors
 
-### Discovery (21 collectors)
+41 built-in collectors across three sensitivity tiers, each mapped to MITRE ATT&CK Reconnaissance techniques. Tier 3 (active) collectors are attribution-gated: they execute only against entities with `confirmed` or `high` attribution, or explicit authorization scope membership.
 
-21 built-in collectors across three sensitivity tiers. Tier 3 (active) collectors are attribution-gated: they execute only against entities with `confirmed` or `high` attribution, or explicit authorization scope membership.
+| Tier | Count | Examples |
+|------|-------|---------|
+| **T1 Passive** | 22 | CT logs (crt.sh, Certstream, Censys, Certspotter), RDAP/WHOIS, BGP (HE, RIPEstat, Team Cymru), cloud IP ranges, SPF/DKIM/DMARC, GitHub exposed secrets, passive DNS history, M&A discovery, Common Crawl, Wayback Machine, OTX AlienVault, paste monitoring, Wikipedia edits, git commit emails, dark web indicators |
+| **T2 Targeted** | 7 | Favicon hash, WAF/CDN detection, reverse PTR, robots.txt, security.txt, mail header analysis, SIP discovery |
+| **T3 Active** | 12 | DNS resolution, TLS handshake + JARM fingerprint, HTTP fingerprinting, port surface scan, subdomain enumeration, zone transfer, WAF origin discovery, screenshot vision, Shodan, Censys, BinaryEdge, cloud storage exposure |
 
-| Collector | ID | Tier | Source |
-|---|---|---|---|
-| crt.sh CT Logs | `ct-crtsh` | T1 Passive | Certificate Transparency via crt.sh |
-| Certstream CT | `ct-certstream` | T1 Passive | Near-real-time CT log stream |
-| RDAP / WHOIS | `rdap-whois` | T1 Passive | RDAP bootstrap + WHOIS fallback |
-| Cloud IP Ranges | `cloud-ranges` | T1 Passive | AWS, Azure, GCP published manifests |
-| BGP (HE Toolkit) | `bgp-he-toolkit` | T1 Passive | Hurricane Electric BGP Toolkit |
-| BGP (RIPEstat) | `bgp-ripestat` | T1 Passive | RIPEstat Data API |
-| BGP (Team Cymru) | `bgp-team-cymru` | T1 Passive | Team Cymru DNS service |
-| SPF/DKIM/DMARC | `spf-dkim-dmarc` | T1 Passive | DNS TXT record queries |
-| GitHub Exposed | `github-exposed` | T1 Passive | GitHub Search API |
-| DNSBL Blacklist | `dns-blacklist` | T1 Passive | DNS-based blackhole lists |
-| Passive DNS History | `dns-passive-history` | T1 Passive | SecurityTrails + VirusTotal pDNS |
-| M&A Discovery | `ma-discovery` | T1 Passive | Subsidiary and acquisition search |
-| Favicon Hash | `favicon-hash` | T2 Targeted | HTTP favicon fetch + MurmurHash3 |
-| Reverse PTR | `dns-reverse-ptr` | T2 Targeted | Reverse DNS lookup for IP seeds |
-| WAF/CDN Detection | `waf-detection` | T2 Targeted | CDN and WAF fingerprinting |
-| Active DNS | `active-dns-resolve` | T3 Active | Direct DNS resolution |
-| Active TLS | `active-tls-handshake` | T3 Active | TLS handshake + JARM fingerprint |
-| Active HTTP | `active-http-fingerprint` | T3 Active | HTTP headers + response fingerprinting |
-| Active Port Surface | `active-port-surface` | T3 Active | TCP connect scan (curated port set) |
-| Subdomain Enumeration | `dns-subdomain-enum` | T3 Active | Wordlist-based subdomain brute-force |
-| DNS Zone Transfer | `dns-zone-transfer` | T3 Active | AXFR against authoritative nameservers |
+See [`docs/collectors.md`](docs/collectors.md) for the full catalog with credential requirements and output schemas.
 
-See [`docs/collectors.md`](docs/collectors.md) for the full collector catalog with credential requirements and output schemas.
+### Attribution Engine
 
-### Attribution
+- **12 rule predicates** evaluated recursively over AND/OR/NOT condition trees
+- **Customizable rule packs** per organizational profile (baseline, cloud-first, conservative, government)
+- **Four confidence tiers** with numeric scores and per-claim evidence chains
+- **Lead scoring** with priority tiers for analyst triage
+- **Trust degradation detection** -- registrar changes, hosting migrations, CA switches
+- **Environment classification** -- production, staging, QA, dev, test via correlated signals
 
-- **8-rule-type scope matcher** producing four confidence tiers with numeric scores and per-claim evidence chains
-- **Trust degradation detection** -- identifies registrar changes, hosting migrations, certificate authority switches, and other infrastructure shifts that may signal compromise or abandonment
-- **Environment classification** -- multi-signal categorization of endpoints as production, staging, QA, development, or test based on correlated DNS, HTTP, TLS, and content signals
-- **SaaS product alignment** -- matches observations against a product-signature knowledge base to identify known SaaS footprint and surface gaps
-- **Declarative rule packs** (JSON Schema-validated) for reproducible, auditable attribution logic
+### Analysis and Enrichment
 
-### Analysis
-
-- **Multi-provider LLM enrichment** via SafeLLMClient with Anthropic, OpenAI, Gemini, and Ollama adapters
-- **Vision analysis** -- multimodal screenshot and banner analysis to identify login portals, default pages, and technology indicators that header analysis alone misses
-- **Tech-stack fingerprinting** and exposure indicators contributing to numeric lead scores
-- **WAF/CDN detection** and origin-IP discovery for assets behind content delivery networks
+- **Screenshot vision** -- multimodal page analysis to identify login portals, default pages, and technology indicators
+- **WAF origin discovery** -- 5 methods, 6 CDN vendor signatures for finding real IPs behind CDNs
+- **Tech-stack fingerprinting** and exposure indicators feeding numeric lead scores
+- **Multi-provider LLM enrichment** with SafeLLMClient (Anthropic, OpenAI, Gemini, Ollama)
 - **DNSBL reputation checking** across standard DNS blackhole lists
 
-### Pipeline & Operations
+### Pipeline and Operations
 
 - **Canonical artifact generation** with FIPS SHA-256 content hashing, Ed25519/ECDSA signing, and SLSA-aligned provenance envelopes
-- **Delta computation** with six classified removal reasons against previous runs
-- **Webhook delivery** with HMAC-SHA256 payload signing, typed event headers, and exponential-backoff retry
-- **Per-tenant quota enforcement** and misuse detection
-- **GDPR/CCPA compliance** with data export and deletion capabilities
-- **Configurable data retention** with automated pruning
-- **Four network egress profiles**: direct, SOCKS5, WireGuard, HTTP CONNECT proxy
+- **Full provenance chain** -- observation-to-attribution audit trail for every finding
+- **Content-addressed evidence storage** with SHA-256 integrity verification
+- **Run scheduling** -- cron-based with concurrent run limits
+- **Delta computation** with six classified removal reasons
+- **Webhook delivery** with HMAC-SHA256 payload signing and exponential-backoff retry
+- **Four network egress profiles** -- direct, SOCKS5, WireGuard, HTTP CONNECT proxy
+- **NIST SP 800-53 audit logging** -- AU-2/AU-3 compliant, append-only, retention-aware
 
-### Dashboard
+### SIEM Integration
 
-- **Darkroom** -- web-based dashboard with D3.js observation graph visualization, Alpine.js interactive controls, and real-time SSE event streaming
+Complete adapters for three major SIEM platforms, shipping findings as structured events:
+
+| Platform | Adapter | Protocol |
+|----------|---------|----------|
+| Splunk | HEC (HTTP Event Collector) | HTTPS |
+| Microsoft Sentinel | Log Analytics API | HTTPS |
+| Google Chronicle | Ingestion API | HTTPS |
+
+### Dashboard and Visualization
+
+- **Darkroom** -- web dashboard with D3.js force-directed observation graph (10 edge type colors), Alpine.js interactive controls, and real-time SSE event streaming
+- **Graph visualization** with click-to-expand entity exploration
 - **CSV export** with entity-type, attribution-tier, and environment filters
+- **Admin panel** with scan log, credential management, and tenant configuration
 
-### API & Integration
+### API and CLI
 
-- **FastAPI REST API** with bearer token authentication, tenant-scoped endpoints, and SSE event streaming
-- **RBAC** with three roles (admin, operator, viewer) and tenant-scoped permission enforcement
-- **Webhook subscriptions** for event-driven integration with external systems
-- **Credential management API** with SpiderFoot import, bundle import/export, and per-credential testing
-- **Click CLI** with `run`, `serve`, and `db` commands plus `--live` flag for streaming output
-- **OpenTelemetry** distributed tracing, structured logging, and five operational metrics
+- **FastAPI REST API** with bearer token auth, tenant-scoped endpoints, and SSE event streaming
+- **RBAC** with three roles (admin, operator, viewer) and tenant-scoped permissions
+- **Click CLI** -- `expose run`, `expose serve`, `expose eval`, `expose db` with `--live` streaming
+- **Eval harness** -- `expose eval` with precision/recall/F1 metrics for attribution accuracy
+- **OpenTelemetry** distributed tracing, structured logging, and operational metrics
 - **Grafana dashboards** for platform overview and per-tenant monitoring
 
 ## Quick Start
 
 ```bash
 # Clone and start with Docker Compose
-git clone https://github.com/pitt-street-labs/expose.git
+git clone https://github.com/korlogos/expose.git
 cd expose
 docker compose up -d
 
@@ -122,31 +126,65 @@ helm install expose ./deploy/helm-chart \
   --values your-tenant-config.yaml
 ```
 
-See [`docs/quickstart.md`](docs/quickstart.md) for full setup instructions and [`CONTRIBUTING.md`](CONTRIBUTING.md) for development setup with `uv`, pre-commit hooks, and the test suite.
+See [`docs/quickstart.md`](docs/quickstart.md) for full setup instructions.
+
+## Architecture
+
+EXPOSE executes a five-stage pipeline per run:
+
+1. **Seed expansion** -- multi-TLD expansion with DNS pre-check
+2. **Collection** -- parallel dispatch across tiered collectors
+3. **Sanitization** -- input validation and normalization
+4. **Attribution and enrichment** -- rule evaluation, lead scoring, LLM enrichment, SIEM push
+5. **Artifact generation** -- signed canonical artifacts with provenance attestations
+
+Four stages are fully deterministic. LLM enrichment in Stage 4 is bounded by SafeLLMClient and produces only structured outputs validated against a schema. See [`docs/adr/`](docs/adr/) for the 10 Architecture Decision Records.
+
+```
+docs/architecture/
+  pipeline-stages.md        Five-stage pipeline flow
+  deployment-topology.md    Single-node and Kubernetes topologies
+  observation-graph.md      Entity-relationship graph model
+  multi-tenancy.md          Tenant isolation architecture
+  scanner-egress.md         Network egress profiles
+  attribution-flow.md       Rule evaluation data flow
+  product-surfaces.md       Open-core module boundaries
+  federal-deployment.md     Air-gap and FedRAMP patterns
+```
+
+## Commercial Modules
+
+EXPOSE follows an open-core model ([ADR-009](docs/adr/ADR-009-commercial-structure.md)). The Apache 2.0 engine ships with all 41 collectors, the attribution engine, artifact signing, and the Darkroom dashboard. Commercial modules extend the platform for enterprise and federal customers:
+
+| Module | Capability |
+|--------|-----------|
+| **Threat Context** | Dark web indicators, threat actor profiling, IOC packaging for SOC teams |
+| **Identity Surface** | Registrant pivot analysis, organizational graph construction, M&A-aware asset discovery |
+| **SOC Package** | STIX 2.1 bundles, MISP events, LLM-generated hunt recommendations, SIEM field mapping |
+| **CISO Report** | Executive threat landscape, attraction assessment, ranked target analysis |
+
+See [`docs/positioning.md`](docs/positioning.md) for the full product structure.
 
 ## Documentation
 
 | Document | Description |
-|---|---|
+|----------|-------------|
 | [`docs/SPEC.md`](docs/SPEC.md) | Full specification -- architecture, threat model, observation graph, collectors, attribution engine, LLM integration, artifact format |
 | [`docs/adr/`](docs/adr/) | 10 Architecture Decision Records |
 | [`docs/collectors.md`](docs/collectors.md) | Collector catalog with credential requirements and output schemas |
 | [`docs/quickstart.md`](docs/quickstart.md) | Setup and first-run guide |
 | [`docs/why-expose.md`](docs/why-expose.md) | Design rationale and positioning |
 | [`docs/use-cases.md`](docs/use-cases.md) | Persona-driven use cases |
-| [`docs/architecture/`](docs/architecture/) | Mermaid diagrams -- pipeline, deployment topology, observation graph, multi-tenancy, scanner egress, attribution flow |
+| [`docs/architecture/`](docs/architecture/) | Mermaid diagrams -- pipeline, deployment, observation graph, multi-tenancy, egress, attribution, product surfaces, federal deployment |
 | [`docs/glossary.md`](docs/glossary.md) | Term definitions |
-| [`docs/strategy/`](docs/strategy/) | Advisory strategy documents -- federal deployment, air-gap deployment, production runbook, network security, SBOM and signing |
+| [`docs/strategy/`](docs/strategy/) | Advisory documents -- federal deployment, air-gap deployment, production runbook, network security, SBOM, competitive analysis, framework mapping |
 | [`schemas/`](schemas/) | JSON Schema (Draft 2020-12) -- canonical artifact, manifest, rule pack |
 | [`examples/rulepacks/`](examples/rulepacks/) | Example rule packs (baseline, cloud-first, conservative) |
-
-## Architecture
-
-EXPOSE executes a five-stage pipeline per run: seed expansion, collection, sanitization, attribution and enrichment, and artifact generation. Four stages are fully deterministic; LLM enrichment in Stage 4b is bounded by SafeLLMClient and produces only structured outputs validated against a schema. See [`docs/adr/`](docs/adr/) for the 10 Architecture Decision Records covering language choice, graph storage, deployment model, output format, LLM integration, licensing, multi-tenancy, ethics, commercial structure, and FedRAMP readiness.
+| [`examples/eval-datasets/`](examples/eval-datasets/) | Eval datasets (confirmed, not-yours, ambiguous, adversarial) |
 
 ## Contributing
 
-Contributions are welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for guidelines, development setup, and the full testing workflow.
+Contributions are welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for guidelines, development setup with `uv`, pre-commit hooks, and the full testing workflow.
 
 All commits require [Developer Certificate of Origin](https://developercertificate.org/) sign-off (`Signed-off-by:` line), enforced by DCO bot. Pre-commit hooks handle linting (ruff), secret scanning (gitleaks), schema validation, and Helm chart linting.
 
@@ -158,22 +196,23 @@ To report a vulnerability, see [`SECURITY.md`](SECURITY.md).
 
 [Apache License 2.0](LICENSE).
 
-The engine is open source. Commercial modules (Threat Context, Identity Surface) are licensed separately. See [`docs/positioning.md`](docs/positioning.md) for the product structure.
+The engine is open source. Commercial modules (Threat Context, Identity Surface) are licensed separately under proprietary terms. See [`docs/positioning.md`](docs/positioning.md) and [ADR-009](docs/adr/ADR-009-commercial-structure.md) for the product structure.
 
 ## Project Status
 
-**Pre-release.** The specification is complete and locked. Phase 1 implementation is active.
+**Pre-release.** The specification is locked. Phase 1 implementation is active.
 
 | Metric | Value |
-|---|---|
-| Python source files | 133 across 21 sub-packages |
-| Test files | 94 |
-| Tests passing | ~1,800 |
-| Test coverage | 91% |
-| Collectors built | 21 (12 passive T1, 3 targeted T2, 6 active T3) |
+|--------|-------|
+| Python source files | 188 across 22 sub-packages |
+| Test files | 138 |
+| Tests passing | 3,590+ |
+| Collectors built | 41 (22 passive, 7 targeted, 12 active) |
+| Attribution predicates | 12 |
+| SIEM adapters | 3 (Splunk, Sentinel, Chronicle) |
 | LLM provider adapters | 4 (Anthropic, OpenAI, Gemini, Ollama) |
 | Architecture decisions | 10 ADRs |
 | JSON schemas | 3 (canonical artifact, manifest, rule pack) |
 | Helm chart templates | 12 |
 
-This is not yet recommended for production use -- expect breaking changes to configuration and schema formats before v1 GA.
+This is not yet recommended for production use -- expect breaking changes to configuration and schema formats before v1.0.

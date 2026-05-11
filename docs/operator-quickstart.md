@@ -1,10 +1,10 @@
 # EXPOSE — Operator Quickstart
 
 **Status:** Pre-release operator guide — tracks Phase 1 of the spec (`docs/SPEC.md` §11.1). Open for revision as the chart and CLI mature in Sprints 1-9.
-**Date:** 2026-05-09
+**Date:** 2026-05-11
 **Audience:** Security engineers and DevOps engineers deploying EXPOSE Core in lab, internal-corporate, or boutique-consultancy contexts.
 **Public name:** EXPOSE / **Internal codename:** FF6K
-**Source files cited:** `docs/SPEC.md`, `docs/adr/ADR-007-multi-tenancy.md`, `docs/adr/ADR-008-authorized-use-and-ethics.md`, `deploy/helm-chart/values.yaml`, `examples/tenant-config.yaml.template`.
+**Source files cited:** `docs/SPEC.md`, `docs/adr/ADR-007-multi-tenancy.md`, `docs/adr/ADR-008-authorized-use-and-ethics.md`, `deploy/helm-chart/values.yaml`, `examples/tenant-config.yaml.template`, `docker-compose.yml`, `src/expose/db/engine.py`, `deploy/grafana/README.md`.
 
 This is the **lighter on-ramp**. If you are a federal agency operator deploying EXPOSE Core inside an Authority To Operate boundary with NIST SP 800-53 control inheritance work, **stop reading this and use `docs/strategy/federal-customer-deployment-guide.md`** instead — it covers FedRAMP-ready posture, SSP boundary documentation, control mapping, CDM/SIEM integration, and 3PAO assessment touchpoints. This quickstart is for everyone else: a CTEM team mapping its own perimeter, a boutique red team standing up a per-engagement tenant, a research lab evaluating attribution methodology.
 
@@ -54,7 +54,46 @@ If any row is undecided, complete it before continuing — the chart install fai
 
 ---
 
-## 3. Step-by-step deploy
+## 3. Docker Compose deployment (lab / development)
+
+For local development, demos, or quick lab evaluation, EXPOSE ships a `docker-compose.yml` at the repository root. This stands up a Postgres 16 instance and the EXPOSE API server with automatic database migration.
+
+```bash
+# Clone and start.
+git clone https://github.com/korlogos/expose.git
+cd expose
+docker compose up -d
+```
+
+The Compose file provisions:
+
+| Service | Image | Ports | Notes |
+|---------|-------|-------|-------|
+| `postgres` | `postgres:16-alpine` | `5432` | Database `expose`, user `expose`, password `expose-dev`. Health-checked via `pg_isready`. |
+| `api` | Built from `Dockerfile` | `8090` | Runs `expose db upgrade` (Alembic migration) then `expose serve`. Depends on healthy Postgres. |
+
+```bash
+# Verify services are up.
+docker compose ps
+curl http://localhost:8090/healthz
+# => {"status": "ok"}
+```
+
+**Limitations of the Compose deployment:**
+
+- **No object storage** -- artifact signing and evidence storage require an S3-compatible backend not included in the Compose file. Add a MinIO service if needed.
+- **No secrets backend** -- credentials are stored in-process memory only. Use the `EXPOSE_SECRET_*` environment variables for dev (see Section 10 below).
+- **No NATS broker** -- the async pipeline (collector dispatch, event bus) requires NATS JetStream, not included in the Compose file. The API server runs in synchronous mode.
+- **Not for production.** For production-grade deployments, use the Helm chart (Section 4 below).
+
+```bash
+# Tear down.
+docker compose down -v   # -v removes the pgdata volume
+```
+
+---
+
+## 4. Helm chart deployment (production)
 
 These are the commands an operator runs. The chart is a Phase 1 skeleton (per `deploy/helm-chart/templates/NOTES.txt`); not every component is wired end-to-end yet. Treat this as the v1 GA target shape.
 
@@ -139,7 +178,7 @@ If pods are crash-looping at this point, the most common causes are: Postgres un
 
 ---
 
-## 4. First run — produce and verify a signed artifact
+## 5. First run -- produce and verify a signed artifact
 
 ```bash
 # Trigger a manual run for the default tenant. Smoke runs typically complete in
@@ -189,7 +228,7 @@ A successful verification prints `Verified OK`. If verification fails, **do not 
 
 ---
 
-## 5. Reading the artifact
+## 6. Reading the artifact
 
 The artifact conforms to `schemas/canonical-artifact-v1.json`. Decompress it once and inspect the top-level fields with `jq`:
 
@@ -229,7 +268,7 @@ jq '{
 
 ---
 
-## 6. Common operations
+## 7. Common operations
 
 ### Resize worker pools
 
@@ -332,20 +371,192 @@ kubectl exec -n expose deploy/expose-control-plane -- \
 
 ---
 
-## 7. Where to go next
+## 8. Environment variables reference
+
+The EXPOSE API server is configured via environment variables following the 12-factor convention. All variables use the `EXPOSE_` prefix.
+
+### Database connection (`EXPOSE_DB_*`)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `EXPOSE_DB_HOST` | `localhost` | PostgreSQL hostname or IP |
+| `EXPOSE_DB_PORT` | `5432` | PostgreSQL port |
+| `EXPOSE_DB_DATABASE` | `expose` | Database name |
+| `EXPOSE_DB_USER` | `expose` | Database user |
+| `EXPOSE_DB_PASSWORD` | (empty) | Database password |
+| `EXPOSE_DB_SSLMODE` | `prefer` | SSL mode (`prefer`, `require`, `verify-ca`, `verify-full`) |
+| `EXPOSE_DB_POOL_SIZE` | `20` | Connection pool size |
+| `EXPOSE_DB_MAX_OVERFLOW` | `10` | Maximum overflow connections |
+| `EXPOSE_DB_POOL_TIMEOUT` | `5` | Pool connection timeout (seconds) |
+| `EXPOSE_DB_POOL_PRE_PING` | `true` | Pre-ping connections before use |
+| `EXPOSE_DB_ECHO` | `false` | Echo SQL statements (debug only) |
+
+**Note:** The settings model uses `extra="forbid"` -- unknown `EXPOSE_DB_*` variables cause a startup failure. Do not pass `EXPOSE_DB_NAME` (use `EXPOSE_DB_DATABASE`).
+
+### Observability and audit
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `EXPOSE_AUDIT_LOG_PATH` | `./audit.log` | Path to the NIST SP 800-53 AU-2/AU-3 compliant audit log file |
+| `EXPOSE_NO_OTEL` | (unset) | Set to `1` to disable OpenTelemetry instrumentation |
+
+### LLM providers
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `EXPOSE_GEMINI_API_KEY` | (unset) | API key for the Gemini LLM provider |
+| `EXPOSE_OLLAMA_ENDPOINT` | (unset) | Endpoint URL for self-hosted Ollama |
+| `EXPOSE_{PROVIDER}_API_KEY` | (unset) | Generic pattern for LLM provider API keys |
+
+### Collector credentials (dev only)
+
+For development, collector credentials can be injected via environment variables using the pattern:
+
+```
+EXPOSE_SECRET_{TENANT_ID}_{KEY}=value
+```
+
+Tenant ID segments are uppercased with hyphens replaced by underscores. For the default tenant (`00000000-0000-0000-0000-000000000000`):
+
+```bash
+export EXPOSE_SECRET_00000000_0000_0000_0000_000000000000_API_KEY=sk-xxx
+```
+
+**Production deployments** must use a secrets backend (Vault, AWS Secrets Manager, Azure Key Vault, GCP Secret Manager) -- not environment variables.
+
+---
+
+## 9. Health check endpoints
+
+The EXPOSE API server exposes health endpoints for orchestrator probes:
+
+| Endpoint | Method | Auth | Purpose |
+|----------|--------|------|---------|
+| `/healthz` | `GET` | None | Liveness probe -- returns `{"status": "ok"}` immediately, no database dependency. Use for Kubernetes `livenessProbe`. |
+
+**Helm chart probe configuration** (from `deploy/helm-chart/values.yaml`):
+
+```yaml
+# These are the defaults; override in your values file if needed.
+controlPlane:
+  service:
+    port: 8000
+```
+
+**Docker Compose health check:**
+
+```bash
+curl -sf http://localhost:8090/healthz
+# => {"status": "ok"}
+```
+
+**Collector health** is a per-tenant, per-run concept. Check collector status after a run completes:
+
+```bash
+kubectl exec -n expose deploy/expose-control-plane -- \
+    expose collector health --tenant default
+```
+
+---
+
+## 10. Grafana dashboard import
+
+EXPOSE ships two Grafana dashboards in `deploy/grafana/`:
+
+| Dashboard | File | Description |
+|-----------|------|-------------|
+| EXPOSE Overview | `deploy/grafana/expose-overview.json` | Fleet-level view: run counts, collector success rates, pipeline latency, error rates across all tenants. |
+| EXPOSE Tenant | `deploy/grafana/expose-tenant.json` | Per-tenant drill-down: run history, attribution tier distribution, scope warnings, collector health timeline. |
+
+### Import procedure
+
+```bash
+# Option 1: Grafana UI
+# Navigate to Dashboards > Import > Upload JSON file.
+# Upload deploy/grafana/expose-overview.json and expose-tenant.json.
+# Select your Prometheus data source when prompted.
+
+# Option 2: Grafana API (provisioning)
+curl -X POST http://grafana.example.internal:3000/api/dashboards/db \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer <<grafana-api-key>>" \
+    -d @deploy/grafana/expose-overview.json
+
+curl -X POST http://grafana.example.internal:3000/api/dashboards/db \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer <<grafana-api-key>>" \
+    -d @deploy/grafana/expose-tenant.json
+
+# Option 3: Grafana provisioning sidecar (Helm)
+# Mount the JSON files into the Grafana provisioning directory:
+#   /etc/grafana/provisioning/dashboards/
+```
+
+The dashboards consume OpenTelemetry metrics exported by the EXPOSE pipeline. Ensure your OTLP backend (Section 2, row 6) is receiving metrics from the EXPOSE pods.
+
+See `deploy/grafana/README.md` for detailed setup instructions.
+
+---
+
+## 11. Scheduled scan configuration
+
+EXPOSE supports cron-scheduled runs via the Helm chart's `runSchedule` configuration and per-tenant overrides.
+
+### Default schedule
+
+The chart ships with a daily run at 02:00 UTC:
+
+```yaml
+# deploy/helm-chart/values.yaml
+runSchedule:
+  defaultCron: "0 2 * * *"  # 02:00 UTC daily
+```
+
+Override in your tenant config:
+
+```yaml
+# tenant-config.yaml
+runSchedule:
+  defaultCron: "0 6 * * 1"  # Weekly on Monday at 06:00 UTC
+```
+
+### Manual run trigger
+
+```bash
+# Trigger an immediate run outside the schedule.
+kubectl exec -n expose deploy/expose-control-plane -- \
+    expose run trigger --tenant default --reason "manual-smoke-test"
+```
+
+### Run frequency guidance
+
+| Use case | Recommended schedule | Rationale |
+|----------|---------------------|-----------|
+| CTEM perimeter monitoring | Daily (`0 2 * * *`) | Catch new CT log entries, DNS changes, cloud IP drift within 24h. |
+| Red team engagement | On-demand / twice daily | Tighter loop during active engagement windows. |
+| Compliance / audit | Weekly (`0 6 * * 1`) | Less aggressive; focuses on scope drift and removal tracking. |
+| Research / eval | On-demand only | Manual triggers per experiment; no background schedule. |
+
+### Cost control
+
+LLM enrichment (Phase 2) runs per-candidate and accumulates token costs. The `llmWorker.costCeilingUSD` value (default `$5.00` per run) caps spending. Monitor cost trends via the Grafana dashboards (Section 10) and adjust the ceiling or narrow the `enrichment_policy` if costs exceed expectations.
+
+---
+
+## 12. Where to go next
 
 | You are | Read |
 |---------|------|
-| **A federal agency operator** | `docs/strategy/federal-customer-deployment-guide.md` — the FedRAMP-ready, ATO-bounded, 3PAO-aware deployment playbook. |
+| **A federal agency operator** | `docs/strategy/federal-customer-deployment-guide.md` -- the FedRAMP-ready, ATO-bounded, 3PAO-aware deployment playbook. |
 | **A red team lead operating per-engagement tenants** | `examples/seeds/consulting-engagement.yaml` and `examples/scope/hard-mode-regulated.yaml` for the per-client tenant pattern. |
-| **A researcher evaluating attribution methodology** | `examples/seeds/research-test-bed.yaml` and `examples/scope/soft-mode-research.yaml`. The eval harness in Phase 2 (per SPEC §11.2) will be the next thing you want once it lands. |
-| **A CTEM team integrating with a SIEM** | SPEC §10.2 (Observability) for the OTLP integration; SPEC §9 (Artifact generation) for the ingestion contract. |
-| **An operator hitting comprehensive-ops questions** | SPEC §10 (Operations) — the operator-facing surface in the spec. |
+| **A researcher evaluating attribution methodology** | `examples/seeds/research-test-bed.yaml` and `examples/scope/soft-mode-research.yaml`. The eval harness in Phase 2 (per SPEC section 11.2) will be the next thing you want once it lands. |
+| **A CTEM team integrating with a SIEM** | SPEC section 10.2 (Observability) for the OTLP integration; SPEC section 9 (Artifact generation) for the ingestion contract. |
+| **An operator hitting comprehensive-ops questions** | SPEC section 10 (Operations) -- the operator-facing surface in the spec. |
 | **An operator with deeper questions than this guide answers** | The FAQ below; the SECURITY.md disclosure path for security questions; the GitHub Discussions for everything else. |
 
 ---
 
-## 8. FAQ
+## 13. FAQ
 
 **Q. Can I run EXPOSE without a Postgres or object store?**
 No. State is externalized by design (per `docs/adr/ADR-003-deployment-posture.md`). The chart can stand up an in-cluster Postgres and MinIO for lab/dev (`postgres.enabled: true`, `objectStorage.enabled: true`), but production deployments must point at managed services for backup, HA, and operational hygiene.
@@ -385,7 +596,7 @@ The artifact's `delta_from_previous_run` is the supported diff. For arbitrary in
 
 ---
 
-## 9. Where to file issues, request features, get help
+## 14. Where to file issues, request features, get help
 
 | What you have | Where it goes |
 |---------------|---------------|

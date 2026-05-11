@@ -150,6 +150,30 @@ KNOWN_SLOTS: list[_SlotDef] = [
         collector_ids=["dns-chaos"],
         backend_key="collector.dns-chaos.api_key",
     ),
+    _SlotDef(
+        credential_id="hibp_api_key",
+        display_name="Have I Been Pwned API Key",
+        collector_ids=["dark-web-indicators"],
+        backend_key="collector.dark-web-indicators.hibp_api_key",
+    ),
+    _SlotDef(
+        credential_id="intelx_api_key",
+        display_name="Intelligence X API Key",
+        collector_ids=["dark-web-indicators"],
+        backend_key="collector.dark-web-indicators.intelx_api_key",
+    ),
+    _SlotDef(
+        credential_id="dehashed_email",
+        display_name="DeHashed Account Email",
+        collector_ids=["dark-web-indicators"],
+        backend_key="collector.dark-web-indicators.dehashed_email",
+    ),
+    _SlotDef(
+        credential_id="dehashed_api_key",
+        display_name="DeHashed API Key",
+        collector_ids=["dark-web-indicators"],
+        backend_key="collector.dark-web-indicators.dehashed_api_key",
+    ),
 ]
 
 # Lookup tables for fast access

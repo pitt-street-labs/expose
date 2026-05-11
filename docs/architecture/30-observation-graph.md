@@ -165,7 +165,7 @@ erDiagram
 
 ## Edge types — the typed relationships
 
-Edges are typed and directional. The v1 vocabulary per SPEC §5.3:
+Edges are typed and directional. The v1 vocabulary per SPEC §5.3, extended during the Tier A-D sprint with three additional edge types from the UI graph renderer and collector pipeline:
 
 | Edge type | From → To | Source | Notes |
 |---|---|---|---|
@@ -179,6 +179,38 @@ Edges are typed and directional. The v1 vocabulary per SPEC §5.3:
 | `in_cloud_range` | IP → CloudResource | cloud provider IP-range manifest match | high but not 1.0 (manifest staleness) |
 | `registrant_of` | Registrant → Organization | WHOIS contact role | inferred from public records |
 | `cloud_resource_belongs_to` | CloudResource → Organization | cloud-account-authoritative | confidence depends on attribution path |
+| `certificate_for` | Certificate → Domain/Subdomain | CT log / TLS handshake SAN match | complements `subject_alt_name_includes` |
+| `hosts` | IP → Service | port scan / service discovery | Tier 3 active probing |
+| `belongs_to` | Domain/IP → Organization | registrant pivot / M&A discovery | inferred from WHOIS + org graph |
+
+### D3 graph color mapping
+
+The observation graph visualization (`src/expose/ui/static/js/graph.js`) renders edges with distinct stroke colors per type. The `EDGE_COLORS` constant maps 10 edge types (9 named + default fallback):
+
+| Edge type | Color | Hex |
+|---|---|---|
+| `resolves_to` | green | `#4CAF50` |
+| `cname_for` | blue | `#2196F3` |
+| `mx_for` | orange | `#FF9800` |
+| `ns_for` | purple | `#9C27B0` |
+| `acquired_by` | red | `#F44336` |
+| `depends_on` | brown | `#795548` |
+| `certificate_for` | cyan | `#00BCD4` |
+| `hosts` | blue-grey | `#607D8B` |
+| `belongs_to` | yellow | `#FFEB3B` |
+| default (unlisted types) | muted blue | `#5b7ca3` |
+
+Link distances are also per-type (60-120 px range) so the force-directed layout clusters structurally related nodes (e.g., `belongs_to` at 60 px is tighter than `depends_on` at 120 px).
+
+### Provenance chain API
+
+The provenance chain endpoint (`GET /v1/tenants/{tenant_id}/entities/{entity_id}/provenance`) consolidates the full attribution evidence trail for a single entity:
+
+1. **Observations** — which collectors observed it, when, and what observation type.
+2. **Rules applied** — which attribution rules fired, their outcomes, and confidence deltas.
+3. **Relationships** — all edges (incoming and outgoing) with resolved target identifiers and types.
+
+The provenance chain is the primary trust-verification mechanism in the EXPOSE UI. It answers "why do we think this entity belongs to the target?" by surfacing every observation, rule evaluation, and relationship that contributed to the current attribution status. Per ADR-007, all queries are tenant-scoped; cross-tenant requests return 404 (intentional invisibility).
 
 ## Tenant scoping (everywhere)
 
@@ -237,3 +269,5 @@ Migration paths preserved per ADR-002 §"Alternatives considered" and §"When to
 - SPEC.md §5.5 — Retention
 - ADR-002 — Graph storage (Postgres normalized, AGE / Neo4j as migration paths)
 - ADR-007 — Multi-tenancy (tenant_id on every relevant table)
+- `src/expose/ui/static/js/graph.js` — D3 force-directed graph renderer (edge colors, link distances)
+- `src/expose/api/provenance.py` — Provenance chain API endpoint

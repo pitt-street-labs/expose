@@ -83,12 +83,39 @@ Per SPEC §8.1, the rule pack is applied to each candidate target. Rules fire in
 A rule consists of:
 
 - `rule_id`, `rule_version` — stable identifiers for audit.
-- `category` — informational classification (e.g., `high_confidence_join`, `registrant_pivot`).
+- `category` — informational classification (e.g., `high_confidence_join`, `registrant_pivot`, `infrastructure_correlation`, `naming_heuristic`, `cloud_authoritative`, `rejection_rule`).
 - `priority` — evaluation order (lower fires first).
-- `when` — boolean condition tree using a fixed predicate vocabulary.
+- `when` — boolean condition tree (`and`, `or`, `not` combinators) using a fixed predicate vocabulary.
 - `then` — action (`promote`, `demote`, `neutral`, `reject`) with optional confidence delta and review flag.
 
-The predicate vocabulary is **closed and versioned**. New predicates are added via engine updates, not via rule pack changes. This prevents rule packs from extending the predicate surface in arbitrary ways. Rule packs are data, not code; the engine consumes them, applies them, and never executes arbitrary code from them.
+The predicate vocabulary is **closed and versioned** — the `Predicate` enum in `expose.types.rulepack` IS the vocabulary. New predicates are added via engine updates, not via rule pack changes. Unknown predicates are rejected at load time, not silently ignored. Rule packs are data, not code; the engine consumes them, applies them, and never executes arbitrary code from them.
+
+### The 12 predicates (v1)
+
+The rule evaluator implements 12 predicates, each a pure function receiving `(entity_data, params, scope_context)`:
+
+| Predicate | What it checks |
+|---|---|
+| `target_has_certificate_with_san_in_scope` | TLS SAN matches any scope domain |
+| `target_ip_in_authorized_cloud_account_range` | IP falls within configured cloud CIDR ranges |
+| `target_registrant_matches_authorized_pattern` | WHOIS registrant fields match regex patterns |
+| `target_shares_cert_chain_with_attributed_target` | Cert chain fingerprint overlap with confirmed entities |
+| `target_nameserver_matches_authorized_pattern` | NS records match regex patterns |
+| `target_asn_in_authorized_list` | Entity ASN is in the tenant's authorized ASN list |
+| `target_subdomain_of_authorized_apex` | Entity is a subdomain of a confirmed apex domain |
+| `target_in_explicit_authorization_scope` | Entity is in the tenant's explicit identifier list |
+| `target_observed_by_collectors_count_gte` | Distinct collector count meets threshold |
+| `target_first_observed_within_days` | Entity first observed within N days |
+| `target_has_exposure_indicator` | Open ports, weak ciphers, or other exposure properties |
+| `target_responds_with_authorized_naming_convention` | HTTP response body/title matches naming patterns |
+
+### Seed attribution
+
+Seed entities (operator-provided apex domains, brand strings, known identifiers) receive `confirmed` / 1.0 attribution automatically per SPEC section 6.3. This is applied by `RunExecutor` before the rule pack evaluation pass, so seed entities bypass the rule engine and proceed directly to artifact generation.
+
+### Tier-3 dispatch gating
+
+Tier-3 collectors (active probing: DNS, TLS, HTTP, port surface) are gated on attribution outcome. The `PipelineDispatcher` checks each entity's attribution tier before dispatching an active collector. Entities without sufficient attribution (`not_yours`, `rejected`, or no attribution record) are refused, and the refusal is recorded in the `EnforcementLog` with structured event data (tenant, entity, collector, reason, enforcement mode, timestamp). The enforcement log is included in the run manifest.
 
 ## Tier outcomes — what each tier triggers
 
@@ -162,11 +189,22 @@ final_score = clamp(base_score * product(modifier.multiplier for modifier in mat
 
 The lead score is independent of the attribution tier. Two `confirmed` targets can have very different lead scores; a `medium` target may have a higher lead score than a `confirmed` target if its exposure indicators are more concerning. Same formula version + same inputs → same score (deterministic, auditable).
 
+## Eval harness for attribution testing
+
+The eval harness (`expose eval` CLI subcommand, `src/expose/eval/`) measures attribution accuracy against held-out datasets. Four dataset categories are provided in `examples/eval-datasets/`: `confirmed_yours`, `confirmed_not_yours`, `ambiguous`, and `adversarial`. Each dataset is a JSON file containing `EvalCase` instances with synthetic observations and expected attribution outcomes.
+
+The `EvalRunner` accepts an injectable `AttributionFn`. It can wrap a `RuleEvaluator` via `EvalRunner.from_rule_evaluator()` to benchmark a real rule-pack-driven attribution function against the naive stub baseline. The harness produces `EvalMetrics` (precision, recall, F1, confusion matrix) per dataset category and overall.
+
+Usage:
+
+```
+expose eval --dataset confirmed_yours --rulepack examples/rulepacks/example-baseline.json
+expose eval --all --rulepack examples/rulepacks/example-baseline.json
+```
+
 ## What this diagram intentionally omits
 
-- The specific predicate vocabulary (versioned in `schemas/rulepack-v1.json`).
 - The exact JSON schemas for each enrichment job's output (covered by the LLM-quality epic in `docs/issues-backlog.md`).
-- The eval harness that measures attribution accuracy on held-out datasets (Phase 2 deliverable; eval-harness epic).
 - The tie-breaker provider selection logic when escalation is enabled.
 - The per-tenant LLM cost dashboard wiring (production-hardening).
 
@@ -181,4 +219,9 @@ The lead score is independent of the attribution tier. Two `confirmed` targets c
 - ADR-005 — LLM integration (multi-frontier provider with Ollama alternative)
 - `examples/rulepacks/example-baseline.json` — working example rule pack
 - `schemas/rulepack-v1.json` — formal rule pack schema
-- `docs/issues-backlog.md` — `epic:llm-quality` (3 issues), `epic:eval-harness` (1 issue)
+- `src/expose/pipeline/rule_evaluator.py` — 12-predicate rule evaluation engine
+- `src/expose/pipeline/lead_scoring.py` — Multi-signal lead scoring engine
+- `src/expose/pipeline/enforcement.py` — Scope enforcement logging
+- `src/expose/eval/` — Eval harness (runner, datasets, metrics)
+- `examples/eval-datasets/` — Four eval dataset categories
+- `docs/issues-backlog.md` — `epic:llm-quality` (3 issues)

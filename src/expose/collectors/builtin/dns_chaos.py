@@ -11,8 +11,8 @@ keys depending on the endpoint version).
 
 The API offers enhanced results with an API key (``Authorization`` header),
 but the public tier provides useful subdomain discovery without credentials.
-When an API key is provided via ``credentials["api_key"]``, it is sent in
-the ``Authorization`` header for expanded results.
+When an API key is provided via ``credentials["chaos_api_key"]``, it is sent
+in the ``Authorization`` header for expanded results.
 
 Tier 1 / passive: queries a third-party aggregation API. No direct
 contact with the target domain.
@@ -74,7 +74,7 @@ class DnsChaosCollector(Collector):
 
         Returns an empty dict when no key is configured (public-tier access).
         """
-        api_key_cred = self.config.credentials.get("api_key")
+        api_key_cred = self.config.credentials.get("chaos_api_key")
         if api_key_cred is not None and api_key_cred.secret_value:
             return {"Authorization": api_key_cred.secret_value}
         return {}

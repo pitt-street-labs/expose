@@ -24,7 +24,7 @@ pip install uv
 # Install all dependencies (including dev and test extras)
 uv sync --all-extras
 
-# Run the test suite -- 1059 tests should pass
+# Run the test suite (3500+ tests)
 uv run pytest
 
 # Run type checking
@@ -61,6 +61,8 @@ The project enforces strict code quality standards through CI and pre-commit hoo
 
 **Testing.** [pytest](https://docs.pytest.org/) with `pytest-asyncio` for async tests. All external HTTP calls must be mocked with [respx](https://lundberg.github.io/respx/) -- no live network calls in the test suite. Database tests use testcontainers for real Postgres instances in CI and aiosqlite for fast local runs.
 
+**FIPS crypto gate.** The test suite includes a banned-import scanner (`tests/test_fips_crypto_gate.py`) that blocks direct use of `hashlib`, `secrets`, or `pycryptodome` in the `src/expose/` tree. All cryptographic operations must go through the FIPS adapter at `src/expose/crypto/fips_adapter.py`, which uses the `cryptography` library in FIPS mode (per ADR-010). CI enforces this gate on every PR.
+
 **Pre-commit hooks.** The repository includes a `.pre-commit-config.yaml` with ruff, gitleaks (secret scanning), JSON Schema validation, and Helm lint. Install hooks with:
 
 ```bash
@@ -77,7 +79,7 @@ Create a new file at `src/expose/collectors/builtin/your_collector.py`. Every co
 
 - Subclass `Collector` from `expose.collectors.base`
 - Use the `@register_collector` decorator from `expose.collectors.registry`
-- Declare class-level metadata: `collector_id`, `collector_version`, `tier`, and `requires_credentials`
+- Declare class-level metadata: `collector_id`, `collector_version`, `tier`, `requires_credentials`, and `technique_ids`
 - Implement two async methods: `expand()` and `health_check()`
 
 ```python
@@ -92,6 +94,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from typing import ClassVar
 
 import httpx
 
@@ -121,6 +124,7 @@ class YourCollector(Collector):
     collector_version: str = "0.1.0"
     tier: CollectorTier = CollectorTier.TIER_1  # or TIER_2, TIER_3
     requires_credentials: bool = False
+    technique_ids: ClassVar[list[str]] = ["T1596"]  # MITRE ATT&CK Reconnaissance
 
     def __init__(self, config: CollectorConfig) -> None:
         super().__init__(config)
@@ -196,6 +200,24 @@ Collectors are tiered by sensitivity (SPEC section 6.3):
 
 Choose the appropriate tier for your collector. Tier 3 collectors have additional dispatch constraints enforced by the pipeline -- you do not need to implement the gating logic yourself.
 
+### Step 2b: Declare MITRE ATT&CK technique IDs
+
+Every collector **must** declare a `technique_ids` class variable mapping it to one or more MITRE ATT&CK Reconnaissance (TA0043) technique IDs. This is a `ClassVar[list[str]]` on the `Collector` ABC (see `src/expose/collectors/base.py`). Examples from existing collectors:
+
+| Technique | Description | Example collectors |
+|-----------|-------------|-------------------|
+| `T1596` | Search Open Technical Databases | `scan-shodan`, `scan-censys`, `otx-alienvault` |
+| `T1596.001` | DNS/Passive DNS | `active-dns`, `bgp-he-toolkit`, `dns-passive-history` |
+| `T1596.003` | Digital Certificates | `ct-crtsh`, `ct-censys`, `ct-certspotter` |
+| `T1593` | Search Open Websites/Domains | `wayback-machine`, `common-crawl` |
+| `T1592.004` | Client Configurations | `active-http`, `waf-origin-discovery` |
+| `T1046` | Network Service Discovery | `active-port-surface` |
+| `T1526` | Cloud Service Discovery | `cloud-storage-exposure` |
+| `T1597` | Search Closed Sources | `dark-web-indicators` |
+| `T1589.002` | Email Addresses | `email-auth` |
+
+The technique IDs flow into the canonical artifact and rule pack evaluation. Do not leave `technique_ids` empty.
+
 ### Step 3: Write tests
 
 Create `tests/test_your_collector.py`. All collector tests must mock HTTP interactions -- no live network calls.
@@ -257,6 +279,32 @@ All data from external sources must pass through the sanitization layer (`expose
 
 Before writing a new collector, open an issue describing the data source, why it adds value, any rate limits or licensing constraints, and which seed types it supports. Some data sources are commercial-only and require operator-provided credentials; those are welcome as long as the engine code itself remains freely usable.
 
+## Contributing a rule pack
+
+Rule packs are data, not code (per SPEC section 8.2). They define attribution rules, lead-score formulas, and evidence-weighting parameters that the rule evaluator (`src/expose/pipeline/rule_evaluator.py`) applies to the observation graph.
+
+**Public example rule packs** ship in `examples/rulepacks/` -- `example-baseline.json`, `cloud-first.json`, and `conservative.json`. These are validated by CI against the JSON Schema at `schemas/rulepack-v1.json`.
+
+### What belongs in the public repo
+
+- **Example rule packs** demonstrating different attribution strategies (conservative, aggressive, industry-specific templates).
+- **Schema changes** to `schemas/rulepack-v1.json` when the rule pack format evolves (these require an ADR amendment discussion first).
+- **Rule evaluator improvements** in `src/expose/pipeline/rule_evaluator.py` that change how rules are interpreted.
+- **Eval dataset entries** in `examples/eval-datasets/` that exercise rule pack edge cases.
+
+### What does NOT belong in the public repo
+
+- **Customer-specific or engagement-specific rule packs.** These belong in private repositories, not the open-source engine. The engine is designed to consume rule packs by reference (`pack_id` + `pack_version`); the pack content itself is operator-provided.
+- **Proprietary intelligence feeds** embedded as rule pack data.
+
+### Adding a new example rule pack
+
+1. Create a new JSON file in `examples/rulepacks/`.
+2. Validate it against the schema: `check-jsonschema --schemafile schemas/rulepack-v1.json examples/rulepacks/your-pack.json`
+3. Write tests in `tests/` that load the pack and verify it against at least one eval dataset from `examples/eval-datasets/`.
+4. Add a brief description to `examples/rulepacks/README.md`.
+5. Open a PR with the pack, tests, and README update.
+
 ## Commit conventions
 
 Subject line under 72 characters, imperative mood ("Add" not "Added"), no trailing period. Use [Conventional Commits](https://www.conventionalcommits.org/) prefixes:
@@ -313,7 +361,7 @@ git rebase --signoff main
 2. **Write your changes** with DCO sign-off on every commit.
 3. **Add tests.** New collectors need tests with mocked HTTP; bug fixes need regression tests; new attribution rules need rule-pack validation tests.
 4. **Update documentation** as appropriate. SPEC.md changes for architectural decisions, ADR additions for design decisions, README updates for user-facing behavior.
-5. **Run the full test suite** locally: `uv run pytest` (all 1059 tests should pass).
+5. **Run the full test suite** locally: `uv run pytest` (all tests should pass).
 6. **Run linting and type checking:** `uv run ruff check src/ && uv run mypy src/`
 7. **Open the PR** with a clear description: what changed, why, and any operational implications.
 8. **Respond to review feedback.** Maintainers may request changes; please be patient as we balance review work with other priorities.

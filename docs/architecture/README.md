@@ -1,7 +1,7 @@
 # EXPOSE -- Architecture Diagrams
 
 **Status:** Advisory -- visual companions to the locked spec, not a substitute for it.
-**Date:** 2026-05-10
+**Date:** 2026-05-11 (refreshed after Tier A-D sprint)
 **Public name:** EXPOSE (EXtended Perimeter Ontology Security Evaluation)
 
 This directory holds Mermaid-rendered architecture diagrams for EXPOSE. Each diagram visualizes one slice of the system as defined in the locked spec (`docs/SPEC.md`) and the architecture decision records (`docs/adr/`). The diagrams are reference material for technical reviewers, federal customers, and onboarding engineers; the spec remains the source of truth when the two appear to disagree.
@@ -17,7 +17,7 @@ GitHub renders Mermaid natively. Each `.md` file in this directory contains one 
 **Type:** Flowchart
 **Spec anchor:** SPEC section 4 (Pipeline Architecture)
 
-The five-stage Environment 1 pipeline with trust-boundary annotations and deterministic-vs-LLM markers. Shows the flow from seed ingestion through collection, sanitization, graph construction, and attribution to the signed canonical artifact. Start here for a top-level understanding of what EXPOSE does.
+The Environment 1 pipeline with trust-boundary annotations and deterministic-vs-LLM markers. Shows the flow from seed ingestion through collection, sanitization, graph construction, rule-based attribution (12 predicates), vision analysis (Stage 4c), lead scoring (post-upsert), enforcement logging, and SSE event publishing to the signed canonical artifact. Start here for a top-level understanding of what EXPOSE does.
 
 ### [10 -- Two-Environment Model](./10-two-environment-model.md)
 
@@ -38,7 +38,7 @@ Container topology showing the control plane, three worker types (collector, sca
 **Type:** ER diagram
 **Spec anchor:** SPEC sections 5.2-5.3, ADR-001
 
-The typed observation graph -- 10 entity types, 10 edge types, tenant scoping, and evidence references. All entity tables include `tenant_id` per ADR-007. Shows the data model that backs the pipeline's storage layer and the canonical artifact's target section.
+The typed observation graph -- 10 entity types, 13 edge types (10 original + 3 new: `certificate_for`, `hosts`, `belongs_to`), tenant scoping, and evidence references. All entity tables include `tenant_id` per ADR-007. Now includes D3 color mapping (10 edge-type stroke colors), link distances, and the provenance chain API. Shows the data model that backs the pipeline's storage layer and the canonical artifact's target section.
 
 ### [40 -- Multi-Tenancy](./40-multi-tenancy.md)
 
@@ -59,14 +59,14 @@ The `EgressProfile` abstraction with four implementations: direct, SOCKS5, WireG
 **Type:** Flowchart
 **Spec anchor:** SPEC section 8 (Attribution), ADR-005, ADR-006
 
-Two-pass attribution: rule-based scoring (Stage 4a) maps entities to attribution tiers, then optional `SafeLLMClient`-wrapped LLM enrichment (Stage 4b) produces enriched candidates. Shows how the deterministic and non-deterministic paths interact and where the trust boundary lies.
+Two-pass attribution: rule-based scoring (Stage 4a) with a 12-predicate vocabulary maps entities to attribution tiers (including seed auto-confirmation at `confirmed`/1.0), then optional `SafeLLMClient`-wrapped LLM enrichment (Stage 4b) produces enriched candidates. Now documents the full predicate table, seed attribution, Tier-3 dispatch gating on attribution, enforcement logging, and the eval harness CLI for attribution accuracy testing. Shows how the deterministic and non-deterministic paths interact and where the trust boundary lies.
 
 ### [70 -- Product Surfaces](./70-product-surfaces.md)
 
 **Type:** Component graph
 **Spec anchor:** ADR-009 (Open-Core Licensing)
 
-The four product surfaces: EXPOSE Core (Apache 2.0), EXPOSE Threat Context (proprietary), EXPOSE Identity Surface (proprietary), and EXPOSE Research (proprietary dataset). Shows the license boundaries between open-source and commercial components and what ships with the free tier vs. paid modules.
+The four product surfaces: EXPOSE Core (Apache 2.0), EXPOSE Threat Context (proprietary), EXPOSE Identity Surface (proprietary), and EXPOSE Research (CC BY 4.0 dataset). Now documents implemented module code: dark web enricher (Threat Context), registrant pivot + org graph (Identity Surface), and eval harness CLI (Research). Includes SOC threat package concept (#115) and CISO report concept (#113) as planned product outputs. Shows the license boundaries between open-source and commercial components and what ships with the free tier vs. paid modules.
 
 ### [80 -- Federal Deployment Pattern](./80-federal-deployment-pattern.md)
 
@@ -74,6 +74,20 @@ The four product surfaces: EXPOSE Core (Apache 2.0), EXPOSE Threat Context (prop
 **Spec anchor:** Federal Customer Deployment Guide (docs/strategy/)
 
 The federal-customer self-host pattern showing: agency ATO boundary, EXPOSE Core sub-boundary, CDM/SIEM ingestion points, dedicated cloud egress, and the EXPOSE update channel as the only inbound exception. Designed for SSP appendix preparation and FedRAMP-equivalent positioning.
+
+### [90 -- Egress Flow](./90-egress-flow.md)
+
+**Type:** Flowchart + component graph
+**Spec anchor:** SPEC section 6.3, ADR-003, ADR-008
+
+The full egress decision path for Tier-3 active collectors: attribution gate, IP Guard SSRF validation, egress profile selection with fallback chain, and connection to target infrastructure via five egress mechanisms (direct, SOCKS5, HTTP CONNECT, WireGuard, Tor). Also includes the deployment topology showing the optional egress gateway. Complements diagram 50 with a sequential decision-flow perspective.
+
+### [95 -- Dependency Map and Pipeline Stages](./95-dependency-map.md)
+
+**Type:** Dependency graph + detailed flowchart
+**Spec anchor:** SPEC section 4 (Pipeline Architecture), SPEC section 11, ADR-003, ADR-005
+
+Two operational reference views. The dependency map separates required infrastructure (Python 3.12+, PostgreSQL 16+) from optional dependencies organized by feature (active scanning, LLM enrichment, SIEM export, collector APIs, object storage, build tooling). The pipeline stages diagram traces the full flow from seed through all processing stages to signed artifact, showing every intermediate step including supply chain inference, lead scoring, vision analysis, and enforcement logging.
 
 ---
 
@@ -92,8 +106,10 @@ For a first-time reader, the recommended sequence is:
 | 7 | `50-scanner-egress` | How active probing is isolated from the operator's own IP space |
 | 8 | `70-product-surfaces` | How Core relates to the commercial modules and the research dataset |
 | 9 | `80-federal-deployment-pattern` | How a federal agency self-hosts within an existing ATO |
+| 10 | `90-egress-flow` | How the egress decision chain works, step by step |
+| 11 | `95-dependency-map` | What you need to deploy, and how the full pipeline flows |
 
-A reviewer focused on the open-source engine alone can stop after diagram 6. A reviewer evaluating commercial structure or federal procurement should read through diagram 9.
+A reviewer focused on the open-source engine alone can stop after diagram 6. A reviewer evaluating commercial structure or federal procurement should read through diagram 9. Diagrams 10 and 11 are operational references for deployers and contributors.
 
 ---
 
@@ -114,7 +130,7 @@ A reviewer focused on the open-source engine alone can stop after diagram 6. A r
 - **Mermaid features used:** `flowchart TD` / `flowchart LR`, `sequenceDiagram`, `erDiagram`, `graph TB`. These render reliably in GitHub, GitLab, and most Markdown renderers (mkdocs-material, Obsidian, VS Code preview).
 - **Component names** match the spec exactly: `expose-control-plane`, `expose-collector-worker`, `expose-scanner-worker`, `expose-llm-worker`, `postgres`, `minio`, `ollama`, `vaultwarden`. Lowercase, hyphenated.
 - **Entity-type names** match SPEC section 5.2 exactly: `Domain`, `Subdomain`, `IP`, `CIDR`, `Certificate`, `Service`, `CloudResource`, `Organization`, `Registrant`, `ASN`. CamelCase singular.
-- **Edge-type names** match SPEC section 5.3 exactly: `resolves_to`, `presented_cert`, `subject_alt_name_includes`, `nested_under`, `same_registrant_as`, `hosted_in_asn`, `cohabits_ip_with`, `in_cloud_range`, `registrant_of`, `cloud_resource_belongs_to`. Snake_case.
+- **Edge-type names** include the 10 SPEC section 5.3 types (`resolves_to`, `presented_cert`, `subject_alt_name_includes`, `nested_under`, `same_registrant_as`, `hosted_in_asn`, `cohabits_ip_with`, `in_cloud_range`, `registrant_of`, `cloud_resource_belongs_to`) plus 3 types added during the Tier A-D sprint (`certificate_for`, `hosts`, `belongs_to`). Snake_case.
 - All entity tables in `erDiagram` blocks include `tenant_id` per ADR-007.
 - The internal codename never appears in diagram labels; only EXPOSE.
 

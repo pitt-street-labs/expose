@@ -1,0 +1,84 @@
+[
+  {
+    "_comment": "Event 1: Domain observation mapped to Splunk CIM DNS data model",
+    "index": "main",
+    "sourcetype": "expose:observation",
+    "host": "staging.acme-corp.com",
+    "source": "expose:tenant:f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    "event": {
+      "tenant_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "entity_identifier": "staging.acme-corp.com",
+      "entity_type": "domain",
+      "observation_type": "dns_resolution",
+      "collector_id": "dns-resolver",
+      "observed_at": "2026-05-11T02:31:05Z",
+      "severity": "informational",
+      "raw_data": {
+        "record_type": "A",
+        "value": "203.0.113.42",
+        "ttl": 300
+      },
+      "src": null,
+      "dest": null,
+      "dest_port": null,
+      "transport": null,
+      "app": null,
+      "query": "staging.acme-corp.com",
+      "query_type": "A",
+      "cim_data_model": "DNS"
+    }
+  },
+  {
+    "_comment": "Event 2: IP observation mapped to Splunk CIM Network Traffic data model",
+    "index": "main",
+    "sourcetype": "expose:observation",
+    "host": "203.0.113.42",
+    "source": "expose:tenant:f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    "event": {
+      "tenant_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "entity_identifier": "203.0.113.42",
+      "entity_type": "ip",
+      "observation_type": "port_scan",
+      "collector_id": "port-scanner",
+      "observed_at": "2026-05-11T02:32:15Z",
+      "severity": "critical",
+      "raw_data": {
+        "open_ports": [22, 80, 3389, 8080],
+        "service_banners": {
+          "22": "OpenSSH_8.9p1",
+          "80": "Apache/2.4.58",
+          "3389": "Microsoft Terminal Services",
+          "8080": "Jetty/9.4.51"
+        }
+      },
+      "src": "203.0.113.42",
+      "dest": null,
+      "dest_port": null,
+      "transport": "tcp",
+      "app": "port-scanner",
+      "cim_data_model": "Network_Traffic"
+    }
+  },
+  {
+    "_comment": "Event 3: Finding mapped to Splunk CIM with expose:finding sourcetype",
+    "index": "main",
+    "sourcetype": "expose:finding",
+    "host": "staging.acme-corp.com",
+    "source": "expose:tenant:f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    "event": {
+      "tenant_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "finding_id": "finding-staging-001",
+      "title": "Staging environment exposed to internet",
+      "severity": "critical",
+      "description": "Staging environment exposed to internet with no TLS, directory listing enabled, and default credentials detected. Immediate remediation required.",
+      "entity_identifier": "staging.acme-corp.com",
+      "entity_type": "domain",
+      "indicators": [
+        { "indicator": "no_tls", "severity": "high" },
+        { "indicator": "directory_listing", "severity": "high" },
+        { "indicator": "default_credentials", "severity": "critical" },
+        { "indicator": "non_production_exposed", "severity": "critical" }
+      ]
+    }
+  }
+]

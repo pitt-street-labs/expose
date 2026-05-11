@@ -1,7 +1,7 @@
 # EXPOSE -- Collector Catalog
 
 **Status:** Advisory -- visual companion to the locked spec, not a substitute for it.
-**Date:** 2026-05-10
+**Date:** 2026-05-11
 **Spec references:** SPEC.md section 6 (Collectors), section 6.3 (Tier Model), section 6.4 (Credentials), ADR-008 (Authorized Use), ADR-010 (FIPS Crypto)
 
 This document catalogs every built-in collector shipped with EXPOSE, their tier classification, data sources, accepted seed types, produced observation types, and credential requirements. It is generated from source and kept in sync with the implementation.
@@ -10,22 +10,49 @@ This document catalogs every built-in collector shipped with EXPOSE, their tier 
 
 ## Summary Table
 
-| Collector ID | Tier | Source | Seeds | Observations | Credentials | Status |
-|---|---|---|---|---|---|---|
-| `ct-crtsh` | T1 | crt.sh | Domain | CT_LOG_ENTRY | No | Stable |
-| `ct-certstream` | T1 | crt.sh (recency-filtered) | Domain | CT_LOG_ENTRY | No | Stable |
-| `cloud-ranges` | T1 | AWS/Azure/GCP manifests | IP, CIDR | CLOUD_IP_RANGE | No | Stable |
-| `rdap-whois` | T1 | rdap.org (RFC 9083) | Domain, IP | RDAP_REGISTRATION | No | Stable |
-| `bgp-he-toolkit` | T1 | bgp.he.net | IP, ASN | BGP_ASN_LOOKUP | No | Stable |
-| `bgp-ripestat` | T1 | stat.ripe.net | IP, ASN | BGP_ASN_LOOKUP | No | Stable |
-| `bgp-team-cymru` | T1 | Team Cymru DNS | IP | BGP_ASN_LOOKUP | No | Stable |
-| `spf-dkim-dmarc` | T1 | DNS (TXT records) | Domain | DNS_RECORD | No | Stable |
-| `github-exposed` | T1 | api.github.com | Domain, Organization | SCANNER_HOST | Optional | Stable |
-| `favicon-hash` | T2 | Target host HTTP | Domain, IP | HTTP_RESPONSE | No | Stable |
-| `active-dns-resolve` | T3 | System DNS resolver | Domain | DNS_RESOLUTION | No | Stable |
-| `active-tls-handshake` | T3 | Target host TLS | Domain, IP | TLS_HANDSHAKE | No | Stable |
-| `active-http-fingerprint` | T3 | Target host HTTP | Domain, IP | HTTP_RESPONSE | No | Stable |
-| `active-port-surface` | T3 | Target host TCP | IP | PORT_SCAN_RESULT | No | Stable |
+| # | Collector ID | Tier | Category | Seeds | ATT&CK | Credentials | Status |
+|---|---|---|---|---|---|---|---|
+| 1 | `ct-crtsh` | T1 | Certificate Transparency | Domain | T1596.003 | No | Stable |
+| 2 | `ct-censys` | T1 | Certificate Transparency | Domain | T1596.003 | Required | Stable |
+| 3 | `ct-certspotter` | T1 | Certificate Transparency | Domain | T1596.003 | No | Stable |
+| 4 | `ct-certstream` | T1 | Certificate Transparency | Domain | T1596.003 | No | Stable |
+| 5 | `active-dns-resolve` | T3 | DNS | Domain | T1596.001 | No | Stable |
+| 6 | `dns-subdomain-enum` | T3 | DNS | Domain | T1596.001 | No | Stable |
+| 7 | `dns-chaos` | T1 | DNS | Domain | T1596.001 | Optional | Stable |
+| 8 | `dns-zone-transfer` | T3 | DNS | Domain | T1596.001 | No | Stable |
+| 9 | `dns-passive-history` | T1 | DNS | Domain, IP | T1596.001 | Required | Stable |
+| 10 | `dns-reverse-ptr` | T2 | DNS | IP | T1596.001 | No | Stable |
+| 11 | `dns-blacklist` | T1 | DNS | IP | T1596.001 | No | Stable |
+| 12 | `bgp-ripestat` | T1 | BGP/ASN | IP, ASN | -- | No | Stable |
+| 13 | `bgp-he-toolkit` | T1 | BGP/ASN | IP, ASN | -- | No | Stable |
+| 14 | `bgp-team-cymru` | T1 | BGP/ASN | IP | -- | No | Stable |
+| 15 | `active-http-fingerprint` | T3 | HTTP/Web | Domain, IP | -- | No | Stable |
+| 16 | `robots-txt` | T2 | HTTP/Web | Domain | T1592.004 | No | Stable |
+| 17 | `security-txt` | T1 | HTTP/Web | Domain | T1592.004 | No | Stable |
+| 18 | `favicon-hash` | T2 | HTTP/Web | Domain, IP | -- | No | Stable |
+| 19 | `waf-detection` | T2 | HTTP/Web | Domain, IP | T1592.004 | No | Stable |
+| 20 | `screenshot-vision` | T2 | HTTP/Web | Domain, IP | T1592.004 | No | Stable |
+| 21 | `cloud-ranges` | T1 | Cloud | IP, CIDR | -- | No | Stable |
+| 22 | `cloud-storage-exposure` | T1 | Cloud | Organization, Domain | T1526 | No | Stable |
+| 23 | `github-exposed` | T1 | Code | Domain, Organization | -- | Optional | Stable |
+| 24 | `git-commit-emails` | T2 | Code | Organization, Domain | T1593.003 | Required | Stable |
+| 25 | `spf-dkim-dmarc` | T1 | Email | Domain | -- | No | Stable |
+| 26 | `mail-headers` | T1 | Email | Domain | T1598 | No | Stable |
+| 27 | `scan-shodan` | T1 | Scan Aggregators | Domain, IP | T1596 | Required | Stable |
+| 28 | `scan-censys` | T1 | Scan Aggregators | Domain, IP | T1596 | Required | Stable |
+| 29 | `scan-binaryedge` | T1 | Scan Aggregators | Domain, IP | T1596 | Required | Stable |
+| 30 | `wayback-machine` | T1 | Historical | Domain, IP | -- | No | Stable |
+| 31 | `common-crawl` | T1 | Historical | Domain | -- | No | Stable |
+| 32 | `rdap-whois` | T1 | Specialized | Domain, IP | -- | No | Stable |
+| 33 | `ma-discovery` | T1 | Specialized | Organization | -- | No | Stable |
+| 34 | `sip-discovery` | T1 | Specialized | Domain | -- | No | Stable |
+| 35 | `wikipedia-edits` | T1 | Specialized | Organization, Domain | -- | No | Stable |
+| 36 | `paste-monitor` | T2 | Specialized | Domain, Organization | -- | Optional | Stable |
+| 37 | `otx-alienvault` | T1 | Specialized | Domain | T1596 | Optional | Stable |
+| 38 | `waf-origin-discovery` | T2 | Specialized | Domain, IP | -- | No | Stable |
+| 39 | `active-port-surface` | T3 | Specialized | IP | -- | No | Stable |
+| 40 | `active-tls-handshake` | T3 | Specialized | Domain, IP | -- | No | Stable |
+| 41 | `dark-web-indicators` | T3 | Specialized | Domain | T1597 | Required | Stable |
 
 ---
 
@@ -62,7 +89,7 @@ EXPOSE classifies collectors into three tiers based on the sensitivity of the da
 
 ---
 
-## 2. Tier 1 -- Passive, Broad
+## 2. Certificate Transparency
 
 ### ct-crtsh
 
@@ -75,20 +102,46 @@ EXPOSE classifies collectors into three tiers based on the sensitivity of the da
 | **Data source** | [crt.sh](https://crt.sh/) JSON API |
 | **Seeds accepted** | `DOMAIN` |
 | **Observation type** | `CT_LOG_ENTRY` |
+| **ATT&CK** | T1596.003 (Search Open Technical Databases: Digital Certificates) |
 | **Credentials** | None |
-| **Rate limit** | Advisory (crt.sh has no published contract; may return 429 under heavy load) |
 
-Queries the crt.sh JSON API for certificates matching a domain seed (including subdomains via wildcard query `%.example.com`). crt.sh aggregates Certificate Transparency log entries from Google, Cloudflare, and DigiCert logs. Results include both pre-certificates and final certificates.
+Queries the crt.sh JSON API for certificates matching a domain seed (including subdomains via wildcard query `%.example.com`). crt.sh aggregates Certificate Transparency log entries from Google, Cloudflare, and DigiCert logs. Results include both pre-certificates and final certificates. Deduplication is performed within a single run by serial number.
 
-**Key payload fields:**
+---
 
-- `issuer_name` -- Certificate issuer (sanitized)
-- `common_name` -- Certificate common name (sanitized)
-- `sans` -- Subject Alternative Names (sanitized, 255-byte cap per SAN)
-- `not_before`, `not_after` -- Certificate validity window
-- `serial_number` -- Hex serial (lowercase), used as proxy identifier per ADR-010
+### ct-censys
 
-Deduplication is performed within a single run by serial number.
+| Field | Value |
+|---|---|
+| **Collector ID** | `ct-censys` |
+| **Class** | `CensysCertCollector` |
+| **Source file** | `src/expose/collectors/builtin/ct_censys.py` |
+| **Tier** | 1 (passive, broad) |
+| **Data source** | [Censys Certificates API v2](https://search.censys.io/api/v2) |
+| **Seeds accepted** | `DOMAIN` |
+| **Observation type** | `CT_LOG_ENTRY` |
+| **ATT&CK** | T1596.003 |
+| **Credentials** | Required: `censys_api_id`, `censys_api_secret` (HTTP Basic auth) |
+
+Alternate CT source when crt.sh is unavailable. Queries the Censys Certificates Search API for certificates matching a domain, extracting Subject Alternative Names (SANs) as subdomain entities. Distinct from `scan-censys` which searches the Censys *hosts* endpoint for port/service discovery. Self-rate-limits to 2 requests/second (Censys free tier).
+
+---
+
+### ct-certspotter
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `ct-certspotter` |
+| **Class** | `CertSpotterCollector` |
+| **Source file** | `src/expose/collectors/builtin/ct_certspotter.py` |
+| **Tier** | 1 (passive, broad) |
+| **Data source** | [CertSpotter / SSLMate API](https://api.certspotter.com/v1/issuances) |
+| **Seeds accepted** | `DOMAIN` |
+| **Observation type** | `CT_LOG_ENTRY` |
+| **ATT&CK** | T1596.003 |
+| **Credentials** | None |
+
+Free, no-auth-required CT backup. Queries CertSpotter for certificate issuances matching a domain (including subdomains). Filters out wildcard SANs (`*.example.com`). Uses the `tbs_sha256` fingerprint for deduplication. Includes an in-memory TTL cache (1 hour) to avoid redundant queries across repeated scans. Rate limited to 60 requests/minute.
 
 ---
 
@@ -103,83 +156,162 @@ Deduplication is performed within a single run by serial number.
 | **Data source** | [crt.sh](https://crt.sh/) JSON API (recency-filtered) |
 | **Seeds accepted** | `DOMAIN` |
 | **Observation type** | `CT_LOG_ENTRY` |
+| **ATT&CK** | T1596.003 |
 | **Credentials** | None |
-| **Rate limit** | Advisory (same as ct-crtsh) |
 
-Near-real-time Certificate Transparency monitoring. Queries the same crt.sh API as `ct-crtsh` but filters results to certificates issued within a configurable recency window (default: 24 hours). This simulates the behavior of a true certstream WebSocket feed without WebSocket complexity.
-
-The recency window is configurable via `config.extra["recency_hours"]`.
-
-**Key payload fields:** Same as `ct-crtsh`, plus:
-
-- `source` -- Always `"certstream"` (distinguishes from `ct-crtsh` output)
-- `recency_hours` -- The configured recency window
-
-A future version (v0.2+) will replace the polling approach with the Certstream WebSocket API (`wss://certstream.calidog.io/`).
+Near-real-time Certificate Transparency monitoring. Queries the same crt.sh API as `ct-crtsh` but filters results to certificates issued within a configurable recency window (default: 24 hours). Configurable via `config.extra["recency_hours"]`. A future version (v0.2+) will replace the polling approach with the Certstream WebSocket API.
 
 ---
 
-### cloud-ranges
+## 3. DNS
+
+### active-dns-resolve
 
 | Field | Value |
 |---|---|
-| **Collector ID** | `cloud-ranges` |
-| **Class** | `CloudRangesCollector` |
-| **Source file** | `src/expose/collectors/builtin/cloud_ranges.py` |
-| **Tier** | 1 (passive, broad) |
-| **Data source** | AWS, Azure, GCP IP range manifests (cached on disk) |
-| **Seeds accepted** | `IP`, `CIDR` |
-| **Observation type** | `CLOUD_IP_RANGE` |
+| **Collector ID** | `active-dns-resolve` |
+| **Class** | `ActiveDnsCollector` |
+| **Source file** | `src/expose/collectors/builtin/active_dns.py` |
+| **Tier** | 3 (active, attribution-gated) |
+| **Data source** | System DNS resolver (or configured egress-profile nameservers) |
+| **Seeds accepted** | `DOMAIN` |
+| **Observation type** | `DNS_RESOLUTION` |
+| **ATT&CK** | T1596.001 (Search Open Technical Databases: DNS/Passive DNS) |
 | **Credentials** | None |
-| **Rate limit** | N/A (local lookup, no network calls during expand) |
+| **Optional dependency** | `dnspython` (install via `expose[collectors-dns]`) |
 
-Compares seed IP addresses and CIDR blocks against pre-cached cloud provider IP range manifests. Matches indicate which cloud provider, region, and service own a given address.
-
-The collector loads range data from cached JSON files on disk (fetched daily from provider endpoints in production). The cache directory is configured via `config.extra["ranges_dir"]`. Expected files:
-
-- `aws-ip-ranges.json` -- from `https://ip-ranges.amazonaws.com/ip-ranges.json`
-- `azure-ip-ranges.json` -- from Microsoft's ServiceTags download
-- `gcp-ip-ranges.json` -- from `https://www.gstatic.com/ipranges/cloud.json`
-
-Per SPEC section 6.1, this collector never makes live network calls during `expand()`. All lookups are against in-memory data loaded at construction time.
-
-**Key payload fields:**
-
-- `provider` -- Cloud provider name (`aws`, `azure`, `gcp`)
-- `region` -- Provider region/scope
-- `service` -- Provider service name
-- `prefix` -- The matching cloud CIDR prefix
+Performs active DNS resolution against target domains, querying A, AAAA, CNAME, MX, NS, TXT, and SOA record types. On NXDOMAIN, emits no observations. Individual record-type failures are skipped without failing the whole expansion. Supports egress profile integration for alternate nameservers.
 
 ---
 
-### rdap-whois
+### dns-subdomain-enum
 
 | Field | Value |
 |---|---|
-| **Collector ID** | `rdap-whois` |
-| **Class** | `RdapWhoisCollector` |
-| **Source file** | `src/expose/collectors/builtin/rdap_whois.py` |
+| **Collector ID** | `dns-subdomain-enum` |
+| **Class** | `SubdomainEnumCollector` |
+| **Source file** | `src/expose/collectors/builtin/dns_subdomain_enum.py` |
+| **Tier** | 3 (active, attribution-gated) |
+| **Data source** | System DNS resolver |
+| **Seeds accepted** | `DOMAIN` |
+| **Observation type** | `DNS_RESOLUTION` |
+| **ATT&CK** | T1596.001 |
+| **Credentials** | None |
+| **Optional dependency** | `dnspython` (install via `expose[collectors-dns]`) |
+
+Wordlist-based subdomain discovery. Resolves `{word}.{apex}` for each word in the configured wordlist via parallel A/AAAA queries (default: 50 concurrent, configurable). Includes wildcard detection -- before enumeration, resolves a random subdomain; if it resolves, all subsequent results matching those IPs are filtered out. Also resolves CNAME chains for each candidate. Wordlist path configurable via `config.extra["wordlist_path"]`; default is `examples/wordlists/subdomains-5000.txt`.
+
+---
+
+### dns-chaos
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `dns-chaos` |
+| **Class** | `DnsChaosCollector` |
+| **Source file** | `src/expose/collectors/builtin/dns_chaos.py` |
 | **Tier** | 1 (passive, broad) |
-| **Data source** | [rdap.org](https://rdap.org) bootstrap service (RFC 9083) |
+| **Data source** | [ProjectDiscovery Chaos API](https://dns.projectdiscovery.io/) |
+| **Seeds accepted** | `DOMAIN` |
+| **Observation type** | `DNS_RECORD` |
+| **ATT&CK** | T1596.001 |
+| **Credentials** | Optional: `api_key` (Authorization header for expanded results) |
+
+Queries the ProjectDiscovery Chaos public API for known subdomains of a target domain. The API returns subdomain labels (e.g., "www", "mail"), which are assembled into FQDNs. No credentials required for public-tier access; an API key enables expanded results. Rate limited to 30 requests/minute.
+
+---
+
+### dns-zone-transfer
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `dns-zone-transfer` |
+| **Class** | `ZoneTransferCollector` |
+| **Source file** | `src/expose/collectors/builtin/dns_zone_transfer.py` |
+| **Tier** | 3 (active, attribution-gated) |
+| **Data source** | Target domain authoritative nameservers (AXFR) |
+| **Seeds accepted** | `DOMAIN` |
+| **Observation type** | `DNS_RECORD` |
+| **ATT&CK** | T1596.001 |
+| **Credentials** | None |
+| **Optional dependency** | `dnspython` (install via `expose[collectors-dns]`) |
+
+Attempts AXFR zone transfers against the authoritative nameservers for a domain. Most well-configured nameservers refuse AXFR (recorded as informational observations). When a transfer succeeds, it is a critical finding -- every record in the zone is exposed, and the collector emits one observation per record plus a summary. AXFR timeout: 10 seconds per nameserver.
+
+---
+
+### dns-passive-history
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `dns-passive-history` |
+| **Class** | `PassiveDnsHistoryCollector` |
+| **Source file** | `src/expose/collectors/builtin/dns_passive_history.py` |
+| **Tier** | 1 (passive, broad) |
+| **Data source** | [SecurityTrails API](https://api.securitytrails.com/v1), [VirusTotal API](https://www.virustotal.com/api/v3) |
 | **Seeds accepted** | `DOMAIN`, `IP` |
-| **Observation type** | `RDAP_REGISTRATION` |
+| **Observation type** | `PASSIVE_DNS`, `DNS_RECORD` |
+| **ATT&CK** | T1596.001 |
+| **Credentials** | Required (at least one): `securitytrails_api_key`, `virustotal_api_key` |
+
+Queries SecurityTrails (primary) and VirusTotal (secondary) for historical DNS resolution records. Reveals infrastructure changes over time: IP migrations, hosting provider switches, CDN adoption, and previously-associated subdomains. For domain seeds, queries SecurityTrails historical DNS for A/AAAA/MX/NS/CNAME records plus subdomain enumeration. For IP seeds, performs reverse lookups. Degrades gracefully if only one key is configured.
+
+---
+
+### dns-reverse-ptr
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `dns-reverse-ptr` |
+| **Class** | `ReversePtrCollector` |
+| **Source file** | `src/expose/collectors/builtin/dns_reverse_ptr.py` |
+| **Tier** | 2 (passive, targeted) |
+| **Data source** | DNS PTR records (in-addr.arpa / ip6.arpa) |
+| **Seeds accepted** | `IP` |
+| **Observation type** | `DNS_RECORD` |
+| **ATT&CK** | T1596.001 |
 | **Credentials** | None |
-| **Rate limit** | Framework-level |
+| **Optional dependency** | `dnspython` (install via `expose[collectors-dns]`) |
 
-Queries RDAP endpoints via the `rdap.org` bootstrap service for domain and IP registration metadata. Extracts registrant organization, registrar, dates, nameservers, and status codes.
+Given an IP address seed, constructs the reverse DNS name and performs a PTR query. Discovered hostnames are emitted as observations and tagged as potential new domain seeds for downstream expansion (`is_new_domain_seed: true`). Supports both IPv4 (in-addr.arpa) and IPv6 (ip6.arpa nibble format).
 
-**PII non-enrichment policy:** This collector deliberately skips personal names, email addresses, phone numbers, and street addresses. Only organization names are extracted from RDAP `vcardArray` entities. If a registrant entity's `fn` field appears to be a personal name (detected by heuristic), it is discarded.
+---
 
-**Key payload fields:**
+### dns-blacklist
 
-- `registrant_org` -- Registrant organization name (sanitized, PII-filtered)
-- `registrar` -- Registrar name (sanitized)
-- `registration_date`, `expiration_date` -- RFC 3339 timestamps
-- `nameservers` -- List of authoritative nameserver hostnames (canonicalized)
-- `status` -- RDAP status codes (e.g., `clientTransferProhibited`)
-- `rdap_port43` -- Legacy WHOIS server hostname
+| Field | Value |
+|---|---|
+| **Collector ID** | `dns-blacklist` |
+| **Class** | `DnsBlacklistCollector` |
+| **Source file** | `src/expose/collectors/builtin/dns_blacklist.py` |
+| **Tier** | 1 (passive, broad) |
+| **Data source** | 7 DNSBL providers (Spamhaus ZEN, Barracuda, SORBS, SpamCop, UCEProtect L1/L2, Abusix) |
+| **Seeds accepted** | `IP` |
+| **Observation type** | `DNS_RECORD` |
+| **ATT&CK** | T1596.001 |
+| **Credentials** | None |
+| **Optional dependency** | `dnspython` (install via `expose[collectors-dns]`) |
 
-The evidence blob contains the full RDAP JSON response (`application/rdap+json`).
+Queries well-known DNS Blacklist (DNSBL) providers to check whether an IP is listed on any spam or abuse blacklist. All providers are queried in parallel. Spamhaus return codes have specific severity mappings (e.g., `127.0.0.4` = exploit/botnet = critical). For listed IPs, a TXT query retrieves the listing reason.
+
+---
+
+## 4. BGP/ASN
+
+### bgp-ripestat
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `bgp-ripestat` |
+| **Class** | `RipeStatCollector` |
+| **Source file** | `src/expose/collectors/builtin/bgp_ripestat.py` |
+| **Tier** | 1 (passive, broad) |
+| **Data source** | [RIPEstat Data API](https://stat.ripe.net/data/) |
+| **Seeds accepted** | `IP`, `ASN` |
+| **Observation type** | `BGP_ASN_LOOKUP` |
+| **Credentials** | None |
+
+Queries the RIPEstat Data API for BGP routing information. For IP seeds, uses the `network-info` endpoint to find the announcing ASN and covering prefix. For ASN seeds, uses the `announced-prefixes` endpoint.
 
 ---
 
@@ -195,43 +327,8 @@ The evidence blob contains the full RDAP JSON response (`application/rdap+json`)
 | **Seeds accepted** | `IP`, `ASN` |
 | **Observation type** | `BGP_ASN_LOOKUP` |
 | **Credentials** | None |
-| **Rate limit** | Advisory |
 
-Scrapes the Hurricane Electric BGP Toolkit web pages for BGP routing information. For IP seeds, queries the IP detail page to extract the announcing ASN, holder name, and announced prefixes. For ASN seeds, queries the ASN detail page.
-
-Parsing uses regex and string matching -- no HTML parser dependencies.
-
-**Key payload fields:**
-
-- `asn` -- Autonomous System Number (e.g., `AS13335`)
-- `holder` -- ASN holder/organization name (sanitized)
-- `prefixes` -- List of announced CIDR prefixes
-- `source` -- Always `"he-toolkit"`
-
----
-
-### bgp-ripestat
-
-| Field | Value |
-|---|---|
-| **Collector ID** | `bgp-ripestat` |
-| **Class** | `RipeStatCollector` |
-| **Source file** | `src/expose/collectors/builtin/bgp_ripestat.py` |
-| **Tier** | 1 (passive, broad) |
-| **Data source** | [RIPEstat Data API](https://stat.ripe.net/data/) |
-| **Seeds accepted** | `IP`, `ASN` |
-| **Observation type** | `BGP_ASN_LOOKUP` |
-| **Credentials** | None |
-| **Rate limit** | Advisory (heavy users should register for an API key) |
-
-Queries the RIPEstat Data API for BGP routing information. For IP seeds, uses the `network-info` endpoint to find the announcing ASN and covering prefix. For ASN seeds, uses the `announced-prefixes` endpoint.
-
-**Key payload fields:**
-
-- `asn` -- Autonomous System Number (e.g., `AS13335`)
-- `holder` -- ASN holder name (sanitized)
-- `prefixes` -- List of announced CIDR prefixes
-- `source` -- Always `"ripestat"`
+Scrapes the Hurricane Electric BGP Toolkit web pages for BGP routing information. For IP seeds, queries the IP detail page to extract the announcing ASN, holder name, and announced prefixes. Parsing uses regex and string matching -- no HTML parser dependencies.
 
 ---
 
@@ -247,196 +344,13 @@ Queries the RIPEstat Data API for BGP routing information. For IP seeds, uses th
 | **Seeds accepted** | `IP` |
 | **Observation type** | `BGP_ASN_LOOKUP` |
 | **Credentials** | None |
-| **Rate limit** | Framework-level |
 | **Optional dependency** | `dnspython` (install via `expose[collectors-dns]`) |
 
-Queries the Team Cymru IP-to-ASN mapping service via DNS TXT lookups. Uses a two-step process:
-
-1. Reverse the IP octets and query `{reversed}.origin.asn.cymru.com` TXT to get ASN, prefix, country, and registry.
-2. Query `AS{asn}.asn.cymru.com` TXT for the ASN holder name.
-
-**Key payload fields:**
-
-- `asn` -- Autonomous System Number (e.g., `AS13335`)
-- `asn_name` -- ASN holder name (sanitized)
-- `prefix` -- Covering CIDR prefix
-- `country` -- Country code
-- `registry` -- Regional Internet Registry (e.g., `arin`, `ripe`)
-- `source` -- Always `"team-cymru"`
+Queries the Team Cymru IP-to-ASN mapping service via DNS TXT lookups. Two-step process: (1) reverse-IP query to `origin.asn.cymru.com` for ASN/prefix/country/registry, (2) ASN query to `asn.cymru.com` for holder name.
 
 ---
 
-### spf-dkim-dmarc
-
-| Field | Value |
-|---|---|
-| **Collector ID** | `spf-dkim-dmarc` |
-| **Class** | `EmailAuthCollector` |
-| **Source file** | `src/expose/collectors/builtin/email_auth.py` |
-| **Tier** | 1 (passive, broad) |
-| **Data source** | DNS TXT records |
-| **Seeds accepted** | `DOMAIN` |
-| **Observation type** | `DNS_RECORD` |
-| **Credentials** | None |
-| **Rate limit** | Framework-level |
-| **Optional dependency** | `dnspython` (install via `expose[collectors-dns]`) |
-
-Queries DNS for email authentication records associated with a domain:
-
-1. **SPF** -- TXT record at `{domain}` containing `v=spf1 ...`
-2. **DKIM** -- TXT records at `{selector}._domainkey.{domain}` for common selectors (`default`, `google`, `selector1`, `selector2`, `k1`, `s1`, `s2`, `dkim`, `mail`)
-3. **DMARC** -- TXT record at `_dmarc.{domain}`
-
-The output reveals mail infrastructure, authorized third-party senders (SPF includes), and potential shadow IT (SaaS platforms authorized to send as the organization).
-
-**Key payload fields:**
-
-- `has_spf`, `spf_record`, `spf_includes`, `spf_mechanisms` -- SPF policy
-- `has_dkim`, `dkim_selectors_found`, `dkim_records` -- DKIM selector presence
-- `has_dmarc`, `dmarc_record`, `dmarc_policy`, `dmarc_rua` -- DMARC enforcement
-
----
-
-### github-exposed
-
-| Field | Value |
-|---|---|
-| **Collector ID** | `github-exposed` |
-| **Class** | `GitHubExposedCollector` |
-| **Source file** | `src/expose/collectors/builtin/github_exposed.py` |
-| **Tier** | 1 (passive, broad) |
-| **Data source** | [GitHub REST API v3](https://docs.github.com/en/rest) |
-| **Seeds accepted** | `DOMAIN`, `ORGANIZATION` |
-| **Observation type** | `SCANNER_HOST` |
-| **Credentials** | Optional (`api_key` slot increases rate limit from 10 to 30 req/min) |
-| **Rate limit** | 10 req/min unauthenticated, 30 req/min authenticated |
-
-Searches the public GitHub API for repositories and code belonging to or mentioning the target organization or domain. Reveals:
-
-- Organization repositories with potential config files, internal hostnames, and API endpoints.
-- Public repositories mentioning the domain in code or configuration files.
-- Potential leaked credential indicators (metadata only -- the collector flags the repository, it does NOT extract secrets).
-
-For organization seeds, performs a repository search. For domain seeds, performs both a repository search and a code search (filtering to configuration file extensions: yml, yaml, json, env, toml, ini, cfg, conf).
-
-**Key payload fields:**
-
-- `source` -- Always `"github"`
-- `search_type` -- `"repository"` or `"code"`
-- `total_results` -- Total match count from the API
-- `repositories` -- Up to 20 repository summaries (`full_name`, `description`, `html_url`, `stars`, `updated_at`)
-- `code_matches` -- Up to 20 code match summaries (`repository`, `path`, `html_url`)
-
----
-
-## 3. Tier 2 -- Passive, Targeted
-
-### favicon-hash
-
-| Field | Value |
-|---|---|
-| **Collector ID** | `favicon-hash` |
-| **Class** | `FaviconHashCollector` |
-| **Source file** | `src/expose/collectors/builtin/favicon_hash.py` |
-| **Tier** | 2 (passive, targeted) |
-| **Data source** | Target host HTTP (`/favicon.ico`, `/apple-touch-icon.png`) |
-| **Seeds accepted** | `DOMAIN`, `IP` |
-| **Observation type** | `HTTP_RESPONSE` |
-| **Credentials** | None |
-| **Rate limit** | Framework-level |
-
-Fetches favicon files from discovered web assets and computes a SHA-256 hash via the FIPS crypto adapter (ADR-010). The same favicon hash across different hosts implies the same operator or application -- useful for cluster correlation and technology fingerprinting.
-
-The collector tries HTTPS first, then HTTP. It probes `/favicon.ico` first, then `/apple-touch-icon.png` as a fallback. Only one favicon per host is collected (the first found).
-
-A stub MurmurHash3 field is included in the payload for future Shodan-compatible correlation (pending `mmh3` dependency addition).
-
-**Key payload fields:**
-
-- `favicon_sha256` -- FIPS-validated SHA-256 hex digest of the favicon bytes
-- `favicon_mmh3` -- MurmurHash3 (stubbed as `0` in v0.1.0)
-- `favicon_size_bytes` -- Size of the favicon file
-- `favicon_url` -- Final URL after redirects
-- `favicon_content_type` -- HTTP Content-Type header
-
-The evidence blob contains the raw favicon bytes.
-
----
-
-## 4. Tier 3 -- Active, Attribution-Gated
-
-All Tier-3 collectors send packets directly to the target infrastructure. Dispatch is gated by the dispatcher -- a Tier-3 collector can only run against an entity whose attribution tier is `confirmed` or `high`, OR which is explicitly listed in the tenant's authorization scope. This gating is enforced upstream; individual Tier-3 collectors do NOT self-gate.
-
-Enforcement mode (per Gitea issue #29) controls the dispatcher's response to denied dispatches:
-
-- **medium** (default): Denial is advisory; the dispatcher may log a warning and proceed at its discretion.
-- **hard**: Denial is absolute; the dispatcher records a structured `ScopeRefusalEvent` for audit.
-
-### active-dns-resolve
-
-| Field | Value |
-|---|---|
-| **Collector ID** | `active-dns-resolve` |
-| **Class** | `ActiveDnsCollector` |
-| **Source file** | `src/expose/collectors/builtin/active_dns.py` |
-| **Tier** | 3 (active, attribution-gated) |
-| **Data source** | System DNS resolver (or configured egress-profile nameservers) |
-| **Seeds accepted** | `DOMAIN` |
-| **Observation type** | `DNS_RESOLUTION` |
-| **Credentials** | None |
-| **Rate limit** | Framework-level |
-| **Optional dependency** | `dnspython` (install via `expose[collectors-dns]`) |
-
-Performs active DNS resolution against target domains, querying A, AAAA, CNAME, MX, NS, TXT, and SOA record types. On NXDOMAIN, emits no observations (not an error). Individual record-type failures (e.g., NoAnswer for TXT) are skipped without failing the whole expansion.
-
-Supports egress profile integration: if `config.extra["egress_profile"]` is set to an `EgressProfile` instance, the resolver uses its configured nameservers.
-
-**Key payload fields (vary by record type):**
-
-- A/AAAA: `values` (list of canonicalized IPs), `ttl`
-- CNAME: `target` (canonicalized domain)
-- MX: `exchanges` (list of `{priority, exchange}`)
-- NS: `nameservers` (list of canonicalized domains)
-- TXT: `values` (list of sanitized text records)
-- SOA: `mname`, `rname`, `serial`, `refresh`, `retry`, `expire`, `minimum`
-
----
-
-### active-tls-handshake
-
-| Field | Value |
-|---|---|
-| **Collector ID** | `active-tls-handshake` |
-| **Class** | `ActiveTlsCollector` |
-| **Source file** | `src/expose/collectors/builtin/active_tls.py` |
-| **Tier** | 3 (active, attribution-gated) |
-| **Data source** | Target host TLS (default port 443, configurable via seed `properties.port`) |
-| **Seeds accepted** | `DOMAIN`, `IP` |
-| **Observation type** | `TLS_HANDSHAKE` |
-| **Credentials** | None |
-| **Rate limit** | Framework-level |
-
-Performs TLS handshakes against discovered hosts and extracts certificate chain details, negotiated protocol version, cipher suite, and a JARM fingerprint stub.
-
-Certificate verification is intentionally disabled (`CERT_NONE`) because the collector needs to observe all certificates -- including self-signed and expired ones -- for attack-surface enumeration. The `cryptography` library is used to parse DER certificates for rich metadata (subject CN, issuer, SANs, validity dates). Certificate fingerprints are computed via the FIPS SHA-256 adapter (ADR-010).
-
-JARM fingerprinting is stubbed in v0.1.0 (returns `None`); full implementation is a follow-up.
-
-**Key payload fields:**
-
-- `tls_version` -- Negotiated TLS version (e.g., `TLSv1.3`)
-- `cipher_suite` -- Negotiated cipher suite
-- `cert_subject_cn` -- Certificate subject Common Name
-- `cert_issuer_cn`, `cert_issuer_org` -- Issuer details
-- `cert_serial` -- Hex serial number (lowercase)
-- `cert_not_before`, `cert_not_after` -- ISO 8601 validity dates
-- `cert_sans` -- Subject Alternative Names (sanitized)
-- `cert_fingerprint_sha256` -- FIPS-validated SHA-256 fingerprint of DER cert
-- `jarm_fingerprint` -- JARM hash (stubbed as `null` in v0.1.0)
-
-The evidence blob contains the leaf certificate in PEM format.
-
----
+## 5. HTTP/Web
 
 ### active-http-fingerprint
 
@@ -450,24 +364,424 @@ The evidence blob contains the leaf certificate in PEM format.
 | **Seeds accepted** | `DOMAIN`, `IP` |
 | **Observation type** | `HTTP_RESPONSE` |
 | **Credentials** | None |
-| **Rate limit** | Per-host token-bucket (default 1 req/sec, configurable via `config.extra["requests_per_second"]`) plus framework-level |
 
-Probes target hosts on ports 80 (HTTP) and 443 (HTTPS) to capture HTTP response metadata. Follows up to 5 redirects. Certificate verification is intentionally disabled for HTTPS probes (same rationale as the TLS collector).
+Probes target hosts on ports 80 (HTTP) and 443 (HTTPS) to capture HTTP response metadata. Follows up to 5 redirects. Includes a per-host async token-bucket rate limiter (default 1 req/sec, configurable via `config.extra["requests_per_second"]`). Captures security-relevant headers (HSTS, CSP, X-Frame-Options, etc.), page title, server banner, and redirect chain.
 
-Includes a belt-and-braces per-host async token-bucket rate limiter that caps request rate independently of the framework-level limiter.
+---
 
-**Key payload fields:**
+### robots-txt
 
-- `url` -- Final URL after redirects (sanitized)
-- `status_code` -- HTTP response status code
-- `server_header` -- Server header value (sanitized)
-- `content_type` -- Content-Type header (sanitized)
-- `title` -- Page title extracted from first 2048 bytes of response body
-- `headers` -- Security-relevant headers: `strict-transport-security`, `x-frame-options`, `content-security-policy`, `x-content-type-options`, `x-xss-protection`, `permissions-policy`
-- `redirect_chain` -- Ordered list of redirect URLs (sanitized)
-- `banner` -- First 4096 bytes of response body (sanitized)
+| Field | Value |
+|---|---|
+| **Collector ID** | `robots-txt` |
+| **Class** | `RobotsTxtCollector` |
+| **Source file** | `src/expose/collectors/builtin/robots_txt.py` |
+| **Tier** | 2 (passive, targeted) |
+| **Data source** | Target host `/robots.txt` |
+| **Seeds accepted** | `DOMAIN` |
+| **Observation type** | `HTTP_RESPONSE` |
+| **ATT&CK** | T1592.004 (Gather Victim Host Information: Client Configurations) |
+| **Credentials** | None |
 
-The evidence blob contains the raw response headers serialized as text.
+Fetches `/robots.txt` from target domains over HTTPS and HTTP, then parses `Disallow:`, `Allow:`, and `Sitemap:` directives. Each path is classified by security interest level -- critical (`.git`, `.env`, debug endpoints), high (admin panels, API endpoints, backup directories), or medium (uploads, staging environments). Low-interest paths (images, CSS, JS) are filtered out. Evidence blob contains the raw robots.txt content.
+
+---
+
+### security-txt
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `security-txt` |
+| **Class** | `SecurityTxtCollector` |
+| **Source file** | `src/expose/collectors/builtin/security_txt.py` |
+| **Tier** | 1 (passive, broad) |
+| **Data source** | Target host `/.well-known/security.txt` (RFC 9116) |
+| **Seeds accepted** | `DOMAIN` |
+| **Observation type** | `HTTP_RESPONSE` |
+| **ATT&CK** | T1592.004 |
+| **Credentials** | None |
+
+Fetches security.txt (RFC 9116) from the well-known path (primary) and legacy `/security.txt` (fallback). Parses Contact, Expires, Encryption, Policy, Hiring, Acknowledgments, Preferred-Languages, and Canonical fields. Domains extracted from URLs in those fields are emitted as separate observations, revealing bug bounty platforms (HackerOne, Bugcrowd), PGP key servers, and related infrastructure.
+
+---
+
+### favicon-hash
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `favicon-hash` |
+| **Class** | `FaviconHashCollector` |
+| **Source file** | `src/expose/collectors/builtin/favicon_hash.py` |
+| **Tier** | 2 (passive, targeted) |
+| **Data source** | Target host HTTP (`/favicon.ico`, `/apple-touch-icon.png`) |
+| **Seeds accepted** | `DOMAIN`, `IP` |
+| **Observation type** | `HTTP_RESPONSE` |
+| **Credentials** | None |
+
+Fetches favicon files and computes a SHA-256 hash via the FIPS crypto adapter (ADR-010). The same favicon hash across different hosts implies the same operator or application -- useful for cluster correlation and technology fingerprinting. Tries HTTPS first, then HTTP; probes `/favicon.ico` first, then `/apple-touch-icon.png` as fallback. A stub MurmurHash3 field is included for future Shodan-compatible correlation.
+
+---
+
+### waf-detection
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `waf-detection` |
+| **Class** | `WafDetectionCollector` |
+| **Source file** | `src/expose/collectors/builtin/waf_detection.py` |
+| **Tier** | 2 (passive, targeted) |
+| **Data source** | Target host HTTP response headers |
+| **Seeds accepted** | `DOMAIN`, `IP` |
+| **Observation type** | `HTTP_RESPONSE` |
+| **ATT&CK** | T1592.004 |
+| **Credentials** | None |
+
+Detects WAF and CDN layers by inspecting HTTP response headers against a signature database covering 8 vendors: Cloudflare, Akamai, CloudFront, Fastly, Incapsula, Sucuri, AWS WAF, and Azure Front Door. Issues a single HTTP HEAD request per seed. Confidence scales with the number of matching signatures per vendor. Also checks DNS CNAME records for CDN-indicative patterns. Per-host token-bucket rate limiter (default 1 req/sec).
+
+---
+
+### screenshot-vision
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `screenshot-vision` |
+| **Class** | `ScreenshotVisionCollector` |
+| **Source file** | `src/expose/collectors/builtin/screenshot_vision.py` |
+| **Tier** | 2 (passive, targeted) |
+| **Data source** | Target host HTTP |
+| **Seeds accepted** | `DOMAIN`, `IP` |
+| **Observation type** | `HTTP_RESPONSE` |
+| **ATT&CK** | T1592.004 |
+| **Credentials** | None |
+
+Captures HTTP response content for downstream vision analysis (Stage 4c). Extracts page title, meta description, body text preview (first 2000 characters), status code, and content type. Only processes HTML responses; non-HTML is skipped. Response bodies capped at 1 MB. Supports egress profile integration for proxied requests. Evidence blob contains the raw HTML.
+
+---
+
+## 6. Cloud
+
+### cloud-ranges
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `cloud-ranges` |
+| **Class** | `CloudRangesCollector` |
+| **Source file** | `src/expose/collectors/builtin/cloud_ranges.py` |
+| **Tier** | 1 (passive, broad) |
+| **Data source** | AWS, Azure, GCP IP range manifests (cached on disk) |
+| **Seeds accepted** | `IP`, `CIDR` |
+| **Observation type** | `CLOUD_IP_RANGE` |
+| **Credentials** | None |
+
+Compares seed IP addresses and CIDR blocks against pre-cached cloud provider IP range manifests. No live network calls during `expand()` -- all lookups are against in-memory data loaded at construction time. Cache directory configured via `config.extra["ranges_dir"]`.
+
+---
+
+### cloud-storage-exposure
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `cloud-storage-exposure` |
+| **Class** | `CloudStorageExposureCollector` |
+| **Source file** | `src/expose/collectors/builtin/cloud_storage_exposure.py` |
+| **Tier** | 1 (passive, broad) |
+| **Data source** | AWS S3, Azure Blob Storage, GCP Cloud Storage (public endpoints) |
+| **Seeds accepted** | `ORGANIZATION`, `DOMAIN` |
+| **Observation type** | `CLOUD_IP_RANGE` |
+| **ATT&CK** | T1526 (Cloud Service Discovery) |
+| **Credentials** | None |
+
+Discovers publicly accessible cloud storage buckets/containers. Generates candidate bucket names via a permutation engine (20 common suffixes: `-backups`, `-data`, `-staging`, `-dev`, etc.) and probes each across all three providers using HTTP HEAD requests. If a bucket exists and is publicly listable, parses the listing to inventory objects and flag sensitive files. Filters out common-word false positives (www, api, cdn, etc.). Max 5 concurrent probes with 0.2s inter-probe delay.
+
+---
+
+## 7. Code
+
+### github-exposed
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `github-exposed` |
+| **Class** | `GitHubExposedCollector` |
+| **Source file** | `src/expose/collectors/builtin/github_exposed.py` |
+| **Tier** | 1 (passive, broad) |
+| **Data source** | [GitHub REST API v3](https://docs.github.com/en/rest) |
+| **Seeds accepted** | `DOMAIN`, `ORGANIZATION` |
+| **Observation type** | `SCANNER_HOST` |
+| **Credentials** | Optional: `api_key` (increases rate limit from 10 to 30 req/min) |
+
+Searches public GitHub API for repositories and code belonging to or mentioning the target. For organization seeds, performs a repository search. For domain seeds, performs both repository and code search (filtering to configuration file extensions: yml, yaml, json, env, toml, ini, cfg, conf). Flags potential leaked credential indicators (metadata only -- does NOT extract secrets).
+
+---
+
+### git-commit-emails
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `git-commit-emails` |
+| **Class** | `GitCommitEmailsCollector` |
+| **Source file** | `src/expose/collectors/builtin/git_commit_emails.py` |
+| **Tier** | 2 (passive, targeted) |
+| **Data source** | [GitHub Commits Search API](https://docs.github.com/en/rest) |
+| **Seeds accepted** | `ORGANIZATION`, `DOMAIN` |
+| **Observation type** | `PASSIVE_DNS` |
+| **ATT&CK** | T1593.003 (Search Open Websites/Domains: Code Repositories) |
+| **Credentials** | Required: `token` (GitHub API authentication) |
+
+Searches GitHub commits for the target and extracts unique committer email domains. Reveals internal email domains, contractor/partner domains, and shadow domains linked to the organization's codebase. Filters out generic free-email providers (Gmail, Outlook, etc.) and GitHub noreply addresses. Rate limited to 30 requests/minute.
+
+---
+
+## 8. Email
+
+### spf-dkim-dmarc
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `spf-dkim-dmarc` |
+| **Class** | `EmailAuthCollector` |
+| **Source file** | `src/expose/collectors/builtin/email_auth.py` |
+| **Tier** | 1 (passive, broad) |
+| **Data source** | DNS TXT records |
+| **Seeds accepted** | `DOMAIN` |
+| **Observation type** | `DNS_RECORD` |
+| **Credentials** | None |
+| **Optional dependency** | `dnspython` (install via `expose[collectors-dns]`) |
+
+Queries DNS for email authentication records: SPF (TXT at domain), DKIM (TXT at `{selector}._domainkey.{domain}` for 8 common selectors), and DMARC (TXT at `_dmarc.{domain}`). Reveals mail infrastructure, authorized third-party senders (SPF includes), and potential shadow IT.
+
+---
+
+### mail-headers
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `mail-headers` |
+| **Class** | `MailHeaderAnalyzerCollector` |
+| **Source file** | `src/expose/collectors/builtin/mail_header_analyzer.py` |
+| **Tier** | 1 (passive, broad) |
+| **Data source** | Public mailing list archives (HTTP) |
+| **Seeds accepted** | `DOMAIN` |
+| **Observation type** | `HTTP_RESPONSE`, `SCANNER_HOST` |
+| **ATT&CK** | T1598 (Phishing for Information) |
+| **Credentials** | None |
+
+Probes for publicly accessible mailing list archives at common subdomains (`lists.`, `mail.`, `mailman.`) and extracts infrastructure hints: IP addresses from `Received:` headers, mailing list software fingerprints (Mailman, Sympa, Majordomo, HyperKitty), and internal hostnames. Rate limited to 30 requests/minute.
+
+---
+
+## 9. Scan Aggregators
+
+### scan-shodan
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `scan-shodan` |
+| **Class** | `ShodanScanCollector` |
+| **Source file** | `src/expose/collectors/builtin/scan_shodan.py` |
+| **Tier** | 1 (passive, broad) |
+| **Data source** | [Shodan API](https://api.shodan.io/) |
+| **Seeds accepted** | `DOMAIN`, `IP` |
+| **Observation type** | `PORT_SCAN_RESULT`, `SCANNER_HOST` |
+| **ATT&CK** | T1596 (Search Open Technical Databases) |
+| **Credentials** | Required: `shodan_api_key` |
+
+Queries Shodan for host data: open ports, banners, known CVEs, hostnames, OS, and ISP information. For domain seeds, resolves the domain to an IP via Shodan DNS first. Emits per-service observations (with port, transport, product, banner, vulnerabilities, and optional SSL cert details) plus a host-level summary. Self-rate-limits to 1 request/second.
+
+---
+
+### scan-censys
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `scan-censys` |
+| **Class** | `CensysScanCollector` |
+| **Source file** | `src/expose/collectors/builtin/scan_censys.py` |
+| **Tier** | 1 (passive, broad) |
+| **Data source** | [Censys Search API v2](https://search.censys.io/api/v2) (hosts endpoint) |
+| **Seeds accepted** | `DOMAIN`, `IP` |
+| **Observation type** | `PORT_SCAN_RESULT`, `SCANNER_HOST` |
+| **ATT&CK** | T1596 |
+| **Credentials** | Required: `censys_api_id`, `censys_api_secret` |
+
+Queries the Censys Search API v2 hosts endpoint for open ports, service names, TLS certificates, banners, and OS fingerprints. For domain seeds, searches by TLS certificate name. Distinct from `ct-censys` which uses the certificates endpoint for CT enumeration. Self-rate-limits to 2 requests/second.
+
+---
+
+### scan-binaryedge
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `scan-binaryedge` |
+| **Class** | `BinaryEdgeScanCollector` |
+| **Source file** | `src/expose/collectors/builtin/scan_binaryedge.py` |
+| **Tier** | 1 (passive, broad) |
+| **Data source** | [BinaryEdge API v2](https://api.binaryedge.io/v2) |
+| **Seeds accepted** | `DOMAIN`, `IP` |
+| **Observation type** | `PORT_SCAN_RESULT`, `SCANNER_HOST` |
+| **ATT&CK** | T1596 |
+| **Credentials** | Required: `binaryedge_api_key` |
+
+Queries BinaryEdge for host data: open ports, services, certificates, and torrent activity. For domain seeds, performs subdomain enumeration. Self-rate-limits to 1 request/second.
+
+---
+
+## 10. Historical
+
+### wayback-machine
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `wayback-machine` |
+| **Class** | `WaybackMachineCollector` |
+| **Source file** | `src/expose/collectors/builtin/wayback_machine.py` |
+| **Tier** | 1 (passive, broad) |
+| **Data source** | [Internet Archive Wayback CDX API](https://web.archive.org/cdx/search/cdx) |
+| **Seeds accepted** | `DOMAIN`, `IP` |
+| **Observation type** | `HTTP_RESPONSE` |
+| **Credentials** | None |
+
+Queries the Wayback CDX API to discover historical URLs and content snapshots. Reveals endpoints, configuration files, and historical structure no longer visible on the live site. Filters for interesting content types (HTML, JSON, plain text, XML, JavaScript). Polite rate limit: 1 request/second.
+
+---
+
+### common-crawl
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `common-crawl` |
+| **Class** | `CommonCrawlCollector` |
+| **Source file** | `src/expose/collectors/builtin/common_crawl.py` |
+| **Tier** | 1 (passive, broad) |
+| **Data source** | [Common Crawl Index API](https://index.commoncrawl.org/) |
+| **Seeds accepted** | `DOMAIN` |
+| **Observation type** | `HTTP_RESPONSE` |
+| **Credentials** | None |
+
+Free, no-auth backup to the Wayback Machine. Queries the Common Crawl Index API (NDJSON) to discover historical URLs, subdomains, and interesting endpoints (admin, API, login, dashboard, config paths). Discovers the latest crawl index automatically via `collinfo.json`. Rate limited to 30 requests/minute.
+
+---
+
+## 11. Specialized
+
+### rdap-whois
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `rdap-whois` |
+| **Class** | `RdapWhoisCollector` |
+| **Source file** | `src/expose/collectors/builtin/rdap_whois.py` |
+| **Tier** | 1 (passive, broad) |
+| **Data source** | [rdap.org](https://rdap.org) bootstrap service (RFC 9083) |
+| **Seeds accepted** | `DOMAIN`, `IP` |
+| **Observation type** | `RDAP_REGISTRATION` |
+| **Credentials** | None |
+
+Queries RDAP endpoints for domain and IP registration metadata. Extracts registrant organization, registrar, dates, nameservers, and status codes. PII non-enrichment policy: deliberately skips personal names, email addresses, phone numbers, and street addresses. Only organization names are extracted.
+
+---
+
+### ma-discovery
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `ma-discovery` |
+| **Class** | `MaDiscoveryCollector` |
+| **Source file** | `src/expose/collectors/builtin/ma_discovery.py` |
+| **Tier** | 1 (passive, broad) |
+| **Data source** | [Wikidata SPARQL](https://query.wikidata.org/sparql), [Wikipedia API](https://en.wikipedia.org/w/api.php) |
+| **Seeds accepted** | `ORGANIZATION` |
+| **Observation type** | `SCANNER_HOST` |
+| **Credentials** | None |
+
+Discovers mergers-and-acquisitions activity using public data. Queries Wikidata for subsidiaries (wdt:P1830 / wdt:P127) and Wikipedia for acquisition mentions. For each discovered company, attempts DNS resolution of candidate domains across 10 TLDs. Emits one observation per acquisition with relationship type, dates, source URL, and candidate domains.
+
+---
+
+### sip-discovery
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `sip-discovery` |
+| **Class** | `SipDiscoveryCollector` |
+| **Source file** | `src/expose/collectors/builtin/sip_discovery.py` |
+| **Tier** | 1 (passive, broad) |
+| **Data source** | DNS SRV and NAPTR records |
+| **Seeds accepted** | `DOMAIN` |
+| **Observation type** | `DNS_RECORD` |
+| **Credentials** | None |
+| **Optional dependency** | `dnspython` (install via `expose[collectors-dns]`) |
+
+Discovers VoIP/SIP infrastructure by querying standard DNS SRV records per RFC 3263: `_sip._tcp`, `_sips._tcp`, `_sip._udp`, `_h323cs._tcp`, `_stun._udp`, `_turn._udp`. Also queries NAPTR records for SIP routing preferences. SRV records reveal VoIP provider, internal hostnames, and non-standard port configurations.
+
+---
+
+### wikipedia-edits
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `wikipedia-edits` |
+| **Class** | `WikipediaEditsCollector` |
+| **Source file** | `src/expose/collectors/builtin/wikipedia_edits.py` |
+| **Tier** | 1 (passive, broad) |
+| **Data source** | [Wikipedia MediaWiki API](https://en.wikipedia.org/w/api.php) |
+| **Seeds accepted** | `ORGANIZATION`, `DOMAIN` |
+| **Observation type** | `SCANNER_HOST` |
+| **Credentials** | None |
+
+Discovers IP addresses from anonymous Wikipedia edits. Anonymous editors are identified by IP in the revision history `user` field. These IPs may belong to corporate networks, cloud egress, VPNs, or employee locations. Fetches the top article's revision history (up to 500 edits) and filters for IPv4/IPv6 anonymous editors. Rate limited to 30 requests/minute.
+
+---
+
+### paste-monitor
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `paste-monitor` |
+| **Class** | `PasteMonitorCollector` |
+| **Source file** | `src/expose/collectors/builtin/paste_monitor.py` |
+| **Tier** | 2 (passive, targeted) |
+| **Data source** | [GitHub Code Search API](https://docs.github.com/en/rest) |
+| **Seeds accepted** | `DOMAIN`, `ORGANIZATION` |
+| **Observation type** | `SCANNER_HOST` |
+| **Credentials** | Optional: `api_key` (increases rate limit) |
+
+Searches GitHub Code Search for configuration file leaks referencing the target. Queries for `.env`, `.conf`, `.yml`, and `filename:.env` files. Extracts IP addresses, hostnames, subdomains, and URLs from matched code snippets. Rate limited to 10 requests/minute due to aggressive GitHub code search limits.
+
+---
+
+### otx-alienvault
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `otx-alienvault` |
+| **Class** | `OtxAlienVaultCollector` |
+| **Source file** | `src/expose/collectors/builtin/otx_alienvault.py` |
+| **Tier** | 1 (passive, broad) |
+| **Data source** | [AlienVault OTX API](https://otx.alienvault.com/api/) |
+| **Seeds accepted** | `DOMAIN` |
+| **Observation type** | `PASSIVE_DNS`, `SCANNER_HOST` |
+| **ATT&CK** | T1596 |
+| **Credentials** | Optional: `otx_api_key` (higher rate limits) |
+
+Free backup source for passive DNS history. Queries two OTX endpoints: passive_dns (historical DNS resolutions showing which IPs a domain has pointed to) and url_list (URLs observed in threat intelligence feeds). No API key required for basic access; optional key for higher rate limits. Rate limited to 30 requests/minute.
+
+---
+
+### waf-origin-discovery
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `waf-origin-discovery` |
+| **Class** | `WafOriginDiscoveryCollector` |
+| **Source file** | `src/expose/collectors/builtin/waf_origin_discovery.py` |
+| **Tier** | 2 (passive, targeted) |
+| **Data source** | Target host HTTP headers, DNS, TLS certificates |
+| **Seeds accepted** | `DOMAIN`, `IP` |
+| **Observation type** | `HTTP_RESPONSE` |
+| **Credentials** | None |
+
+Discovers origin server IPs behind CDN/WAF layers using five passive techniques: CDN header leakage (X-Forwarded-For, X-Real-IP, X-Originating-IP, CF-Connecting-IP), certificate SAN analysis, subdomain enumeration (`ftp.*`, `mail.*`, `direct.*`, `cpanel.*`), MX record analysis, and DNS history. Reuses the WAF signature database from `waf-detection`. Per-host token-bucket rate limiter (default 1 req/sec).
 
 ---
 
@@ -483,31 +797,52 @@ The evidence blob contains the raw response headers serialized as text.
 | **Seeds accepted** | `IP` |
 | **Observation type** | `PORT_SCAN_RESULT` |
 | **Credentials** | None |
-| **Rate limit** | Framework-level |
 
-Light port-surface enumeration on attributed IP addresses. Probes a curated set of 27 common service ports to identify exposed services. This is NOT a full Nmap-style scan -- it is a targeted check of high-value ports using async TCP connect probes.
-
-Default ports probed: 21, 22, 23, 25, 53, 80, 110, 143, 443, 445, 993, 995, 1433, 1521, 2222, 3306, 3389, 5432, 5900, 6379, 8080, 8443, 8888, 9090, 9200, 9443, 27017.
-
-The port list can be overridden per seed via `seed.properties["ports"]`. The TCP connect timeout (default 3 seconds) is configurable via `config.extra["probe_timeout_seconds"]`.
-
-All ports are probed concurrently via `asyncio.gather`. The collector yields exactly one observation per seed (even when no ports are open -- the absence of open ports is informative).
-
-**Key payload fields:**
-
-- `open_ports` -- Sorted list of open port numbers
-- `closed_ports_probed` -- Count of ports that were closed or filtered
-- `total_ports_probed` -- Total number of ports probed
-- `probe_timeout_seconds` -- The configured TCP connect timeout
+Light port-surface enumeration on attributed IP addresses. Probes 27 common service ports (21, 22, 23, 25, 53, 80, 110, 143, 443, 445, 993, 995, 1433, 1521, 2222, 3306, 3389, 5432, 5900, 6379, 8080, 8443, 8888, 9090, 9200, 9443, 27017) using async TCP connect probes. All ports probed concurrently. Port list overridable per seed via `seed.properties["ports"]`. TCP connect timeout default 3 seconds (configurable via `config.extra["probe_timeout_seconds"]`). Yields exactly one observation per seed.
 
 ---
 
-## 5. Writing a Custom Collector
+### active-tls-handshake
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `active-tls-handshake` |
+| **Class** | `ActiveTlsCollector` |
+| **Source file** | `src/expose/collectors/builtin/active_tls.py` |
+| **Tier** | 3 (active, attribution-gated) |
+| **Data source** | Target host TLS (default port 443) |
+| **Seeds accepted** | `DOMAIN`, `IP` |
+| **Observation type** | `TLS_HANDSHAKE` |
+| **Credentials** | None |
+
+Performs TLS handshakes and extracts certificate chain details, negotiated protocol version, cipher suite, and a JARM fingerprint stub. Certificate verification intentionally disabled (`CERT_NONE`) to observe all certificates including self-signed and expired. Certificate fingerprints computed via the FIPS SHA-256 adapter (ADR-010). JARM fingerprinting stubbed in v0.1.0 (returns `None`).
+
+---
+
+### dark-web-indicators
+
+| Field | Value |
+|---|---|
+| **Collector ID** | `dark-web-indicators` |
+| **Class** | `DarkWebIndicatorsCollector` |
+| **Source file** | `src/expose/collectors/builtin/dark_web_indicators.py` |
+| **Tier** | 3 (active, attribution-gated) |
+| **Data source** | Have I Been Pwned, IntelX, DeHashed (via `DarkWebEnricher`) |
+| **Seeds accepted** | `DOMAIN` |
+| **Observation type** | `SCANNER_HOST` |
+| **ATT&CK** | T1597 (Search Closed Sources) |
+| **Credentials** | Required: `hibp_api_key`. Optional: `intelx_api_key`, `dehashed_email` + `dehashed_api_key` |
+
+Queries public dark web aggregator APIs for breach data, leaked credentials, and dark web mentions. Delegates API calls to the `DarkWebEnricher` module (part of the commercial Threat Context surface). FIPS gate compliant -- no direct hashlib/secrets imports. Rate limited to 10 requests/minute.
+
+---
+
+## 12. Writing a Custom Collector
 
 To create a custom collector:
 
 1. Subclass `expose.collectors.Collector`.
-2. Set the four class-level metadata attributes: `collector_id`, `collector_version`, `requires_credentials`, `tier`.
+2. Set the class-level metadata attributes: `collector_id`, `collector_version`, `requires_credentials`, `tier`, `technique_ids`.
 3. Implement `expand(seed)` as an async generator yielding `Observation` records.
 4. Implement `health_check()` returning a `CollectorHealthCheck`.
 5. Register the collector with `@register_collector` or call `CollectorRegistry.register()` directly.
@@ -524,7 +859,7 @@ Key contracts to honor:
 
 ---
 
-## 6. Credential Management
+## 13. Credential Management
 
 ### How the CredentialResolver works
 
@@ -537,6 +872,24 @@ The `CredentialResolver` (in `src/expose/pipeline/credential_resolver.py`) bridg
 5. Per SPEC section 6.4, credential material is held only for the lifetime of a single `expand()` invocation. Instances are not persisted.
 
 If a required key is absent from the backend, `CredentialResolutionError` is raised before the collector is constructed. Secret values are never logged.
+
+### Credential summary by collector
+
+| Collector ID | Slot(s) | Required? |
+|---|---|---|
+| `ct-censys` | `censys_api_id`, `censys_api_secret` | Yes |
+| `dns-passive-history` | `securitytrails_api_key`, `virustotal_api_key` | At least one |
+| `dns-chaos` | `api_key` | No |
+| `github-exposed` | `api_key` | No |
+| `git-commit-emails` | `token` | Yes |
+| `scan-shodan` | `shodan_api_key` | Yes |
+| `scan-censys` | `censys_api_id`, `censys_api_secret` | Yes |
+| `scan-binaryedge` | `binaryedge_api_key` | Yes |
+| `paste-monitor` | `api_key` | No |
+| `otx-alienvault` | `otx_api_key` | No |
+| `dark-web-indicators` | `hibp_api_key` (req), `intelx_api_key` (opt), `dehashed_email` + `dehashed_api_key` (opt) | Partially |
+
+All other collectors require no credentials.
 
 ### Secrets backends
 

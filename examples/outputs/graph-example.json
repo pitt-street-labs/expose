@@ -1,0 +1,204 @@
+{
+  "nodes": [
+    {
+      "id": "10000001-0001-4000-8000-000000000001",
+      "label": "acme-corp.com",
+      "entity_type": "domain",
+      "attribution_status": "confirmed",
+      "attribution_confidence": 0.99,
+      "collector_count": 3,
+      "first_observed": "2026-05-11T02:30:12Z"
+    },
+    {
+      "id": "10000001-0001-4000-8000-000000000002",
+      "label": "staging.acme-corp.com",
+      "entity_type": "domain",
+      "attribution_status": "confirmed",
+      "attribution_confidence": 0.97,
+      "collector_count": 4,
+      "first_observed": "2026-05-11T02:31:05Z"
+    },
+    {
+      "id": "10000001-0001-4000-8000-000000000003",
+      "label": "admin.acme-corp.com",
+      "entity_type": "domain",
+      "attribution_status": "confirmed",
+      "attribution_confidence": 0.96,
+      "collector_count": 2,
+      "first_observed": "2026-05-11T02:31:18Z"
+    },
+    {
+      "id": "10000001-0001-4000-8000-000000000004",
+      "label": "api.acme-corp.com",
+      "entity_type": "domain",
+      "attribution_status": "confirmed",
+      "attribution_confidence": 0.95,
+      "collector_count": 2,
+      "first_observed": "2026-05-11T02:31:28Z"
+    },
+    {
+      "id": "10000001-0001-4000-8000-000000000005",
+      "label": "www.acme-corp.com",
+      "entity_type": "domain",
+      "attribution_status": "confirmed",
+      "attribution_confidence": 0.99,
+      "collector_count": 1,
+      "first_observed": "2026-05-11T02:31:34Z"
+    },
+    {
+      "id": "10000001-0001-4000-8000-000000000006",
+      "label": "203.0.113.10",
+      "entity_type": "ip",
+      "attribution_status": "high",
+      "attribution_confidence": 0.88,
+      "collector_count": 2,
+      "first_observed": "2026-05-11T02:30:14Z"
+    },
+    {
+      "id": "10000001-0001-4000-8000-000000000007",
+      "label": "203.0.113.42",
+      "entity_type": "ip",
+      "attribution_status": "high",
+      "attribution_confidence": 0.82,
+      "collector_count": 2,
+      "first_observed": "2026-05-11T02:31:05Z"
+    },
+    {
+      "id": "10000001-0001-4000-8000-000000000008",
+      "label": "mail.acme-corp.com",
+      "entity_type": "domain",
+      "attribution_status": "high",
+      "attribution_confidence": 0.90,
+      "collector_count": 1,
+      "first_observed": "2026-05-11T02:32:28Z"
+    },
+    {
+      "id": "10000001-0001-4000-8000-000000000009",
+      "label": "vpn.acme-corp.com",
+      "entity_type": "domain",
+      "attribution_status": "high",
+      "attribution_confidence": 0.91,
+      "collector_count": 2,
+      "first_observed": "2026-05-11T02:32:38Z"
+    },
+    {
+      "id": "10000001-0001-4000-8000-000000000016",
+      "label": "ns1.acmedns.net",
+      "entity_type": "domain",
+      "attribution_status": "requires_review",
+      "attribution_confidence": 0.40,
+      "collector_count": 1,
+      "first_observed": "2026-05-11T02:30:14Z"
+    },
+    {
+      "id": "10000001-0001-4000-8000-000000000017",
+      "label": "ns2.acmedns.net",
+      "entity_type": "domain",
+      "attribution_status": "requires_review",
+      "attribution_confidence": 0.40,
+      "collector_count": 1,
+      "first_observed": "2026-05-11T02:30:14Z"
+    },
+    {
+      "id": "10000001-0001-4000-8000-000000000019",
+      "label": "Acme Corp",
+      "entity_type": "organization",
+      "attribution_status": "confirmed",
+      "attribution_confidence": 0.99,
+      "collector_count": 1,
+      "first_observed": "2026-05-11T02:30:00Z"
+    }
+  ],
+  "edges": [
+    {
+      "source": "10000001-0001-4000-8000-000000000001",
+      "target": "10000001-0001-4000-8000-000000000006",
+      "relationship_type": "resolves_to",
+      "collector_id": "dns-resolver"
+    },
+    {
+      "source": "10000001-0001-4000-8000-000000000002",
+      "target": "10000001-0001-4000-8000-000000000007",
+      "relationship_type": "resolves_to",
+      "collector_id": "dns-resolver"
+    },
+    {
+      "source": "10000001-0001-4000-8000-000000000003",
+      "target": "10000001-0001-4000-8000-000000000006",
+      "relationship_type": "resolves_to",
+      "collector_id": "dns-resolver"
+    },
+    {
+      "source": "10000001-0001-4000-8000-000000000004",
+      "target": "10000001-0001-4000-8000-000000000006",
+      "relationship_type": "resolves_to",
+      "collector_id": "dns-resolver"
+    },
+    {
+      "source": "10000001-0001-4000-8000-000000000005",
+      "target": "10000001-0001-4000-8000-000000000001",
+      "relationship_type": "resolves_to",
+      "collector_id": "dns-resolver"
+    },
+    {
+      "source": "10000001-0001-4000-8000-000000000008",
+      "target": "10000001-0001-4000-8000-000000000001",
+      "relationship_type": "hosts",
+      "collector_id": "dns-resolver"
+    },
+    {
+      "source": "10000001-0001-4000-8000-000000000009",
+      "target": "10000001-0001-4000-8000-000000000006",
+      "relationship_type": "resolves_to",
+      "collector_id": "dns-resolver"
+    },
+    {
+      "source": "10000001-0001-4000-8000-000000000001",
+      "target": "10000001-0001-4000-8000-000000000002",
+      "relationship_type": "certificate_for",
+      "collector_id": "ct-log-monitor"
+    },
+    {
+      "source": "10000001-0001-4000-8000-000000000001",
+      "target": "10000001-0001-4000-8000-000000000003",
+      "relationship_type": "certificate_for",
+      "collector_id": "ct-log-monitor"
+    },
+    {
+      "source": "10000001-0001-4000-8000-000000000001",
+      "target": "10000001-0001-4000-8000-000000000004",
+      "relationship_type": "certificate_for",
+      "collector_id": "ct-log-monitor"
+    },
+    {
+      "source": "10000001-0001-4000-8000-000000000001",
+      "target": "10000001-0001-4000-8000-000000000019",
+      "relationship_type": "belongs_to",
+      "collector_id": "whois-resolver"
+    },
+    {
+      "source": "10000001-0001-4000-8000-000000000016",
+      "target": "10000001-0001-4000-8000-000000000001",
+      "relationship_type": "ns_for",
+      "collector_id": "dns-resolver"
+    },
+    {
+      "source": "10000001-0001-4000-8000-000000000017",
+      "target": "10000001-0001-4000-8000-000000000001",
+      "relationship_type": "ns_for",
+      "collector_id": "dns-resolver"
+    },
+    {
+      "source": "10000001-0001-4000-8000-000000000006",
+      "target": "10000001-0001-4000-8000-000000000019",
+      "relationship_type": "belongs_to",
+      "collector_id": "cloud-ip-ranger"
+    },
+    {
+      "source": "10000001-0001-4000-8000-000000000002",
+      "target": "10000001-0001-4000-8000-000000000019",
+      "relationship_type": "belongs_to",
+      "collector_id": "whois-resolver"
+    }
+  ]
+}

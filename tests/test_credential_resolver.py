@@ -569,7 +569,7 @@ class TestRealCollectorCredentialChain:
         backend: InMemoryBackend,
         resolver: CredentialResolver,
     ) -> None:
-        """dns-chaos: optional key resolved when present (no key_mapping, uses default)."""
+        """dns-chaos: optional key resolved when present (key_mapping to collector.dns-chaos.api_key)."""
         await backend.set(
             tenant_id=TENANT_A,
             key="collector.dns-chaos.api_key",
@@ -577,8 +577,8 @@ class TestRealCollectorCredentialChain:
         )
         result = await resolver.resolve(TENANT_A, "dns-chaos")
         assert len(result) == 1
-        assert "api_key" in result
-        assert result["api_key"].secret_value == "test-chaos-key"  # noqa: S105
+        assert "chaos_api_key" in result
+        assert result["chaos_api_key"].secret_value == "test-chaos-key"  # noqa: S105
 
     async def test_dns_chaos_runs_without_credentials(
         self,
@@ -693,7 +693,7 @@ class TestRealCollectorCredentialChain:
             "scan-censys": {"censys_api_id", "censys_api_secret"},
             "ct-censys": {"censys_api_id", "censys_api_secret"},
             "scan-binaryedge": {"binaryedge_api_key"},
-            "dns-chaos": {"api_key"},  # optional, but present in backend
+            "dns-chaos": {"chaos_api_key"},  # optional, via key_mapping
             "github-exposed": {"api_key"},  # optional, via key_mapping
         }
 

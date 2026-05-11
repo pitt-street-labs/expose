@@ -45,6 +45,7 @@ class EgressProfileType(StrEnum):
 
     DIRECT = "direct"
     SOCKS5 = "socks5"
+    TOR = "tor"
     WIREGUARD = "wireguard"
     HTTP_CONNECT = "http_connect"
 

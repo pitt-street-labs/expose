@@ -1,0 +1,106 @@
+{
+  "categories": {
+    "confirmed_yours": {
+      "category": "confirmed_yours",
+      "metrics": {
+        "dataset_name": "confirmed_yours",
+        "total_cases": 25,
+        "correct_attributions": 23,
+        "attribution_accuracy": 0.92,
+        "mean_confidence_error": 0.045,
+        "false_positives": 0,
+        "false_negatives": 2
+      },
+      "precision": 0.958333,
+      "recall": 0.92,
+      "f1": 0.938776,
+      "total_wall_clock_ms": 12.450,
+      "mean_wall_clock_ms": 0.498
+    },
+    "confirmed_not_yours": {
+      "category": "confirmed_not_yours",
+      "metrics": {
+        "dataset_name": "confirmed_not_yours",
+        "total_cases": 20,
+        "correct_attributions": 18,
+        "attribution_accuracy": 0.90,
+        "mean_confidence_error": 0.062,
+        "false_positives": 2,
+        "false_negatives": 0
+      },
+      "precision": 0.90,
+      "recall": 1.0,
+      "f1": 0.947368,
+      "total_wall_clock_ms": 9.820,
+      "mean_wall_clock_ms": 0.491
+    },
+    "ambiguous": {
+      "category": "ambiguous",
+      "metrics": {
+        "dataset_name": "ambiguous",
+        "total_cases": 15,
+        "correct_attributions": 12,
+        "attribution_accuracy": 0.80,
+        "mean_confidence_error": 0.110,
+        "false_positives": 1,
+        "false_negatives": 2
+      },
+      "precision": 0.857143,
+      "recall": 0.80,
+      "f1": 0.827586,
+      "total_wall_clock_ms": 7.650,
+      "mean_wall_clock_ms": 0.510
+    },
+    "adversarial": {
+      "category": "adversarial",
+      "metrics": {
+        "dataset_name": "adversarial",
+        "total_cases": 10,
+        "correct_attributions": 8,
+        "attribution_accuracy": 0.80,
+        "mean_confidence_error": 0.135,
+        "false_positives": 1,
+        "false_negatives": 1
+      },
+      "precision": 0.833333,
+      "recall": 0.80,
+      "f1": 0.816327,
+      "total_wall_clock_ms": 5.380,
+      "mean_wall_clock_ms": 0.538
+    }
+  },
+  "confusion_matrix": {
+    "matrix": {
+      "confirmed": {
+        "confirmed": 23,
+        "high": 2,
+        "medium": 0,
+        "not_yours": 0
+      },
+      "high": {
+        "confirmed": 1,
+        "high": 14,
+        "medium": 2,
+        "not_yours": 0
+      },
+      "medium": {
+        "confirmed": 0,
+        "high": 1,
+        "medium": 9,
+        "not_yours": 1
+      },
+      "not_yours": {
+        "confirmed": 1,
+        "high": 1,
+        "medium": 1,
+        "not_yours": 14
+      }
+    }
+  },
+  "overall_accuracy": 0.857143,
+  "overall_precision": 0.892857,
+  "overall_recall": 0.877193,
+  "overall_f1": 0.884956,
+  "total_cases": 70,
+  "total_wall_clock_ms": 35.300
+}

@@ -1,0 +1,58 @@
+{
+  "entity_id": "10000001-0001-4000-8000-000000000002",
+  "entity_identifier": "staging.acme-corp.com",
+  "entity_type": "domain",
+  "attribution_status": "confirmed",
+  "attribution_confidence": 0.97,
+  "observations": [
+    {
+      "collector_id": "dns-resolver",
+      "observed_at": "2026-05-11T02:31:05Z",
+      "observation_type": "dns_resolution"
+    },
+    {
+      "collector_id": "ct-log-monitor",
+      "observed_at": "2026-05-11T02:31:08Z",
+      "observation_type": "certificate_san"
+    },
+    {
+      "collector_id": "http-prober",
+      "observed_at": "2026-05-11T02:31:10Z",
+      "observation_type": "http_response"
+    },
+    {
+      "collector_id": "port-scanner",
+      "observed_at": "2026-05-11T02:31:12Z",
+      "observation_type": "port_scan"
+    }
+  ],
+  "rules_applied": [
+    {
+      "rule_id": "subdomain-of-seed-promote",
+      "outcome": "matched_promote",
+      "confidence_delta": 0.60
+    },
+    {
+      "rule_id": "cert-san-match",
+      "outcome": "matched_neutral",
+      "confidence_delta": 0.37
+    }
+  ],
+  "relationships": [
+    {
+      "edge_type": "resolves_to",
+      "target_identifier": "203.0.113.42",
+      "target_type": "ip"
+    },
+    {
+      "edge_type": "certificate_for",
+      "target_identifier": "acme-corp.com",
+      "target_type": "domain"
+    },
+    {
+      "edge_type": "belongs_to",
+      "target_identifier": "Acme Corp",
+      "target_type": "organization"
+    }
+  ]
+}

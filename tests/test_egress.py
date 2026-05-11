@@ -150,10 +150,10 @@ def test_health_check_model_forbids_extra() -> None:
 # === EgressProfileType enum ==================================================
 
 
-def test_enum_has_all_four_values() -> None:
-    """EgressProfileType has exactly the 4 expected values."""
+def test_enum_has_all_five_values() -> None:
+    """EgressProfileType has exactly the 5 expected values."""
     values = {t.value for t in EgressProfileType}
-    assert values == {"direct", "socks5", "wireguard", "http_connect"}
+    assert values == {"direct", "socks5", "tor", "wireguard", "http_connect"}
 
 
 def test_enum_string_coercion() -> None:

@@ -13,6 +13,7 @@ Sub-modules:
   :class:`EgressHealthCheck` model.
 - ``direct`` — :class:`DirectEgressProfile` (pass-through, default).
 - ``socks5`` — :class:`Socks5EgressProfile`.
+- ``tor`` — :class:`TorEgressProfile`.
 - ``wireguard`` — :class:`WireguardEgressProfile`.
 - ``http_connect`` — :class:`HttpConnectEgressProfile`.
 
@@ -32,11 +33,13 @@ from expose.egress.base import EgressHealthCheck, EgressProfile, EgressProfileTy
 from expose.egress.direct import DirectEgressProfile
 from expose.egress.http_connect import HttpConnectEgressProfile
 from expose.egress.socks5 import Socks5EgressProfile
+from expose.egress.tor import TorEgressProfile
 from expose.egress.wireguard import WireguardEgressProfile
 
 _PROFILE_REGISTRY: dict[EgressProfileType, type[EgressProfile]] = {
     EgressProfileType.DIRECT: DirectEgressProfile,
     EgressProfileType.SOCKS5: Socks5EgressProfile,
+    EgressProfileType.TOR: TorEgressProfile,
     EgressProfileType.WIREGUARD: WireguardEgressProfile,
     EgressProfileType.HTTP_CONNECT: HttpConnectEgressProfile,
 }
@@ -47,7 +50,8 @@ def create_egress_profile(profile_type: str, **config: Any) -> EgressProfile:
 
     Args:
         profile_type: One of the :class:`EgressProfileType` string values
-            (``"direct"``, ``"socks5"``, ``"wireguard"``, ``"http_connect"``).
+            (``"direct"``, ``"socks5"``, ``"tor"``, ``"wireguard"``,
+            ``"http_connect"``).
         **config: Profile-specific configuration kwargs passed to the
             constructor. Currently unused by :class:`DirectEgressProfile`;
             future profiles (SOCKS5 etc.) will accept host/port/auth here.
@@ -76,6 +80,7 @@ __all__ = [
     "EgressProfileType",
     "HttpConnectEgressProfile",
     "Socks5EgressProfile",
+    "TorEgressProfile",
     "WireguardEgressProfile",
     "create_egress_profile",
 ]
