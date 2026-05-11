@@ -160,6 +160,36 @@
         </section>
     </main>
 
+    <!-- ===== AI Insights panel (Stage 4b enrichment) ===== -->
+    <div class="card" id="ai-insights-panel" x-data="aiInsights()" x-show="insights.length > 0" x-cloak>
+        <h2 style="display: flex; align-items: center; gap: 0.5rem;">
+            <span style="color: var(--amber);">Stage 4b</span> AI Insights
+        </h2>
+        <div class="ai-insights-list">
+            <template x-for="insight in insights" :key="insight.entity">
+                <div class="ai-insight-row">
+                    <div class="ai-insight-header">
+                        <span class="ai-insight-entity" x-text="insight.entity"></span>
+                        <span class="ai-insight-type" x-text="insight.type"
+                              :style="{ color: insight.type === 'attribution' ? 'var(--green)' : insight.type === 'tech_stack' ? 'var(--blue)' : 'var(--amber)' }">
+                        </span>
+                    </div>
+                    <div class="ai-insight-detail" x-text="insight.summary" style="color: var(--dim); font-size: 0.85rem; margin-top: 0.25rem;"></div>
+                    <template x-if="insight.adjustment">
+                        <div style="margin-top: 0.25rem; font-size: 0.8rem;">
+                            Confidence: <span x-text="insight.original"></span>
+                            <span style="color: var(--dim);">&rarr;</span>
+                            <span :style="{ color: insight.adjusted > insight.original ? 'var(--green)' : 'var(--red)' }" x-text="insight.adjusted"></span>
+                        </div>
+                    </template>
+                </div>
+            </template>
+        </div>
+        <div x-show="insights.length === 0" style="color: var(--dim); font-size: 0.85rem; padding: 1rem 0;">
+            No AI enrichment data available. Run a scan with an LLM provider configured.
+        </div>
+    </div>
+
     <!-- ===== Bottom status bar ===== -->
     <footer class="status-bar"
             {% if active_run_id is defined and active_run_id %}
@@ -182,4 +212,77 @@
     </footer>
 
 </div>
+
+<style>
+.ai-insight-row {
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border);
+}
+.ai-insight-row:last-child { border-bottom: none; }
+.ai-insight-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.ai-insight-entity { font-weight: 600; font-size: 0.9rem; }
+.ai-insight-type {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: var(--border);
+}
+</style>
+
+<script>
+function aiInsights() {
+    return {
+        insights: [],
+        async fetchInsights(tenantId) {
+            if (!tenantId) return;
+            try {
+                const resp = await fetch(`/v1/tenants/${tenantId}/entities`);
+                const data = await resp.json();
+                const entities = data.entities || data.items || [];
+                this.insights = entities
+                    .filter(e => e.properties && e.properties._llm_enrichment)
+                    .flatMap(e => {
+                        const enrichment = e.properties._llm_enrichment;
+                        const results = [];
+                        if (enrichment.attribution) {
+                            results.push({
+                                entity: e.canonical_identifier,
+                                type: 'attribution',
+                                summary: enrichment.attribution.adjustment_reasoning || 'Attribution reviewed',
+                                adjustment: true,
+                                original: enrichment.attribution.original_confidence,
+                                adjusted: enrichment.attribution.adjusted_confidence,
+                            });
+                        }
+                        if (enrichment.tech_stack) {
+                            results.push({
+                                entity: e.canonical_identifier,
+                                type: 'tech_stack',
+                                summary: `Technologies: ${(enrichment.tech_stack.inferred_technologies || []).join(', ')}`,
+                                adjustment: false,
+                            });
+                        }
+                        if (enrichment.noise) {
+                            results.push({
+                                entity: e.canonical_identifier,
+                                type: enrichment.noise.is_noise ? 'noise' : 'signal',
+                                summary: enrichment.noise.noise_reason || 'Classified as signal',
+                                adjustment: false,
+                            });
+                        }
+                        return results;
+                    });
+            } catch (e) {
+                console.warn('AI insights fetch failed:', e);
+            }
+        }
+    };
+}
+</script>
 {% endblock %}

@@ -50,6 +50,9 @@ const ExposeGraph = (() => {
 
     const LABELED_STATUSES = new Set(["confirmed", "high", "requires_review"]);
 
+    /** Normal node radius baseline. Highest-risk node gets 2x. */
+    const DERU_KUI_RADIUS_MULTIPLIER = 2;
+
     /** Link distance by relationship type; fallback for unknown types. */
     const LINK_DISTANCES = {
         resolves_to:     80,
@@ -73,15 +76,19 @@ const ExposeGraph = (() => {
     let edgeData = [];
     let linkGroup = null, nodeGroup = null, labelGroup = null;
     let tooltip = null;
+    let deruKuiTooltip = null;
 
     // --- Visual property helpers ------------------------------------------
 
-    /** Base 6 px, +2 px per collector signal, capped at 10 signals. */
+    /** Base 6 px, +2 px per collector signal, capped at 10 signals.
+     *  Highest-risk node (deru-kui) gets 2x radius. */
     function nodeRadius(d) {
-        return 6 + Math.min(d.collector_count || 1, 10) * 2;
+        const base = 6 + Math.min(d.collector_count || 1, 10) * 2;
+        return d.highest_risk ? base * DERU_KUI_RADIUS_MULTIPLIER : base;
     }
 
     function nodeColor(d) {
+        if (d.highest_risk) return "#ef4444";
         return COLORS[d.attribution_status] || COLORS.unattributed;
     }
 
@@ -101,6 +108,8 @@ const ExposeGraph = (() => {
     }
 
     function nodeFilter(d) {
+        // Highest-risk node uses CSS-driven drop-shadow via deru-kui class.
+        if (d.highest_risk) return null;
         if (d.attribution_status === "confirmed") return "url(#expose-glow)";
         return `url(#${nodeFilterId(d)})`;
     }
@@ -179,6 +188,12 @@ const ExposeGraph = (() => {
             .style("opacity", 0)
             .style("transition", "opacity 150ms ease")
             .style("z-index", 10);
+
+        // ---- Deru-kui tooltip (highest-risk rich tooltip) ----
+        deruKuiTooltip = d3.select("body")
+            .append("div")
+            .attr("class", "deru-kui-tooltip")
+            .style("opacity", 0);
     }
 
     // --- Force simulation --------------------------------------------------
@@ -242,28 +257,58 @@ const ExposeGraph = (() => {
             .attr("stroke-opacity", (l) =>
                 (l.source.id === d.id || l.target.id === d.id) ? 0.9 : 0.08);
 
-        // Build tooltip content.
-        const lines = [
-            `<strong>${d.label}</strong>`,
-            `Type: ${d.entity_type}`,
-            `Status: ${d.attribution_status}`,
-            `Confidence: ${((d.attribution_confidence || 0) * 100).toFixed(0)}%`,
-            `Signals: ${d.collector_count || 0}`,
-        ];
-        if (d.first_observed) {
-            lines.push(`First seen: ${d.first_observed.substring(0, 19)}`);
-        }
+        if (d.highest_risk && deruKuiTooltip) {
+            // Show rich deru-kui tooltip for the highest-risk node.
+            const tierLabel = d.attribution_status
+                ? d.attribution_status.replace(/_/g, " ")
+                : "unknown";
+            const scoreDisplay = d.lead_score != null
+                ? d.lead_score
+                : (d.attribution_confidence != null
+                    ? ((d.attribution_confidence * 100).toFixed(0) + "%")
+                    : "—");
 
-        tooltip
-            .html(lines.join("<br>"))
-            .style("left", `${event.offsetX + 14}px`)
-            .style("top", `${event.offsetY - 10}px`)
-            .style("opacity", 1);
+            deruKuiTooltip
+                .html(
+                    '<div class="deru-kui-kanji">「出る杭は打たれる」</div>' +
+                    '<div class="deru-kui-english">The nail that sticks out gets hammered</div>' +
+                    '<div class="deru-kui-entity">' + (d.label || d.id) + '</div>' +
+                    '<div class="deru-kui-score">Lead Score: ' + scoreDisplay + ' | ' + tierLabel + '</div>'
+                )
+                .style("left", (event.pageX + 16) + "px")
+                .style("top", (event.pageY - 16) + "px")
+                .style("opacity", 1);
+
+            // Hide the standard tooltip.
+            tooltip.style("opacity", 0);
+        } else {
+            // Build standard tooltip content.
+            const lines = [
+                `<strong>${d.label}</strong>`,
+                `Type: ${d.entity_type}`,
+                `Status: ${d.attribution_status}`,
+                `Confidence: ${((d.attribution_confidence || 0) * 100).toFixed(0)}%`,
+                `Signals: ${d.collector_count || 0}`,
+            ];
+            if (d.first_observed) {
+                lines.push(`First seen: ${d.first_observed.substring(0, 19)}`);
+            }
+
+            tooltip
+                .html(lines.join("<br>"))
+                .style("left", `${event.offsetX + 14}px`)
+                .style("top", `${event.offsetY - 10}px`)
+                .style("opacity", 1);
+
+            // Hide deru-kui tooltip if visible.
+            if (deruKuiTooltip) deruKuiTooltip.style("opacity", 0);
+        }
     }
 
     function onNodeHoverOut() {
         linkGroup.selectAll("line").attr("stroke-opacity", 0.25);
         tooltip.style("opacity", 0);
+        if (deruKuiTooltip) deruKuiTooltip.style("opacity", 0);
     }
 
     function onNodeClick(_event, d) {
@@ -352,28 +397,30 @@ const ExposeGraph = (() => {
             circlesEnter
                 .transition().duration(EMERGE_DURATION)
                 .attr("r", nodeRadius)
-                .attr("opacity", nodeOpacity);
+                .attr("opacity", (d) => d.highest_risk ? 1 : nodeOpacity(d));
         } else {
             circlesEnter
                 .attr("r", nodeRadius)
-                .attr("opacity", nodeOpacity);
+                .attr("opacity", (d) => d.highest_risk ? 1 : nodeOpacity(d));
         }
 
         // Update — attribution changes (smooth transition).
         circles
             .classed("expose-pulse", (d) => d.attribution_status === "requires_review")
+            .classed("deru-kui", (d) => d.highest_risk === true)
             .transition().duration(CHANGE_DURATION)
             .attr("r", nodeRadius)
             .attr("fill", nodeColor)
-            .attr("opacity", nodeOpacity)
+            .attr("opacity", (d) => d.highest_risk ? 1 : nodeOpacity(d))
             .attr("filter", nodeFilter);
 
         // Merge enter + update for tick positioning.
         circlesEnter.merge(circles);
 
-        // Apply requires_review pulse class on entering nodes too.
+        // Apply pulse / deru-kui classes on entering nodes too.
         circlesEnter
-            .classed("expose-pulse", (d) => d.attribution_status === "requires_review");
+            .classed("expose-pulse", (d) => d.attribution_status === "requires_review")
+            .classed("deru-kui", (d) => d.highest_risk === true);
 
         // ---- Labels ----
         const labels = labelGroup.selectAll("text")
@@ -501,6 +548,7 @@ const ExposeGraph = (() => {
         if (simulation) { simulation.stop(); simulation = null; }
         if (svg) { svg.remove(); svg = null; }
         if (tooltip) { tooltip.remove(); tooltip = null; }
+        if (deruKuiTooltip) { deruKuiTooltip.remove(); deruKuiTooltip = null; }
         nodeMap.clear();
         edgeData = [];
         container = linkGroup = nodeGroup = labelGroup = null;
