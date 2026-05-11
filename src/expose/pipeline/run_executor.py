@@ -55,6 +55,7 @@ from expose.quotas.tracker import QuotaExceededError, QuotaTracker
 from expose.repositories.entity_repo import EntityRepository
 from expose.repositories.relationship_repo import RelationshipRepository
 from expose.repositories.run_repo import RunRepository
+from expose.observability.metrics import pipeline_errors_total
 from expose.types.shared import EntityId, RunId, TenantId
 
 # Type alias for the log sink callable used by the executor and dispatcher.
@@ -252,8 +253,9 @@ class RunExecutor:
                         data=data or {},
                     )
                 )
-            except Exception:
+            except Exception as exc:
                 logger.debug("Failed to publish event %s", event_type)
+                pipeline_errors_total.add(1, {"component": "executor", "error_type": type(exc).__name__})
 
     async def _dns_filter_seeds(self, seeds: list[Seed]) -> list[Seed]:
         """Remove DOMAIN seeds that do not resolve via DNS.
@@ -540,10 +542,11 @@ class RunExecutor:
                 await self._entity_repo.update_attribution_scores(
                     tenant_id=TenantId(tenant_id),
                 )
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Attribution scoring failed after pass %d", pass_number
                 )
+                pipeline_errors_total.add(1, {"component": "executor", "error_type": type(exc).__name__})
 
             # --- Stage 4a: Rule-based attribution evaluation -----------------
             try:
@@ -595,10 +598,11 @@ class RunExecutor:
                                     f"({eval_result.final_confidence:.3f}), "
                                     f"rules={eval_result.matched_rules}",
                                 )
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Rule evaluation failed after pass %d", pass_number
                 )
+                pipeline_errors_total.add(1, {"component": "rule_evaluator", "error_type": type(exc).__name__})
 
             # --- Check for more passes ---------------------------------------
             if pass_number >= max_passes:
@@ -620,10 +624,11 @@ class RunExecutor:
                     tenant_id=tenant_id,
                     pass_number=pass_number,
                 )
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Supply chain inference failed after pass %d", pass_number
                 )
+                pipeline_errors_total.add(1, {"component": "supply_chain", "error_type": type(exc).__name__})
 
             # --- Subdomain takeover detection -----------------------------------
             # After supply chain inference, check for dangling CNAME records
@@ -634,10 +639,11 @@ class RunExecutor:
                     tenant_id=tenant_id,
                     pass_number=pass_number,
                 )
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Takeover detection failed after pass %d", pass_number
                 )
+                pipeline_errors_total.add(1, {"component": "takeover_detection", "error_type": type(exc).__name__})
 
             # --- Target profiling & collector filtering (after Pass 1) ---
             # Build a profile of the target's infrastructure from Pass 1
@@ -664,10 +670,11 @@ class RunExecutor:
                             f"Active signals: {filter_result.signals_active}; "
                             f"{len(filter_result.decisions)} filter decisions applied",
                         )
-                except Exception:
+                except Exception as exc:
                     logger.exception(
                         "Target profiling/collector filtering failed after pass 1"
                     )
+                    pipeline_errors_total.add(1, {"component": "executor", "error_type": type(exc).__name__})
 
             # Convert discovered entities to new seeds
             new_seeds = entities_to_seeds(entities, already_scanned)
@@ -1071,10 +1078,11 @@ class RunExecutor:
                         f"{entity.canonical_identifier}",
                     )
                 batch_succeeded = True
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Batch entity upsert failed; falling back to per-entity upserts"
                 )
+                pipeline_errors_total.add(1, {"component": "executor", "error_type": type(exc).__name__})
                 self._log(
                     "warn",
                     "Batch entity upsert failed — falling back to per-entity upserts",
@@ -1100,12 +1108,13 @@ class RunExecutor:
                         f"New entity: {obs.subject.identifier_type.value} "
                         f"{obs.subject.identifier_value}",
                     )
-                except Exception:
+                except Exception as exc:
                     logger.exception(
                         "Entity upsert failed for %s/%s",
                         obs.subject.identifier_type.value,
                         obs.subject.identifier_value,
                     )
+                    pipeline_errors_total.add(1, {"component": "executor", "error_type": type(exc).__name__})
                     self._log(
                         "error",
                         f"Entity upsert failed: {obs.subject.identifier_value}",
@@ -1196,8 +1205,9 @@ class RunExecutor:
                                 "priority_tier": score_result.priority_tier.value,
                             },
                         )
-                except Exception:
+                except Exception as exc:
                     logger.exception("Lead scoring failed for %s", canonical_id)
+                    pipeline_errors_total.add(1, {"component": "lead_scoring", "error_type": type(exc).__name__})
 
             # --- Temporal analysis (post-lead-scoring) -------------------------
             # Detect progression patterns from historical observations.
@@ -1236,12 +1246,14 @@ class RunExecutor:
                                     attribution_status=entity.attribution_status,
                                     attribution_confidence=entity.attribution_confidence,
                                 )
-                        except Exception:
+                        except Exception as exc:
                             logger.exception(
                                 "Temporal analysis failed for %s", canonical_id
                             )
-            except Exception:
+                            pipeline_errors_total.add(1, {"component": "temporal_analysis", "error_type": type(exc).__name__})
+            except Exception as exc:
                 logger.exception("Temporal analysis setup failed")
+                pipeline_errors_total.add(1, {"component": "temporal_analysis", "error_type": type(exc).__name__})
 
         # --- Stage 4 (cont): Relationship extraction -------------------------
         if self._relationship_repo is not None:
@@ -1322,12 +1334,13 @@ class RunExecutor:
                             obs.subject.identifier_value,
                         )
                         return False
-                    except Exception:
+                    except Exception as exc:
                         logger.exception(
                             "Enrichment failed for %s/%s",
                             obs.subject.identifier_type.value,
                             obs.subject.identifier_value,
                         )
+                        pipeline_errors_total.add(1, {"component": "enrichment", "error_type": type(exc).__name__})
                         return False
 
             results = await asyncio.gather(
@@ -1428,13 +1441,15 @@ class RunExecutor:
                                         f"classified as {analysis.page_type} "
                                         f"({analysis.visual_confidence:.2f})",
                                     )
-                        except Exception:
+                        except Exception as exc:
                             logger.exception(
                                 "Vision analysis failed for %s",
                                 obs.subject.identifier_value,
                             )
-            except Exception:
+                            pipeline_errors_total.add(1, {"component": "enrichment", "error_type": type(exc).__name__})
+            except Exception as exc:
                 logger.exception("Stage 4c vision analysis setup failed")
+                pipeline_errors_total.add(1, {"component": "enrichment", "error_type": type(exc).__name__})
 
         return enrichment_count, upsert_failures
 
@@ -1589,20 +1604,22 @@ class RunExecutor:
                 )
                 for entity in upserted:
                     related_entity_map[entity.canonical_identifier] = entity
-            except Exception:
+            except Exception as exc:
                 logger.exception("Batch related-entity upsert failed")
+                pipeline_errors_total.add(1, {"component": "relationship_extraction", "error_type": type(exc).__name__})
                 return
         else:
             for data in unique_related.values():
                 try:
                     entity = await self._entity_repo.create_or_update(**data)
                     related_entity_map[data["canonical_identifier"]] = entity
-                except Exception:
+                except Exception as exc:
                     logger.exception(
                         "Related entity upsert failed for %s/%s",
                         data["entity_type"],
                         data["canonical_identifier"],
                     )
+                    pipeline_errors_total.add(1, {"component": "relationship_extraction", "error_type": type(exc).__name__})
 
         # --- 3. Batch-create relationships -----------------------------------
         rel_dicts: list[dict[str, Any]] = []
@@ -1627,8 +1644,9 @@ class RunExecutor:
         if getattr(self._relationship_repo, "supports_batch_create", False) is True:
             try:
                 await self._relationship_repo.batch_create(rel_dicts)
-            except Exception:
+            except Exception as exc:
                 logger.exception("Batch relationship creation failed")
+                pipeline_errors_total.add(1, {"component": "relationship_extraction", "error_type": type(exc).__name__})
                 try:
                     await self._relationship_repo._session.rollback()
                 except Exception:
@@ -1637,13 +1655,14 @@ class RunExecutor:
             for rel in rel_dicts:
                 try:
                     await self._relationship_repo.create_or_update(**rel)
-                except Exception:
+                except Exception as exc:
                     logger.exception(
                         "Relationship creation failed for %s -[%s]-> %s",
                         rel["from_entity_id"],
                         rel["edge_type"],
                         rel["to_entity_id"],
                     )
+                    pipeline_errors_total.add(1, {"component": "relationship_extraction", "error_type": type(exc).__name__})
 
     async def _extract_relationships(
         self,
@@ -1730,7 +1749,7 @@ class RunExecutor:
                     observed_at=obs.observed_at,
                     collector_id=obs.collector_id,
                 )
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Relationship extraction failed for %s -[%s]-> %s/%s",
                     obs.subject.identifier_value,
@@ -1738,6 +1757,7 @@ class RunExecutor:
                     entity_type,
                     identifier,
                 )
+                pipeline_errors_total.add(1, {"component": "relationship_extraction", "error_type": type(exc).__name__})
 
     async def _apply_supply_chain_detections(
         self,
@@ -1824,12 +1844,13 @@ class RunExecutor:
                     f"{detection.provider_name} ({detection.evidence_type}: "
                     f"{detection.evidence_value})",
                 )
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Supply chain: failed to persist detection %s -> %s",
                     detection.source_entity,
                     detection.provider_id,
                 )
+                pipeline_errors_total.add(1, {"component": "supply_chain", "error_type": type(exc).__name__})
 
     async def _apply_takeover_detections(
         self,
@@ -1908,11 +1929,12 @@ class RunExecutor:
                     risk.provider,
                     risk.risk_level,
                 )
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Takeover detection: failed to update entity %s",
                     risk.subdomain,
                 )
+                pipeline_errors_total.add(1, {"component": "takeover_detection", "error_type": type(exc).__name__})
 
 
 def _observation_properties(obs: Observation) -> dict[str, Any]:

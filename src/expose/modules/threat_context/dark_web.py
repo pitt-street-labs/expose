@@ -40,6 +40,7 @@ or ``Crypto``. All HTTP is via ``httpx`` (stdlib TLS).
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -48,6 +49,49 @@ from typing import Any
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# === Input validation ==========================================================
+
+# DNS label-safe domain pattern (RFC 1035 / RFC 1123).
+_DOMAIN_RE = re.compile(
+    r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?"
+    r"(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$"
+)
+
+# Basic email sanity check (not full RFC 5322).
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+# Characters that indicate path traversal or injection attempts.
+_PATH_TRAVERSAL_CHARS = re.compile(r"[/\\]|\.\.")
+
+# DNS maximum length per RFC 1035.
+_MAX_INPUT_LEN = 253
+
+
+def _validate_domain(domain: str) -> bool:
+    """Return True if *domain* passes basic format validation.
+
+    Rejects overlong inputs, path-traversal characters, and strings
+    that don't look like valid DNS names.
+    """
+    if not domain or len(domain) > _MAX_INPUT_LEN:
+        return False
+    if _PATH_TRAVERSAL_CHARS.search(domain):
+        return False
+    return bool(_DOMAIN_RE.match(domain))
+
+
+def _validate_email(email: str) -> bool:
+    """Return True if *email* passes basic format validation.
+
+    Rejects overlong inputs, path-traversal characters, and strings
+    that don't match a minimal ``user@host.tld`` pattern.
+    """
+    if not email or len(email) > _MAX_INPUT_LEN:
+        return False
+    if _PATH_TRAVERSAL_CHARS.search(email):
+        return False
+    return bool(_EMAIL_RE.match(email))
 
 
 # === Indicator types ==========================================================
@@ -122,7 +166,14 @@ class DarkWebEnricher:
 
         Returns a list of ThreatIndicators from all sources that had
         credentials configured. Sources without credentials are skipped.
+        Invalid domains are rejected with an empty result and a warning.
         """
+        if not _validate_domain(domain):
+            logger.warning(
+                "Invalid domain rejected by input validation: %r", domain
+            )
+            return []
+
         indicators: list[ThreatIndicator] = []
 
         if self._hibp_api_key:
@@ -149,8 +200,15 @@ class DarkWebEnricher:
         """Query all configured aggregators for an email address.
 
         Returns a list of ThreatIndicators. Similar to enrich_domain but
-        uses email-specific endpoints where available.
+        uses email-specific endpoints where available. Invalid emails are
+        rejected with an empty result and a warning.
         """
+        if not _validate_email(email):
+            logger.warning(
+                "Invalid email rejected by input validation: %r", email
+            )
+            return []
+
         indicators: list[ThreatIndicator] = []
 
         if self._hibp_api_key:
@@ -452,4 +510,6 @@ __all__ = [
     "DarkWebEnricher",
     "IndicatorType",
     "ThreatIndicator",
+    "_validate_domain",
+    "_validate_email",
 ]

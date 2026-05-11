@@ -77,6 +77,7 @@ from expose.collectors.tiers import (
 )
 from expose.egress.base import EgressProfile
 from expose.observability import current_tenant_id
+from expose.observability.metrics import pipeline_errors_total
 from expose.pipeline.credential_resolver import CredentialResolutionError, CredentialResolver
 from expose.pipeline.enforcement import EnforcementLog, ScopeRefusalEvent
 from expose.scope.matcher import ScopeMatcher
@@ -264,6 +265,7 @@ class PipelineDispatcher:
                 job.tenant_id,
                 exc,
             )
+            pipeline_errors_total.add(1, {"component": "dispatcher", "error_type": type(exc).__name__})
             return DispatchResult(
                 status=DispatchStatus.SKIPPED,
                 error_message=str(exc),
@@ -397,6 +399,7 @@ class PipelineDispatcher:
                             job.collector_id,
                             HEALTH_CHECK_TIMEOUT,
                         )
+                        pipeline_errors_total.add(1, {"component": "dispatcher", "error_type": "TimeoutError"})
                         return DispatchResult(
                             status=DispatchStatus.HEALTH_CHECK_FAILED,
                             error_message=f"Health check timed out after {HEALTH_CHECK_TIMEOUT}s",
@@ -408,6 +411,7 @@ class PipelineDispatcher:
                 CollectorStatus.SUCCESS,
                 CollectorStatus.PARTIAL_SUCCESS,
             ):
+                pipeline_errors_total.add(1, {"component": "dispatcher", "error_type": "HealthCheckFailed"})
                 return DispatchResult(
                     status=DispatchStatus.HEALTH_CHECK_FAILED,
                     collector_health=health,
@@ -433,6 +437,7 @@ class PipelineDispatcher:
                     job.collector_id,
                     EXPAND_TIMEOUT,
                 )
+                pipeline_errors_total.add(1, {"component": "dispatcher", "error_type": "TimeoutError"})
                 return DispatchResult(
                     status=DispatchStatus.COLLECTOR_ERROR,
                     collector_health=health,
@@ -448,6 +453,7 @@ class PipelineDispatcher:
                     job.collector_id,
                     exc_info=True,
                 )
+                pipeline_errors_total.add(1, {"component": "dispatcher", "error_type": type(exc).__name__})
                 return DispatchResult(
                     status=DispatchStatus.COLLECTOR_ERROR,
                     collector_health=health,
@@ -459,6 +465,7 @@ class PipelineDispatcher:
                     "Unexpected error in collector %s",
                     job.collector_id,
                 )
+                pipeline_errors_total.add(1, {"component": "dispatcher", "error_type": type(exc).__name__})
                 return DispatchResult(
                     status=DispatchStatus.COLLECTOR_ERROR,
                     collector_health=health,
@@ -484,12 +491,13 @@ class PipelineDispatcher:
             if _close is not None and callable(_close):
                 try:
                     await _close()
-                except Exception:
+                except Exception as exc:
                     logger.debug(
                         "Ignoring error from collector %s close()",
                         job.collector_id,
                         exc_info=True,
                     )
+                    pipeline_errors_total.add(1, {"component": "dispatcher", "error_type": type(exc).__name__})
 
     async def _dispatch_inner(
         self,
@@ -541,6 +549,7 @@ class PipelineDispatcher:
                     job.collector_id,
                     primary_egress_name,
                 )
+                pipeline_errors_total.add(1, {"component": "dispatcher", "error_type": type(primary_exc).__name__})
                 return DispatchResult(
                     status=DispatchStatus.COLLECTOR_ERROR,
                     error_message=str(primary_exc),
@@ -595,6 +604,7 @@ class PipelineDispatcher:
                 job.collector_id,
                 primary_egress_name,
             )
+            pipeline_errors_total.add(1, {"component": "dispatcher", "error_type": type(primary_exc).__name__})
             return DispatchResult(
                 status=DispatchStatus.COLLECTOR_ERROR,
                 error_message=str(primary_exc),

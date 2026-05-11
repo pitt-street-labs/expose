@@ -3,7 +3,7 @@
 Coverage:
 
 1. ``AuditEvent`` model validation — all fields accepted, types enforced.
-2. ``AuditEventType`` — all 23 enum members are valid ``StrEnum`` values.
+2. ``AuditEventType`` — all 33 enum members are valid ``StrEnum`` values.
 3. Audit log append-only — write, verify, write again, verify both records.
 4. Serialization round-trip — model_dump → JSON → parse → reconstruct.
 5. ``retention_category`` present on every event (default + explicit).
@@ -15,6 +15,13 @@ Coverage:
 11. ``sanitize_details`` redacts sensitive keys (passwords, secrets, tokens,
     api_keys, credentials) including nested dicts.
 12. ``emit_audit_event`` applies ``sanitize_details`` before writing.
+13. ``AuditLogger`` convenience methods — each event category produces correct
+    event_type, action, outcome, and AU-3 fields.
+14. ``AuditRetentionConfig`` — configurable retention periods, defaults, and
+    fallback behavior.
+15. New AU-2 event types — token lifecycle, tier-3 gate, tenant isolation,
+    entity queries, artifact downloads, collector dispatch, enrichment,
+    credential CRUD.
 """
 
 from __future__ import annotations
@@ -27,7 +34,14 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from expose.observability.audit_schema import AuditEvent, AuditEventType, sanitize_details
+from expose.observability.audit_schema import (
+    AuditEvent,
+    AuditEventType,
+    AuditLogger,
+    AuditRetentionConfig,
+    DEFAULT_RETENTION_DAYS,
+    sanitize_details,
+)
 from expose.observability.logging import (
     _AUDIT_LOGGER_NAME,
     configure_audit_logging,
@@ -64,34 +78,66 @@ def _reset_audit_logger() -> None:
     logger.propagate = False
 
 
+def _flush_audit_logger() -> None:
+    """Flush all handlers on the audit logger."""
+    logger = logging.getLogger(_AUDIT_LOGGER_NAME)
+    for h in logger.handlers:
+        h.flush()
+
+
 # ---------------------------------------------------------------------------
 # AuditEventType enum tests
 # ---------------------------------------------------------------------------
 
-
+# Complete catalog of all 32 AU-2 event types (9 new in issue #107).
 _EXPECTED_EVENT_TYPES = [
+    # Run lifecycle
     ("RUN_STARTED", "run_started"),
     ("RUN_COMPLETED", "run_completed"),
     ("RUN_FAILED", "run_failed"),
+    # Entity lifecycle
     ("ENTITY_CREATED", "entity_created"),
     ("ENTITY_UPDATED", "entity_updated"),
+    # Data access (new)
+    ("ENTITY_QUERIED", "entity_queried"),
+    ("ARTIFACT_DOWNLOADED", "artifact_downloaded"),
+    # Scope enforcement
     ("SCOPE_DENIAL", "scope_denial"),
+    # Tenant lifecycle
     ("TENANT_CREATED", "tenant_created"),
     ("TENANT_DELETED", "tenant_deleted"),
+    # Credential operations (expanded)
+    ("CREDENTIAL_CREATED", "credential_created"),
     ("CREDENTIAL_ACCESSED", "credential_accessed"),
     ("CREDENTIAL_ROTATED", "credential_rotated"),
+    ("CREDENTIAL_DELETED", "credential_deleted"),
+    # Data lifecycle
     ("DATA_EXPORT", "data_export"),
     ("DATA_DELETION", "data_deletion"),
+    # Configuration
     ("CONFIG_CHANGED", "config_changed"),
+    # Authentication (expanded)
     ("AUTH_SUCCESS", "auth_success"),
     ("AUTH_FAILURE", "auth_failure"),
+    ("TOKEN_CREATED", "token_created"),
+    ("TOKEN_VALIDATION_FAILED", "token_validation_failed"),
+    # Authorization (expanded)
     ("AUTHORIZATION_DENIED", "authorization_denied"),
+    ("TIER3_GATE_DENIED", "tier3_gate_denied"),
+    ("TENANT_ISOLATION_VIOLATION", "tenant_isolation_violation"),
+    # Artifact signing
     ("ARTIFACT_SIGNED", "artifact_signed"),
     ("SIGNATURE_VERIFICATION_FAILED", "signature_verification_failed"),
+    # Scheduling
     ("SCHEDULE_CREATED", "schedule_created"),
     ("SCHEDULE_DELETED", "schedule_deleted"),
     ("SCHEDULE_UPDATED", "schedule_updated"),
+    # Pipeline operations (new)
+    ("COLLECTOR_DISPATCHED", "collector_dispatched"),
+    ("ENRICHMENT_COMPLETED", "enrichment_completed"),
+    # SIEM delivery
     ("SIEM_DELIVERY_FAILED", "siem_delivery_failed"),
+    # Credential resolution
     ("CREDENTIAL_RESOLUTION_FAILED", "credential_resolution_failed"),
 ]
 
@@ -106,8 +152,8 @@ class TestAuditEventType:
             assert isinstance(member.value, str)
 
     def test_member_count(self) -> None:
-        """Exactly 23 event types in the AU-2 catalog."""
-        assert len(AuditEventType) == 23
+        """Exactly 33 event types in the extended AU-2 catalog."""
+        assert len(AuditEventType) == 33
 
     @pytest.mark.parametrize(("name", "value"), _EXPECTED_EVENT_TYPES)
     def test_expected_member(self, name: str, value: str) -> None:
@@ -115,6 +161,31 @@ class TestAuditEventType:
         member = AuditEventType[name]
         assert member.value == value
         assert str(member) == value
+
+    def test_new_auth_event_types(self) -> None:
+        """New authentication event types exist."""
+        assert AuditEventType.TOKEN_CREATED == "token_created"
+        assert AuditEventType.TOKEN_VALIDATION_FAILED == "token_validation_failed"
+
+    def test_new_authz_event_types(self) -> None:
+        """New authorization event types exist."""
+        assert AuditEventType.TIER3_GATE_DENIED == "tier3_gate_denied"
+        assert AuditEventType.TENANT_ISOLATION_VIOLATION == "tenant_isolation_violation"
+
+    def test_new_data_access_event_types(self) -> None:
+        """New data access event types exist."""
+        assert AuditEventType.ENTITY_QUERIED == "entity_queried"
+        assert AuditEventType.ARTIFACT_DOWNLOADED == "artifact_downloaded"
+
+    def test_new_pipeline_event_types(self) -> None:
+        """New pipeline event types exist."""
+        assert AuditEventType.COLLECTOR_DISPATCHED == "collector_dispatched"
+        assert AuditEventType.ENRICHMENT_COMPLETED == "enrichment_completed"
+
+    def test_new_credential_event_types(self) -> None:
+        """New credential CRUD event types exist."""
+        assert AuditEventType.CREDENTIAL_CREATED == "credential_created"
+        assert AuditEventType.CREDENTIAL_DELETED == "credential_deleted"
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +283,7 @@ class TestSerializationRoundTrip:
         assert isinstance(json_str, str)
 
     def test_round_trip_preserves_fields(self) -> None:
-        """Serialize → deserialize produces an equivalent AuditEvent."""
+        """Serialize -> deserialize produces an equivalent AuditEvent."""
         original = _make_event(
             source_ip="10.20.30.40",
             tenant_id=uuid4(),
@@ -318,11 +389,7 @@ class TestEmitAuditEvent:
 
         event = _make_event()
         emit_audit_event(event)
-
-        # Force flush.
-        logger = logging.getLogger(_AUDIT_LOGGER_NAME)
-        for h in logger.handlers:
-            h.flush()
+        _flush_audit_logger()
 
         lines = log_path.read_text().strip().splitlines()
         assert len(lines) == 1
@@ -342,10 +409,7 @@ class TestEmitAuditEvent:
         )
         emit_audit_event(event1)
         emit_audit_event(event2)
-
-        logger = logging.getLogger(_AUDIT_LOGGER_NAME)
-        for h in logger.handlers:
-            h.flush()
+        _flush_audit_logger()
 
         lines = log_path.read_text().strip().splitlines()
         assert len(lines) == 2
@@ -363,10 +427,7 @@ class TestEmitAuditEvent:
 
         for evt_type in list(AuditEventType)[:5]:
             emit_audit_event(_make_event(event_type=evt_type))
-
-        logger = logging.getLogger(_AUDIT_LOGGER_NAME)
-        for h in logger.handlers:
-            h.flush()
+        _flush_audit_logger()
 
         lines = log_path.read_text().strip().splitlines()
         assert len(lines) == 5
@@ -388,10 +449,7 @@ class TestEmitAuditEvent:
         configure_audit_logging(path=str(log_path))
 
         emit_audit_event(_make_event(retention_category="legal-hold"))
-
-        logger = logging.getLogger(_AUDIT_LOGGER_NAME)
-        for h in logger.handlers:
-            h.flush()
+        _flush_audit_logger()
 
         record = json.loads(log_path.read_text().strip())
         assert record["retention_category"] == "legal-hold"
@@ -408,10 +466,7 @@ class TestEmitAuditEvent:
             correlation_id="au3-check",
         )
         emit_audit_event(event)
-
-        logger = logging.getLogger(_AUDIT_LOGGER_NAME)
-        for h in logger.handlers:
-            h.flush()
+        _flush_audit_logger()
 
         record = json.loads(log_path.read_text().strip())
         required_keys = {
@@ -544,10 +599,7 @@ class TestEmitSanitizesDetails:
 
         event = _make_event(details={"db_password": "supersecret", "host": "db.local"})
         emit_audit_event(event)
-
-        logger = logging.getLogger(_AUDIT_LOGGER_NAME)
-        for h in logger.handlers:
-            h.flush()
+        _flush_audit_logger()
 
         record = json.loads(log_path.read_text().strip())
         assert record["details"]["db_password"] == "[REDACTED]"
@@ -565,10 +617,7 @@ class TestEmitSanitizesDetails:
             },
         })
         emit_audit_event(event)
-
-        logger = logging.getLogger(_AUDIT_LOGGER_NAME)
-        for h in logger.handlers:
-            h.flush()
+        _flush_audit_logger()
 
         record = json.loads(log_path.read_text().strip())
         assert record["details"]["collector_config"]["api_key"] == "[REDACTED]"
@@ -581,11 +630,566 @@ class TestEmitSanitizesDetails:
 
         event = _make_event(details={"domain": "example.com", "count": 5})
         emit_audit_event(event)
-
-        logger = logging.getLogger(_AUDIT_LOGGER_NAME)
-        for h in logger.handlers:
-            h.flush()
+        _flush_audit_logger()
 
         record = json.loads(log_path.read_text().strip())
         assert record["details"]["domain"] == "example.com"
         assert record["details"]["count"] == 5
+
+
+# ---------------------------------------------------------------------------
+# AuditRetentionConfig tests
+# ---------------------------------------------------------------------------
+
+
+class TestAuditRetentionConfig:
+    """Verify configurable retention periods per AU-11."""
+
+    def test_default_values(self) -> None:
+        """Default retention config matches the 90/365/-1 standard."""
+        config = AuditRetentionConfig()
+        assert config.standard_days == 90
+        assert config.extended_days == 365
+        assert config.legal_hold_days == -1
+
+    def test_custom_values(self) -> None:
+        """Custom retention periods are accepted."""
+        config = AuditRetentionConfig(
+            standard_days=180,
+            extended_days=730,
+            legal_hold_days=-1,
+        )
+        assert config.standard_days == 180
+        assert config.extended_days == 730
+
+    def test_days_for_standard(self) -> None:
+        """days_for('standard') returns standard_days."""
+        config = AuditRetentionConfig(standard_days=120)
+        assert config.days_for("standard") == 120
+
+    def test_days_for_extended(self) -> None:
+        """days_for('extended') returns extended_days."""
+        config = AuditRetentionConfig(extended_days=500)
+        assert config.days_for("extended") == 500
+
+    def test_days_for_legal_hold(self) -> None:
+        """days_for('legal-hold') returns legal_hold_days."""
+        config = AuditRetentionConfig(legal_hold_days=-1)
+        assert config.days_for("legal-hold") == -1
+
+    def test_days_for_unknown_falls_back_to_standard(self) -> None:
+        """Unknown retention category falls back to standard_days."""
+        config = AuditRetentionConfig(standard_days=90)
+        assert config.days_for("unknown-category") == 90
+
+    def test_config_is_frozen(self) -> None:
+        """AuditRetentionConfig is immutable."""
+        config = AuditRetentionConfig()
+        with pytest.raises(Exception):  # noqa: B017 — ValidationError
+            config.standard_days = 999  # type: ignore[misc]
+
+    def test_default_retention_days_constant(self) -> None:
+        """DEFAULT_RETENTION_DAYS module constant has the expected keys."""
+        assert DEFAULT_RETENTION_DAYS["standard"] == 90
+        assert DEFAULT_RETENTION_DAYS["extended"] == 365
+        assert DEFAULT_RETENTION_DAYS["legal-hold"] == -1
+
+
+# ---------------------------------------------------------------------------
+# AuditLogger class tests
+# ---------------------------------------------------------------------------
+
+
+class TestAuditLogger:
+    """Verify the AuditLogger convenience class for each AU-2 event category."""
+
+    def setup_method(self) -> None:
+        _reset_audit_logger()
+
+    def teardown_method(self) -> None:
+        _reset_audit_logger()
+
+    def _make_logger(self, tmp_path: Path) -> tuple[AuditLogger, Path]:
+        """Create an AuditLogger with a file-backed audit log."""
+        log_path = tmp_path / "audit.log"
+        configure_audit_logging(path=str(log_path))
+        return AuditLogger(), log_path
+
+    def _read_last_record(self, log_path: Path) -> dict:
+        """Read and parse the last JSON line from the audit log."""
+        _flush_audit_logger()
+        lines = log_path.read_text().strip().splitlines()
+        return json.loads(lines[-1])
+
+    # -- Retention config access --
+
+    def test_default_retention_config(self) -> None:
+        """AuditLogger uses default retention when none specified."""
+        audit = AuditLogger()
+        assert audit.retention.standard_days == 90
+
+    def test_custom_retention_config(self) -> None:
+        """AuditLogger accepts a custom retention config."""
+        config = AuditRetentionConfig(standard_days=180)
+        audit = AuditLogger(retention=config)
+        assert audit.retention.standard_days == 180
+
+    # -- Authentication events --
+
+    def test_log_auth_success(self, tmp_path: Path) -> None:
+        """log_auth_success produces correct event_type and outcome."""
+        audit, log_path = self._make_logger(tmp_path)
+        event = audit.log_auth_success(
+            actor="admin@example.com",
+            source_ip="10.0.0.1",
+        )
+        assert event.event_type == AuditEventType.AUTH_SUCCESS
+        assert event.outcome == "success"
+        assert event.source_ip == "10.0.0.1"
+
+        record = self._read_last_record(log_path)
+        assert record["event_type"] == "auth_success"
+        assert record["outcome"] == "success"
+
+    def test_log_auth_failure(self, tmp_path: Path) -> None:
+        """log_auth_failure produces correct event_type and outcome."""
+        audit, log_path = self._make_logger(tmp_path)
+        event = audit.log_auth_failure(
+            actor="unknown@example.com",
+            source_ip="10.0.0.99",
+            details={"reason": "invalid_password"},
+        )
+        assert event.event_type == AuditEventType.AUTH_FAILURE
+        assert event.outcome == "failure"
+
+        record = self._read_last_record(log_path)
+        assert record["event_type"] == "auth_failure"
+        assert record["details"]["reason"] == "invalid_password"
+
+    def test_log_token_created(self, tmp_path: Path) -> None:
+        """log_token_created produces correct event_type."""
+        audit, log_path = self._make_logger(tmp_path)
+        event = audit.log_token_created(actor="admin@example.com")
+        assert event.event_type == AuditEventType.TOKEN_CREATED
+        assert event.outcome == "success"
+
+        record = self._read_last_record(log_path)
+        assert record["event_type"] == "token_created"
+
+    def test_log_token_validation_failed(self, tmp_path: Path) -> None:
+        """log_token_validation_failed produces correct event_type."""
+        audit, log_path = self._make_logger(tmp_path)
+        event = audit.log_token_validation_failed(
+            actor="system",
+            details={"token_prefix": "exp_"},
+        )
+        assert event.event_type == AuditEventType.TOKEN_VALIDATION_FAILED
+        assert event.outcome == "failure"
+
+        record = self._read_last_record(log_path)
+        assert record["event_type"] == "token_validation_failed"
+
+    # -- Authorization events --
+
+    def test_log_scope_denial(self, tmp_path: Path) -> None:
+        """log_scope_denial produces correct event_type and outcome."""
+        audit, log_path = self._make_logger(tmp_path)
+        event = audit.log_scope_denial(
+            actor="user@example.com",
+            resource="entity/outside-scope",
+        )
+        assert event.event_type == AuditEventType.SCOPE_DENIAL
+        assert event.outcome == "failure"
+
+        record = self._read_last_record(log_path)
+        assert record["event_type"] == "scope_denial"
+
+    def test_log_authorization_denied(self, tmp_path: Path) -> None:
+        """log_authorization_denied produces correct event_type."""
+        audit, log_path = self._make_logger(tmp_path)
+        event = audit.log_authorization_denied(
+            actor="user@example.com",
+            resource="admin/users",
+        )
+        assert event.event_type == AuditEventType.AUTHORIZATION_DENIED
+        assert event.outcome == "failure"
+
+        record = self._read_last_record(log_path)
+        assert record["event_type"] == "authorization_denied"
+
+    def test_log_tier3_gate_denied(self, tmp_path: Path) -> None:
+        """log_tier3_gate_denied produces correct event_type."""
+        audit, log_path = self._make_logger(tmp_path)
+        event = audit.log_tier3_gate_denied(
+            actor="free-tier@example.com",
+            resource="modules/threat_context",
+        )
+        assert event.event_type == AuditEventType.TIER3_GATE_DENIED
+        assert event.outcome == "failure"
+
+        record = self._read_last_record(log_path)
+        assert record["event_type"] == "tier3_gate_denied"
+
+    def test_log_tenant_isolation_violation(self, tmp_path: Path) -> None:
+        """log_tenant_isolation_violation produces correct event_type and extended retention."""
+        audit, log_path = self._make_logger(tmp_path)
+        tid = uuid4()
+        event = audit.log_tenant_isolation_violation(
+            actor="user@tenant-a.com",
+            resource="tenant/tenant-b/entities",
+            tenant_id=tid,
+        )
+        assert event.event_type == AuditEventType.TENANT_ISOLATION_VIOLATION
+        assert event.outcome == "failure"
+        # Isolation violations get extended retention.
+        assert event.retention_category == "extended"
+
+        record = self._read_last_record(log_path)
+        assert record["event_type"] == "tenant_isolation_violation"
+        assert record["retention_category"] == "extended"
+
+    # -- Data access events --
+
+    def test_log_entity_queried(self, tmp_path: Path) -> None:
+        """log_entity_queried produces correct event_type."""
+        audit, log_path = self._make_logger(tmp_path)
+        event = audit.log_entity_queried(
+            actor="analyst@example.com",
+            resource="entity/example.com",
+        )
+        assert event.event_type == AuditEventType.ENTITY_QUERIED
+        assert event.outcome == "success"
+
+        record = self._read_last_record(log_path)
+        assert record["event_type"] == "entity_queried"
+
+    def test_log_artifact_downloaded(self, tmp_path: Path) -> None:
+        """log_artifact_downloaded produces correct event_type."""
+        audit, log_path = self._make_logger(tmp_path)
+        event = audit.log_artifact_downloaded(
+            actor="analyst@example.com",
+            resource="artifact/screenshot-12345.png",
+        )
+        assert event.event_type == AuditEventType.ARTIFACT_DOWNLOADED
+        assert event.outcome == "success"
+
+        record = self._read_last_record(log_path)
+        assert record["event_type"] == "artifact_downloaded"
+
+    # -- Configuration events --
+
+    def test_log_config_changed(self, tmp_path: Path) -> None:
+        """log_config_changed produces correct event_type."""
+        audit, log_path = self._make_logger(tmp_path)
+        tid = uuid4()
+        event = audit.log_config_changed(
+            actor="admin@example.com",
+            resource=f"tenant/{tid}/config",
+            tenant_id=tid,
+            details={"field": "llm_enabled", "old": False, "new": True},
+        )
+        assert event.event_type == AuditEventType.CONFIG_CHANGED
+        assert event.outcome == "success"
+
+        record = self._read_last_record(log_path)
+        assert record["event_type"] == "config_changed"
+        assert record["details"]["field"] == "llm_enabled"
+
+    def test_log_schedule_created(self, tmp_path: Path) -> None:
+        """log_schedule_created produces correct event_type."""
+        audit, log_path = self._make_logger(tmp_path)
+        event = audit.log_schedule_created(
+            actor="admin@example.com",
+            resource="schedule/daily-scan",
+        )
+        assert event.event_type == AuditEventType.SCHEDULE_CREATED
+
+        record = self._read_last_record(log_path)
+        assert record["event_type"] == "schedule_created"
+
+    def test_log_schedule_updated(self, tmp_path: Path) -> None:
+        """log_schedule_updated produces correct event_type."""
+        audit, log_path = self._make_logger(tmp_path)
+        event = audit.log_schedule_updated(
+            actor="admin@example.com",
+            resource="schedule/daily-scan",
+        )
+        assert event.event_type == AuditEventType.SCHEDULE_UPDATED
+
+        record = self._read_last_record(log_path)
+        assert record["event_type"] == "schedule_updated"
+
+    def test_log_schedule_deleted(self, tmp_path: Path) -> None:
+        """log_schedule_deleted produces correct event_type."""
+        audit, log_path = self._make_logger(tmp_path)
+        event = audit.log_schedule_deleted(
+            actor="admin@example.com",
+            resource="schedule/daily-scan",
+        )
+        assert event.event_type == AuditEventType.SCHEDULE_DELETED
+
+        record = self._read_last_record(log_path)
+        assert record["event_type"] == "schedule_deleted"
+
+    def test_log_credential_created(self, tmp_path: Path) -> None:
+        """log_credential_created produces correct event_type."""
+        audit, log_path = self._make_logger(tmp_path)
+        event = audit.log_credential_created(
+            actor="admin@example.com",
+            resource="credential/shodan",
+        )
+        assert event.event_type == AuditEventType.CREDENTIAL_CREATED
+
+        record = self._read_last_record(log_path)
+        assert record["event_type"] == "credential_created"
+
+    def test_log_credential_rotated(self, tmp_path: Path) -> None:
+        """log_credential_rotated produces correct event_type."""
+        audit, log_path = self._make_logger(tmp_path)
+        event = audit.log_credential_rotated(
+            actor="admin@example.com",
+            resource="credential/shodan",
+        )
+        assert event.event_type == AuditEventType.CREDENTIAL_ROTATED
+
+        record = self._read_last_record(log_path)
+        assert record["event_type"] == "credential_rotated"
+
+    def test_log_credential_deleted(self, tmp_path: Path) -> None:
+        """log_credential_deleted produces correct event_type."""
+        audit, log_path = self._make_logger(tmp_path)
+        event = audit.log_credential_deleted(
+            actor="admin@example.com",
+            resource="credential/shodan",
+        )
+        assert event.event_type == AuditEventType.CREDENTIAL_DELETED
+
+        record = self._read_last_record(log_path)
+        assert record["event_type"] == "credential_deleted"
+
+    # -- Pipeline events --
+
+    def test_log_run_started(self, tmp_path: Path) -> None:
+        """log_run_started produces correct event_type."""
+        audit, log_path = self._make_logger(tmp_path)
+        rid = uuid4()
+        event = audit.log_run_started(
+            actor="system",
+            resource=f"run/{rid}",
+            run_id=rid,
+            details={"target": "example.com"},
+        )
+        assert event.event_type == AuditEventType.RUN_STARTED
+        assert event.outcome == "success"
+        assert event.run_id == rid
+
+        record = self._read_last_record(log_path)
+        assert record["event_type"] == "run_started"
+
+    def test_log_run_completed(self, tmp_path: Path) -> None:
+        """log_run_completed produces correct event_type."""
+        audit, log_path = self._make_logger(tmp_path)
+        rid = uuid4()
+        event = audit.log_run_completed(
+            actor="system",
+            resource=f"run/{rid}",
+            run_id=rid,
+        )
+        assert event.event_type == AuditEventType.RUN_COMPLETED
+        assert event.outcome == "success"
+
+        record = self._read_last_record(log_path)
+        assert record["event_type"] == "run_completed"
+
+    def test_log_run_failed(self, tmp_path: Path) -> None:
+        """log_run_failed produces correct event_type and failure outcome."""
+        audit, log_path = self._make_logger(tmp_path)
+        rid = uuid4()
+        event = audit.log_run_failed(
+            actor="system",
+            resource=f"run/{rid}",
+            run_id=rid,
+            details={"error": "collector_timeout"},
+        )
+        assert event.event_type == AuditEventType.RUN_FAILED
+        assert event.outcome == "failure"
+
+        record = self._read_last_record(log_path)
+        assert record["event_type"] == "run_failed"
+        assert record["outcome"] == "failure"
+
+    def test_log_collector_dispatched(self, tmp_path: Path) -> None:
+        """log_collector_dispatched produces correct event_type."""
+        audit, log_path = self._make_logger(tmp_path)
+        rid = uuid4()
+        event = audit.log_collector_dispatched(
+            actor="system",
+            resource="collector/ct_crtsh",
+            run_id=rid,
+            details={"domain": "example.com"},
+        )
+        assert event.event_type == AuditEventType.COLLECTOR_DISPATCHED
+        assert event.outcome == "success"
+
+        record = self._read_last_record(log_path)
+        assert record["event_type"] == "collector_dispatched"
+
+    def test_log_enrichment_completed(self, tmp_path: Path) -> None:
+        """log_enrichment_completed produces correct event_type."""
+        audit, log_path = self._make_logger(tmp_path)
+        rid = uuid4()
+        event = audit.log_enrichment_completed(
+            actor="system",
+            resource="enrichment/whois",
+            run_id=rid,
+        )
+        assert event.event_type == AuditEventType.ENRICHMENT_COMPLETED
+        assert event.outcome == "success"
+
+        record = self._read_last_record(log_path)
+        assert record["event_type"] == "enrichment_completed"
+
+
+# ---------------------------------------------------------------------------
+# AuditLogger — cross-cutting concerns
+# ---------------------------------------------------------------------------
+
+
+class TestAuditLoggerCrossCutting:
+    """Verify AuditLogger behavior across all event methods."""
+
+    def setup_method(self) -> None:
+        _reset_audit_logger()
+
+    def teardown_method(self) -> None:
+        _reset_audit_logger()
+
+    def test_every_event_has_uuid_event_id(self, tmp_path: Path) -> None:
+        """Every emitted event gets a unique UUID event_id."""
+        log_path = tmp_path / "audit.log"
+        configure_audit_logging(path=str(log_path))
+        audit = AuditLogger()
+
+        e1 = audit.log_auth_success(actor="a@b.com")
+        e2 = audit.log_auth_failure(actor="c@d.com")
+        assert e1.event_id != e2.event_id
+        assert isinstance(e1.event_id, UUID)
+
+    def test_every_event_has_utc_timestamp(self, tmp_path: Path) -> None:
+        """Every emitted event has a timezone-aware UTC timestamp."""
+        log_path = tmp_path / "audit.log"
+        configure_audit_logging(path=str(log_path))
+        audit = AuditLogger()
+
+        event = audit.log_auth_success(actor="a@b.com")
+        assert event.timestamp.tzinfo is not None
+
+    def test_tenant_id_propagated(self, tmp_path: Path) -> None:
+        """tenant_id is propagated into the emitted event."""
+        log_path = tmp_path / "audit.log"
+        configure_audit_logging(path=str(log_path))
+        audit = AuditLogger()
+        tid = uuid4()
+
+        event = audit.log_config_changed(
+            actor="admin@example.com",
+            resource="tenant/config",
+            tenant_id=tid,
+        )
+        assert event.tenant_id == tid
+
+    def test_source_ip_propagated(self, tmp_path: Path) -> None:
+        """source_ip is propagated into the emitted event."""
+        log_path = tmp_path / "audit.log"
+        configure_audit_logging(path=str(log_path))
+        audit = AuditLogger()
+
+        event = audit.log_auth_success(
+            actor="a@b.com",
+            source_ip="192.168.1.100",
+        )
+        assert event.source_ip == "192.168.1.100"
+
+    def test_details_sanitized_in_output(self, tmp_path: Path) -> None:
+        """Sensitive keys in details are sanitized when written to log."""
+        log_path = tmp_path / "audit.log"
+        configure_audit_logging(path=str(log_path))
+        audit = AuditLogger()
+
+        audit.log_credential_created(
+            actor="admin@example.com",
+            resource="credential/shodan",
+            details={"api_key": "SHODAN_KEY_123", "name": "shodan"},
+        )
+        _flush_audit_logger()
+
+        record = json.loads(log_path.read_text().strip())
+        assert record["details"]["api_key"] == "[REDACTED]"
+        assert record["details"]["name"] == "shodan"
+
+    def test_returns_audit_event(self, tmp_path: Path) -> None:
+        """Every AuditLogger method returns the emitted AuditEvent."""
+        log_path = tmp_path / "audit.log"
+        configure_audit_logging(path=str(log_path))
+        audit = AuditLogger()
+
+        result = audit.log_run_started(
+            actor="system",
+            resource="run/test",
+        )
+        assert isinstance(result, AuditEvent)
+        assert result.event_type == AuditEventType.RUN_STARTED
+
+    def test_unconfigured_logger_does_not_crash(self) -> None:
+        """AuditLogger methods do not crash when logger has no handlers."""
+        _reset_audit_logger()
+        audit = AuditLogger()
+        # Must not raise.
+        event = audit.log_auth_success(actor="test@example.com")
+        assert isinstance(event, AuditEvent)
+
+    def test_all_au3_fields_in_emitted_event(self, tmp_path: Path) -> None:
+        """Every AU-3 field is present in events emitted through AuditLogger."""
+        log_path = tmp_path / "audit.log"
+        configure_audit_logging(path=str(log_path))
+        audit = AuditLogger()
+        tid = uuid4()
+        rid = uuid4()
+
+        event = audit.log_run_started(
+            actor="system",
+            resource=f"run/{rid}",
+            run_id=rid,
+            tenant_id=tid,
+            source_ip="10.0.0.1",
+            details={"target": "example.com"},
+        )
+        _flush_audit_logger()
+
+        record = json.loads(log_path.read_text().strip())
+        required_keys = {
+            "event_id", "event_type", "timestamp", "actor", "action",
+            "resource", "outcome", "details", "source_ip", "tenant_id",
+            "run_id", "retention_category",
+        }
+        assert required_keys.issubset(record.keys())
+        assert record["actor"] == "system"
+        assert record["outcome"] == "success"
+        assert record["details"]["target"] == "example.com"
+
+    def test_iso8601_timestamp_format_in_output(self, tmp_path: Path) -> None:
+        """Timestamp in the serialized output is ISO 8601."""
+        log_path = tmp_path / "audit.log"
+        configure_audit_logging(path=str(log_path))
+        audit = AuditLogger()
+
+        audit.log_auth_success(actor="a@b.com")
+        _flush_audit_logger()
+
+        record = json.loads(log_path.read_text().strip())
+        ts = record["timestamp"]
+        # ISO 8601: contains 'T' separator and timezone info.
+        assert "T" in ts
+        # Must be parseable as a datetime.
+        parsed = datetime.fromisoformat(ts)
+        assert parsed.year >= 2025

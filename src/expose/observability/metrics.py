@@ -98,6 +98,7 @@ def _create_instruments(provider: MeterProvider) -> None:
     global pipeline_entities_discovered_total  # noqa: PLW0603
     global pipeline_lead_score  # noqa: PLW0603
     global api_requests_total  # noqa: PLW0603
+    global pipeline_errors_total  # noqa: PLW0603
 
     meter = provider.get_meter("expose.metrics", _get_service_version())
 
@@ -173,6 +174,12 @@ def _create_instruments(provider: MeterProvider) -> None:
         name="expose.api.requests_total",
         description="Total HTTP API requests handled",
         unit="{request}",
+    )
+
+    pipeline_errors_total = meter.create_counter(
+        name="expose.pipeline.errors_total",
+        description="Total swallowed exceptions in pipeline components",
+        unit="{error}",
     )
 
 
@@ -254,6 +261,12 @@ api_requests_total: Counter = _meter.create_counter(
     unit="{request}",
 )
 
+pipeline_errors_total: Counter = _meter.create_counter(
+    name="expose.pipeline.errors_total",
+    description="Total swallowed exceptions in pipeline components",
+    unit="{error}",
+)
+
 
 # -- Prometheus metric reader (optional) ------------------------------------
 
@@ -302,6 +315,7 @@ __all__ = [
     "pipeline_dispatch_duration_seconds",
     "pipeline_dispatches_total",
     "pipeline_entities_discovered_total",
+    "pipeline_errors_total",
     "pipeline_lead_score",
     "pipeline_observations_total",
     "pipeline_runs_total",
