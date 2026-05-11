@@ -227,6 +227,48 @@
         </div>
     </div>
 
+    <!-- ===== Priority Findings ===== -->
+    <div class="card findings-panel" x-show="selectedTenantId && findings.length > 0" x-cloak
+         style="margin: 0 var(--space-lg); margin-bottom: var(--space-md);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-sm);">
+            <h2 class="pane-title">Priority Findings</h2>
+            <span class="badge" x-text="findings.length + ' findings'" style="font-size: 0.75rem;"></span>
+        </div>
+        <table class="findings-table">
+            <thead>
+                <tr>
+                    <th style="width: 3rem;">#</th>
+                    <th>Entity</th>
+                    <th style="width: 5rem;">Score</th>
+                    <th style="width: 6rem;">Priority</th>
+                    <th>Justification</th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="finding in findings" :key="finding.rank">
+                    <tr @click="highlightEntity(finding.entity_identifier)"
+                        style="cursor: pointer;">
+                        <td x-text="finding.rank" style="color: var(--text-muted);"></td>
+                        <td style="font-family: var(--font-mono); font-weight: 600;" x-text="finding.entity_identifier"></td>
+                        <td>
+                            <div class="score-bar">
+                                <div class="score-fill"
+                                     :style="'width:' + finding.score + '%; background:' + scoreColor(finding.score)"></div>
+                                <span class="score-value" x-text="finding.score"></span>
+                            </div>
+                        </td>
+                        <td>
+                            <span class="priority-badge"
+                                  :class="'priority-' + finding.priority_tier"
+                                  x-text="finding.priority_tier"></span>
+                        </td>
+                        <td style="font-size: 0.8rem; color: var(--text-secondary);" x-text="finding.justification"></td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+    </div>
+
     <!-- ===== Split pane ===== -->
     <main class="split-pane">
 
@@ -462,6 +504,39 @@
 .stat-card--accent .stat-value { color: var(--accent); }
 .stat-card--warning .stat-value { color: var(--warning); }
 .stat-value--error { color: var(--error) !important; }
+
+/* Priority Findings Panel */
+.findings-table { width: 100%; border-collapse: collapse; }
+.findings-table th {
+    text-align: left; font-size: 0.7rem; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--text-muted);
+    padding: var(--space-xs) var(--space-sm); border-bottom: 1px solid var(--border);
+}
+.findings-table td {
+    padding: var(--space-xs) var(--space-sm);
+    border-bottom: 1px solid var(--border-subtle);
+}
+.findings-table tr:hover { background: var(--surface-raised); }
+
+.score-bar {
+    position: relative; height: 1.25rem; background: var(--surface-raised);
+    border-radius: var(--radius-sm); overflow: hidden;
+}
+.score-fill { height: 100%; border-radius: var(--radius-sm); transition: width 0.3s ease; }
+.score-value {
+    position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    font-family: var(--font-mono); font-size: 0.7rem; font-weight: 700;
+    line-height: 1.25rem; color: var(--text-primary);
+}
+
+.priority-badge {
+    display: inline-block; padding: 2px 8px; border-radius: var(--radius-sm);
+    font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+}
+.priority-critical { background: rgba(239, 68, 68, 0.2); color: var(--error); }
+.priority-high { background: rgba(234, 179, 8, 0.2); color: var(--warning); }
+.priority-medium { background: rgba(99, 102, 241, 0.2); color: var(--accent); }
+.priority-low { background: rgba(100, 116, 139, 0.2); color: var(--text-muted); }
 
 .ai-insight-row {
     padding: 0.75rem 0;

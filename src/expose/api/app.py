@@ -19,11 +19,14 @@ from expose import __version__
 from expose.api.credentials import router as credentials_router
 from expose.api.events import router as events_router
 from expose.api.export import router as export_router
+from expose.api.findings import router as findings_router
 from expose.api.graph import router as graph_router
+from expose.api.rbac import router as rbac_router
 from expose.api.runs import router as runs_router
 from expose.api.tenant_config import router as tenant_config_router
 from expose.api.tenants import get_session
 from expose.api.tenants import router as tenant_router
+from expose.api.webhooks import router as webhooks_router
 from expose.db.engine import (
     DatabaseSettings,
     create_async_engine_from_settings,
@@ -126,6 +129,9 @@ def create_app(
     app.include_router(tenant_config_router)
     app.include_router(credentials_router)
     app.include_router(export_router)
+    app.include_router(findings_router)
+    app.include_router(rbac_router)
+    app.include_router(webhooks_router)
     app.include_router(ui_router)
 
     # -- Static files (CSS, JS for dashboard) ----------------------------------

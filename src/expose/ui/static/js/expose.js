@@ -65,6 +65,9 @@ function exposeApp() {
         sfImportText: "",
         bundleImportText: "",
 
+        // Priority findings from lead scoring
+        findings: [],
+
         // Summary stats for at-a-glance risk posture
         stats: {
             totalEntities: 0,
@@ -105,6 +108,8 @@ function exposeApp() {
             if (!this.selectedTenantId) {
                 this.entityCount = 0;
                 this.activeRunId = null;
+                // Reset findings
+                this.findings = [];
                 // Reset summary stats
                 this.stats = {
                     totalEntities: 0,
@@ -136,6 +141,9 @@ function exposeApp() {
 
             // Load summary stats for the at-a-glance panel
             this.loadStats();
+
+            // Load priority findings
+            this.loadFindings();
         },
 
         /**
@@ -317,6 +325,9 @@ function exposeApp() {
 
             // Refresh summary stats after run completion
             this.loadStats();
+
+            // Refresh priority findings after run completion
+            this.loadFindings();
 
             // Refresh AI insights if the component exists
             var aiPanel = document.querySelector("[x-data='aiInsights()']");
@@ -792,6 +803,57 @@ function exposeApp() {
             } catch (e) {
                 console.warn("[EXPOSE] Stats fetch failed:", e);
             }
+        },
+
+        /* ==================================================================
+           Priority Findings
+           ================================================================== */
+
+        /**
+         * Fetch prioritized findings from the lead scoring API.
+         * Populates this.findings for the Priority Findings table.
+         */
+        async loadFindings() {
+            if (!this.selectedTenantId) return;
+            try {
+                var res = await fetch(
+                    "/v1/tenants/" + this.selectedTenantId + "/findings/?limit=20"
+                );
+                if (res.ok) {
+                    var data = await res.json();
+                    this.findings = data.findings;
+                }
+            } catch (e) {
+                console.error("[EXPOSE] Failed to load findings:", e);
+            }
+        },
+
+        /**
+         * Map a lead score (0-100) to a CSS color variable.
+         * Used by the findings table score bar to indicate severity.
+         *
+         * @param {number} score - Lead score value
+         * @returns {string} CSS variable reference
+         */
+        scoreColor(score) {
+            if (score >= 70) return "var(--error)";
+            if (score >= 40) return "var(--warning)";
+            if (score >= 20) return "var(--accent)";
+            return "var(--text-dim)";
+        },
+
+        /**
+         * Dispatch a custom event to highlight an entity on the graph.
+         * The D3 renderer listens for 'expose:node-selected' events.
+         *
+         * @param {string} identifier - Entity canonical identifier
+         */
+        highlightEntity(identifier) {
+            window.dispatchEvent(
+                new CustomEvent("expose:node-selected", {
+                    detail: { id: identifier },
+                })
+            );
         },
 
         /**
