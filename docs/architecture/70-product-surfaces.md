@@ -98,11 +98,11 @@ The critical structural property per ADR-009: **Core depends on no proprietary c
 Per ADR-009 §"Repository structure":
 
 ```
-github.com/korlogos/expose                 (Apache 2.0, public — when consent gate lifts)
-github.com/korlogos/expose-threat-context  (proprietary, private — commercial customers only)
-github.com/korlogos/expose-identity-surface (proprietary, private — commercial customers only)
-github.com/korlogos/expose-research        (CC BY 4.0 datasets + Apache 2.0 tooling, public)
-github.com/korlogos/expose-rulepacks       (proprietary, private — client-specific rule packs)
+github.com/pitt-street-labs/expose                 (Apache 2.0, public — when consent gate lifts)
+github.com/pitt-street-labs/expose-threat-context  (proprietary, private — commercial customers only)
+github.com/pitt-street-labs/expose-identity-surface (proprietary, private — commercial customers only)
+github.com/pitt-street-labs/expose-research        (CC BY 4.0 datasets + Apache 2.0 tooling, public)
+github.com/pitt-street-labs/expose-rulepacks       (proprietary, private — client-specific rule packs)
 ```
 
 Note: repository names shown above are placeholders; final GitHub organization and repository naming will be determined at publication time.

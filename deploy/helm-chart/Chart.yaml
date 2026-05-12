@@ -14,9 +14,9 @@ keywords:
   - attack-surface
   - security
   - fedramp
-home: https://github.com/korlogos/expose
+home: https://github.com/pitt-street-labs/expose
 sources:
-  - https://github.com/korlogos/expose
+  - https://github.com/pitt-street-labs/expose
 maintainers:
   - name: Korlogos / Pitt Street Labs
 icon: https://expose.korlogos.com/icon.png

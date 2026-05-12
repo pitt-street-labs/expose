@@ -60,7 +60,7 @@ For local development, demos, or quick lab evaluation, EXPOSE ships a `docker-co
 
 ```bash
 # Clone and start.
-git clone https://github.com/korlogos/expose.git
+git clone https://github.com/pitt-street-labs/expose.git
 cd expose
 docker compose up -d
 ```
@@ -99,7 +99,7 @@ These are the commands an operator runs. The chart is a Phase 1 skeleton (per `d
 
 ```bash
 # 1. Clone the repository.
-git clone https://github.com/korlogos/expose.git
+git clone https://github.com/pitt-street-labs/expose.git
 cd expose
 ```
 
@@ -113,7 +113,7 @@ helm template my-expose deploy/helm-chart/ --debug | less
 # 3. Verify the chart's signature with cosign before installing it.
 #    (Future: chart releases are cosign-signed in CI per SPEC §9.4.)
 cosign verify deploy/helm-chart/ \
-    --certificate-identity-regexp '^https://github.com/korlogos/expose/' \
+    --certificate-identity-regexp '^https://github.com/pitt-street-labs/expose/' \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
@@ -215,7 +215,7 @@ ls ./first-run/
 # Verify the signature with cosign. Keyless verification (production):
 cosign verify-blob ./first-run/canonical.json.gz \
     --signature ./first-run/canonical.json.gz.sig \
-    --certificate-identity-regexp '^https://github.com/korlogos/expose/' \
+    --certificate-identity-regexp '^https://github.com/pitt-street-labs/expose/' \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
 # Or keypair verification (lab, with operator-controlled key):
@@ -600,9 +600,9 @@ The artifact's `delta_from_previous_run` is the supported diff. For arbitrary in
 
 | What you have | Where it goes |
 |---------------|---------------|
-| **Bug report or feature request** | GitHub Issues at `https://github.com/korlogos/expose/issues`. Include `pipeline_version` from the artifact, your Helm chart version, and a minimal reproduction. |
+| **Bug report or feature request** | GitHub Issues at `https://github.com/pitt-street-labs/expose/issues`. Include `pipeline_version` from the artifact, your Helm chart version, and a minimal reproduction. |
 | **Security disclosure** | `SECURITY.md` — coordinated disclosure with PGP-encrypted email. **Do not file security issues in public GitHub Issues.** |
-| **Question about the spec or operator workflow** | GitHub Discussions at `https://github.com/korlogos/expose/discussions`. |
+| **Question about the spec or operator workflow** | GitHub Discussions at `https://github.com/pitt-street-labs/expose/discussions`. |
 | **Custom rule pack work or paid integration** | Korlogos / Pitt Street Labs commercial inquiry per `docs/adr/ADR-009-commercial-structure.md`. |
 | **Federal-deployment specific questions** | Read `docs/strategy/federal-customer-deployment-guide.md` first; sponsoring-agency engagement model in §2 of that doc. |
 

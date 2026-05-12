@@ -1,3 +1,8 @@
+# Copyright 2026 Korlogos / Pitt Street Labs. All rights reserved.
+# This file is part of the EXPOSE commercial module and is NOT covered
+# by the Apache 2.0 license that governs the open-source core.
+# Unauthorized copying, distribution, or use is prohibited.
+#
 """Registrant pivot: cluster domains by shared WHOIS/RDAP registrant identity.
 
 Correlates registrant data across domains to find assets registered by the

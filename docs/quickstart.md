@@ -16,7 +16,7 @@ EXPOSE requires Python 3.12 or later.
 
 ```bash
 # Clone the repository
-git clone https://github.com/korlogos/expose.git
+git clone https://github.com/pitt-street-labs/expose.git
 cd expose
 
 # Install in development mode with all optional dependencies
@@ -26,7 +26,7 @@ uv pip install -e ".[all]"
 ### Using pip
 
 ```bash
-git clone https://github.com/korlogos/expose.git
+git clone https://github.com/pitt-street-labs/expose.git
 cd expose
 
 # Install base package

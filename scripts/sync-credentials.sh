@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sync API credentials from dev (z590) to production (Node1).
+# Sync API credentials from dev (dev-workstation) to production (Node1).
 #
 # Usage:
 #   ./scripts/sync-credentials.sh [TENANT_ID]
@@ -8,7 +8,7 @@
 # If provided, syncs to both global and the specified tenant.
 #
 # Prerequisites:
-#   - SSH key access to Node1 (jcarlson@172.16.20.10)
+#   - SSH key access to Node1 ($USER@YOUR_SERVER_IP)
 #   - EXPOSE API running on Node1:8096
 #   - spiderfoot-creds.txt in project root (source of truth)
 set -euo pipefail
@@ -16,9 +16,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 CREDS_FILE="$PROJECT_DIR/spiderfoot-creds.txt"
-NODE1="172.16.20.10"
+NODE1="YOUR_SERVER_IP"
 NODE1_API="http://localhost:8096"
-SSH_OPTS="-i $HOME/.ssh/node1-2024 -o ConnectTimeout=10"
+SSH_OPTS="-i $HOME/.ssh/expose-server-key -o ConnectTimeout=10"
 TENANT_ID="${1:-}"
 
 if [[ ! -f "$CREDS_FILE" ]]; then
@@ -90,7 +90,7 @@ echo "Built bundle with $KEY_COUNT credential slots"
 
 # Import to global pool
 echo -n "Importing to global pool... "
-RESULT=$(SSH_AUTH_SOCK= ssh $SSH_OPTS jcarlson@$NODE1 \
+RESULT=$(SSH_AUTH_SOCK= ssh $SSH_OPTS $USER@$NODE1 \
     "curl -sL -X POST '$NODE1_API/v1/credentials/global/import/bundle' \
      -H 'Content-Type: application/json' \
      -d '$BUNDLE'" 2>&1)
@@ -100,7 +100,7 @@ echo "$IMPORTED imported"
 # Import to tenant if specified
 if [[ -n "$TENANT_ID" ]]; then
     echo -n "Importing to tenant $TENANT_ID... "
-    RESULT=$(SSH_AUTH_SOCK= ssh $SSH_OPTS jcarlson@$NODE1 \
+    RESULT=$(SSH_AUTH_SOCK= ssh $SSH_OPTS $USER@$NODE1 \
         "curl -sL -X POST '$NODE1_API/v1/tenants/$TENANT_ID/credentials/import/bundle' \
          -H 'Content-Type: application/json' \
          -d '$BUNDLE'" 2>&1)

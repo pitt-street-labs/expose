@@ -1280,7 +1280,7 @@ async def test_dns_filter_removes_nonresolving_domains(
     executor, disp, _r_repo, _e_repo = _build_executor()
     disp.dispatch = AsyncMock(return_value=_success_result())
 
-    # Organization seed "Korlogos" will expand to korlogos.com, korlogos.net,
+    # Organization seed "ExampleOrg" will expand to example-target.com, korlogos.net,
     # korlogos.org, etc. via multi-TLD expansion. Only the ones that resolve
     # should survive the DNS filter.
     result = await executor.execute(
@@ -1355,10 +1355,10 @@ async def test_dns_filter_org_expansion_filters_nonexistent_tlds(
 ) -> None:
     """Org expansion generates many TLD variants; DNS filter removes non-resolving ones."""
 
-    # Only korlogos.com resolves; all other TLDs fail.
-    # Note: www.korlogos.com is NOT generated — the www. expansion only applies
+    # Only example-target.com resolves; all other TLDs fail.
+    # Note: www.example-target.com is NOT generated — the www. expansion only applies
     # to DOMAIN seeds in the original input, not to org-generated domain seeds.
-    _resolving = {"korlogos.com"}
+    _resolving = {"exampleorg.com"}
 
     def _selective_getaddrinfo(host, port, family=0, type_=0):
         if host in _resolving:
@@ -1373,11 +1373,11 @@ async def test_dns_filter_org_expansion_filters_nonexistent_tlds(
     result = await executor.execute(
         run_id=RUN_ID,
         tenant_id=TENANT_ID,
-        seeds=[Seed(seed_type=SeedType.ORGANIZATION, value="Korlogos")],
+        seeds=[Seed(seed_type=SeedType.ORGANIZATION, value="ExampleOrg")],
         collector_ids=["scanner"],
     )
 
-    # Original ORGANIZATION seed + korlogos.com (only resolving domain) = 2 seeds
+    # Original ORGANIZATION seed + example-target.com (only resolving domain) = 2 seeds
     # All other TLD variants (korlogos.net, .org, .io, etc.) filtered out
     assert result.expanded_seeds == 2
     # 2 seeds x 1 collector = 2 dispatches
@@ -1385,12 +1385,12 @@ async def test_dns_filter_org_expansion_filters_nonexistent_tlds(
 
     # Verify that the dispatched seeds are only the resolving ones + org seed
     dispatched_values = {c.args[0].seed.value for c in disp.dispatch.call_args_list}
-    assert "Korlogos" in dispatched_values
-    assert "korlogos.com" in dispatched_values
+    assert "ExampleOrg" in dispatched_values
+    assert "exampleorg.com" in dispatched_values
     # Non-resolving domains should NOT be dispatched
-    assert "korlogos.net" not in dispatched_values
-    assert "korlogos.gov" not in dispatched_values
-    assert "korlogos.org" not in dispatched_values
+    assert "exampleorg.net" not in dispatched_values
+    assert "exampleorg.gov" not in dispatched_values
+    assert "exampleorg.org" not in dispatched_values
     assert "korlogos.io" not in dispatched_values
 
 

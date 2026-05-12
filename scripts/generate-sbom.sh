@@ -11,7 +11,7 @@
 #
 # Examples:
 #   ./scripts/generate-sbom.sh expose:dev
-#   ./scripts/generate-sbom.sh ghcr.io/korlogos/expose:v1.0.0 dist/sbom
+#   ./scripts/generate-sbom.sh ghcr.io/pitt-street-labs/expose:v1.0.0 dist/sbom
 #
 # Prerequisites:
 #   - syft v1.x+  (https://github.com/anchore/syft)

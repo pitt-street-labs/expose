@@ -59,8 +59,8 @@ _REGISTRANT_ORG_KEYS: tuple[str, ...] = ("registrant_org", "_registrant_org")
 def _extract_apex_domains(seeds: Sequence[Seed]) -> frozenset[str]:
     """Extract apex domains from a set of seeds for scope anchoring.
 
-    Given seeds like ``["sub.korlogos.com", "www.korlogos.com", "192.168.1.1"]``,
-    returns ``frozenset({"korlogos.com"})``.
+    Given seeds like ``["sub.example.com", "www.example.com", "192.168.1.1"]``,
+    returns ``frozenset({"example.com"})``.
     """
     apex: set[str] = set()
     for seed in seeds:
@@ -76,7 +76,7 @@ def _extract_org_names(seeds: Sequence[Seed]) -> frozenset[str]:
     """Extract organization-like names from original seeds for scope anchoring.
 
     Collects explicit org seeds and derives org names from domain seeds
-    (e.g., ``korlogos.com`` yields ``korlogos``).
+    (e.g., ``example.com`` yields ``example``).
     """
     names: set[str] = set()
     for seed in seeds:

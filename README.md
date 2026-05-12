@@ -107,7 +107,7 @@ Complete adapters for three major SIEM platforms, shipping findings as structure
 
 ```bash
 # Clone and start with Docker Compose
-git clone https://github.com/korlogos/expose.git
+git clone https://github.com/pitt-street-labs/expose.git
 cd expose
 docker compose up -d
 

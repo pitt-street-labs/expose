@@ -53,7 +53,7 @@ The repository includes a convenience script at `scripts/generate-sbom.sh`:
 ./scripts/generate-sbom.sh expose:dev
 
 # Custom output directory
-./scripts/generate-sbom.sh ghcr.io/korlogos/expose:v1.0.0 dist/sbom
+./scripts/generate-sbom.sh ghcr.io/pitt-street-labs/expose:v1.0.0 dist/sbom
 ```
 
 This produces two files:
@@ -73,13 +73,13 @@ FedRAMP assessor requirements).
 
 ```bash
 # CycloneDX
-syft ghcr.io/korlogos/expose:v1.0.0 -o cyclonedx-json > expose-sbom.cdx.json
+syft ghcr.io/pitt-street-labs/expose:v1.0.0 -o cyclonedx-json > expose-sbom.cdx.json
 
 # SPDX
-syft ghcr.io/korlogos/expose:v1.0.0 -o spdx-json > expose-sbom.spdx.json
+syft ghcr.io/pitt-street-labs/expose:v1.0.0 -o spdx-json > expose-sbom.spdx.json
 
 # Human-readable table (quick inspection)
-syft ghcr.io/korlogos/expose:v1.0.0 -o table
+syft ghcr.io/pitt-street-labs/expose:v1.0.0 -o table
 ```
 
 ### What Syft captures from the EXPOSE image
@@ -119,13 +119,13 @@ cosign generate-key-pair
 Sign after build:
 
 ```bash
-cosign sign --yes --key cosign.key ghcr.io/korlogos/expose:v1.0.0
+cosign sign --yes --key cosign.key ghcr.io/pitt-street-labs/expose:v1.0.0
 ```
 
 Verify:
 
 ```bash
-cosign verify --key cosign.pub ghcr.io/korlogos/expose:v1.0.0
+cosign verify --key cosign.pub ghcr.io/pitt-street-labs/expose:v1.0.0
 ```
 
 The private key (`cosign.key`) is stored in the CI secret store, never in
@@ -138,7 +138,7 @@ For production releases from GitHub Actions, cosign supports keyless
 signing via Sigstore's Fulcio CA and Rekor transparency log:
 
 ```bash
-cosign sign --yes ghcr.io/korlogos/expose:v1.0.0
+cosign sign --yes ghcr.io/pitt-street-labs/expose:v1.0.0
 ```
 
 In this mode:
@@ -151,9 +151,9 @@ In this mode:
 
 ```bash
 cosign verify \
-  --certificate-identity-regexp "https://github.com/korlogos/expose/" \
+  --certificate-identity-regexp "https://github.com/pitt-street-labs/expose/" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-  ghcr.io/korlogos/expose:v1.0.0
+  ghcr.io/pitt-street-labs/expose:v1.0.0
 ```
 
 Keyless signing is the target posture per ADR-004. It eliminates private
@@ -185,7 +185,7 @@ provenance attestations. For container images:
 # Provenance generation (runs after container-build)
 - uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.1.0
   with:
-    image: ghcr.io/korlogos/expose
+    image: ghcr.io/pitt-street-labs/expose
     digest: ${{ steps.build.outputs.digest }}
   permissions:
     id-token: write
@@ -208,9 +208,9 @@ Consumers verify provenance with the `slsa-verifier` CLI:
 
 ```bash
 slsa-verifier verify-image \
-  --source-uri github.com/korlogos/expose \
+  --source-uri github.com/pitt-street-labs/expose \
   --source-tag v1.0.0 \
-  ghcr.io/korlogos/expose:v1.0.0
+  ghcr.io/pitt-street-labs/expose:v1.0.0
 ```
 
 This checks that the image was built by the expected repository's CI
@@ -225,24 +225,24 @@ running it. Each check is independent and exits non-zero on failure.
 
 ```bash
 # Keypair mode
-cosign verify --key cosign.pub ghcr.io/korlogos/expose:v1.0.0
+cosign verify --key cosign.pub ghcr.io/pitt-street-labs/expose:v1.0.0
 
 # Keyless mode
 cosign verify \
-  --certificate-identity-regexp "https://github.com/korlogos/expose/" \
+  --certificate-identity-regexp "https://github.com/pitt-street-labs/expose/" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-  ghcr.io/korlogos/expose:v1.0.0
+  ghcr.io/pitt-street-labs/expose:v1.0.0
 ```
 
 **What this proves:** The image was signed by a holder of the EXPOSE
 signing key (keypair mode) or by a GitHub Actions workflow in the
-`korlogos/expose` repository (keyless mode).
+`pitt-street-labs/expose` repository (keyless mode).
 
 ### Step 2: Retrieve and inspect the SBOM
 
 ```bash
 # Download the attached SBOM
-cosign download sbom ghcr.io/korlogos/expose:v1.0.0 > expose-sbom.cdx.json
+cosign download sbom ghcr.io/pitt-street-labs/expose:v1.0.0 > expose-sbom.cdx.json
 
 # Scan for known vulnerabilities
 grype sbom:expose-sbom.cdx.json
@@ -256,8 +256,8 @@ Advisory).
 
 ```bash
 slsa-verifier verify-image \
-  --source-uri github.com/korlogos/expose \
-  ghcr.io/korlogos/expose:v1.0.0
+  --source-uri github.com/pitt-street-labs/expose \
+  ghcr.io/pitt-street-labs/expose:v1.0.0
 ```
 
 **What this proves:** The image was built by the expected CI pipeline from
@@ -302,14 +302,14 @@ The `container-build` job already has the required permissions
 # 2. Sign the image (keyless via GitHub OIDC)
 - name: Sign container image
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-  run: cosign sign --yes ghcr.io/korlogos/expose:${{ github.sha }}
+  run: cosign sign --yes ghcr.io/pitt-street-labs/expose:${{ github.sha }}
 
 # 3. Generate and attach SBOM
 - name: Generate SBOM
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
   run: |
-    syft ghcr.io/korlogos/expose:${{ github.sha }} -o cyclonedx-json > expose-sbom.cdx.json
-    cosign attach sbom --sbom expose-sbom.cdx.json ghcr.io/korlogos/expose:${{ github.sha }}
+    syft ghcr.io/pitt-street-labs/expose:${{ github.sha }} -o cyclonedx-json > expose-sbom.cdx.json
+    cosign attach sbom --sbom expose-sbom.cdx.json ghcr.io/pitt-street-labs/expose:${{ github.sha }}
 
 # 4. Upload SBOM as build artifact
 - name: Upload SBOM artifact
@@ -337,7 +337,7 @@ provenance:
     packages: write
   uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.1.0
   with:
-    image: ghcr.io/korlogos/expose
+    image: ghcr.io/pitt-street-labs/expose
     digest: ${{ needs.container-build.outputs.digest }}
 ```
 

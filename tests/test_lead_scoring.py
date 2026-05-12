@@ -2075,7 +2075,7 @@ class TestSingleRegistrarDependencySignal:
             ],
         }
         result = _ENGINE.score_entity(
-            entity_identifier="korlogos.com", entity_properties=props
+            entity_identifier="example-target.com", entity_properties=props
         )
         sigs = [
             s for s in result.contributing_signals
@@ -2267,7 +2267,7 @@ class TestRegistrarRiskCombined:
             "dnssec": False,
         }
         result = _ENGINE.score_entity(
-            entity_identifier="korlogos.com", entity_properties=props
+            entity_identifier="example-target.com", entity_properties=props
         )
         signal_names = {s.signal_name for s in result.contributing_signals}
         assert "registrar_breach_history" in signal_names
@@ -2284,7 +2284,7 @@ class TestRegistrarRiskCombined:
             "dnssec": False,
         }
         result = _ENGINE.score_entity(
-            entity_identifier="korlogos.com", entity_properties=props
+            entity_identifier="example-target.com", entity_properties=props
         )
         registrar_signal_names = {
             "registrar_breach_history",

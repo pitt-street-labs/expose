@@ -197,7 +197,7 @@ class CollectorConfig(StrictModel):
     rate_limit_per_minute: int | None = Field(default=None, gt=0)
     request_timeout_seconds: float = Field(default=30.0, gt=0.0)
     credentials: dict[str, CollectorCredential] = Field(default_factory=dict)
-    user_agent: str = "expose-collector/0.1 (+https://github.com/korlogos/expose)"
+    user_agent: str = "expose-collector/0.1 (+https://github.com/pitt-street-labs/expose)"
     extra: dict[str, Any] = Field(default_factory=dict)
 
 

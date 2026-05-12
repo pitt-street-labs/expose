@@ -63,7 +63,7 @@ ARG VCS_REF=unknown
 
 LABEL org.opencontainers.image.title="EXPOSE Core" \
       org.opencontainers.image.description="External Attack Surface Intelligence — deterministic discovery + bounded LLM enrichment + signed JSON artifacts" \
-      org.opencontainers.image.source="https://github.com/korlogos/expose" \
+      org.opencontainers.image.source="https://github.com/pitt-street-labs/expose" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.vendor="Korlogos / Pitt Street Labs" \
       org.opencontainers.image.version="${BUILD_VERSION}" \

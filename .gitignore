@@ -135,3 +135,12 @@ desktop.ini
 *.orig
 .playwright-mcp/
 spiderfoot-creds.txt
+
+# Internal-only files (not for publication)
+CLAUDE.md
+HANDOFF.md
+INVENTORY.md
+init-and-push-to-gitea.sh
+credentials.json
+*.asc
+.qa-gate-logs/

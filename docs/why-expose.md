@@ -172,7 +172,7 @@ EXPOSE Research publishes reference graph datasets under CC BY 4.0, alongside th
 
 EXPOSE is Apache 2.0 licensed. The engine, schemas, rule packs, and eval datasets are open source.
 
-- Repository: [github.com/korlogos/expose](https://github.com/korlogos/expose)
+- Repository: [github.com/pitt-street-labs/expose](https://github.com/pitt-street-labs/expose)
 - Specification: `docs/SPEC.md`
 - Architecture decisions: `docs/adr/`
 - Quickstart guide: `docs/quickstart.md`

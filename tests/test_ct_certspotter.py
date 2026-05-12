@@ -36,12 +36,12 @@ _API_URL = "https://api.certspotter.com/v1/issuances"
 
 # -- Canned CertSpotter response data ----------------------------------------
 
-# Two certificates with multiple SANs (mimics real korlogos.com response).
+# Two certificates with multiple SANs (mimics real example-corp.com response).
 _HAPPY_PATH_RESPONSE = [
     {
         "id": "6543210001",
         "tbs_sha256": "aabbccdd00112233445566778899aabb00112233445566778899aabbccddeeff",
-        "dns_names": ["korlogos.com", "kev.korlogos.com"],
+        "dns_names": ["example-corp.com", "kev.example-corp.com"],
         "issuer": {
             "C": "US",
             "O": "Let's Encrypt",
@@ -53,7 +53,7 @@ _HAPPY_PATH_RESPONSE = [
     {
         "id": "6543210002",
         "tbs_sha256": "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100",
-        "dns_names": ["goymonitor.korlogos.com", "korlogos.com"],
+        "dns_names": ["portal.example-corp.com", "example-corp.com"],
         "issuer": {
             "C": "US",
             "O": "Let's Encrypt",
@@ -98,7 +98,7 @@ def _make_config(
     )
 
 
-def _make_seed(domain: str = "korlogos.com") -> Seed:
+def _make_seed(domain: str = "example-corp.com") -> Seed:
     return Seed(seed_type=SeedType.DOMAIN, value=domain)
 
 
@@ -145,8 +145,8 @@ class TestCertSpotterHappyPath:
 
     @respx.mock
     async def test_yields_unique_domains(self) -> None:
-        """Should yield 3 unique domains: korlogos.com, kev.korlogos.com,
-        goymonitor.korlogos.com (korlogos.com deduplicated across certs)."""
+        """Should yield 3 unique domains: example-corp.com, kev.example-corp.com,
+        portal.example-corp.com (example-corp.com deduplicated across certs)."""
         respx.get(_API_URL).mock(
             return_value=httpx.Response(
                 200, text=json.dumps(_HAPPY_PATH_RESPONSE)
@@ -154,14 +154,14 @@ class TestCertSpotterHappyPath:
         )
 
         collector = CertSpotterCollector(_make_config())
-        results = await _collect_all(collector, _make_seed("korlogos.com"))
+        results = await _collect_all(collector, _make_seed("example-corp.com"))
 
         assert len(results) == 3
         domains = {r.subject.identifier_value for r in results}
         assert domains == {
-            "korlogos.com",
-            "kev.korlogos.com",
-            "goymonitor.korlogos.com",
+            "example-corp.com",
+            "kev.example-corp.com",
+            "portal.example-corp.com",
         }
 
     @respx.mock
@@ -256,14 +256,14 @@ class TestCertSpotterHappyPath:
         collector = CertSpotterCollector(_make_config())
         results = await _collect_all(collector, _make_seed())
 
-        # First cert's first domain (korlogos.com) should carry the first
+        # First cert's first domain (example-corp.com) should carry the first
         # cert's dns_names.
         first = next(
-            r for r in results if r.subject.identifier_value == "korlogos.com"
+            r for r in results if r.subject.identifier_value == "example-corp.com"
         )
         assert first.structured_payload["dns_names"] == [
-            "korlogos.com",
-            "kev.korlogos.com",
+            "example-corp.com",
+            "kev.example-corp.com",
         ]
 
 

@@ -48,7 +48,7 @@ Four candidate launches with very different dates:
 | Problem statement narrative | indeterminate | Project lead authored; should land before pre-publication review |
 | Trademark search USPTO classes 9/38/42 | 2 weeks (legal) | Runs during Phase 1 implementation; must clear before public launch |
 | Domain registration (`expose.security`, `.tools`, variants) | 1 day | After trademark clears |
-| GitHub org reservation (`korlogos/expose`) | 1 day | Pre-publication action, single consent-gate event |
+| GitHub org reservation (`pitt-street-labs/expose`) | 1 day | Pre-publication action, single consent-gate event |
 | Phase 2 LLM enrichment | 6 weeks | Ships in v1.1, **not on v1 critical path** |
 | Phase 3 production-hardening items | Concurrent | Most ship post-launch |
 
@@ -70,7 +70,7 @@ Four candidate launches with very different dates:
 2. **Session G (Federal Customer Deployment Guide) needs federal-side input.** The control-mapping work in ADR-010 is preliminary; making it concrete and defensible likely needs at least one sponsoring-agency conversation. Scheduling that conversation is outside the project lead's direct control.
 3. **Trademark search may surface conflicts.** Preliminary EASM check was clean (Session H, 2026-05-10), but USPTO across all relevant security classes (9, 38, 42) is a different exercise. Worst case: rebrand needed. Mitigation: start the search in week 1, not week 12.
 4. **Implementation has not been authorized at time of writing (2026-05-10).** Critical path assumes Phase 1 starts after Session F (week 3). If authorization is deferred or staged, every week of delay extends the launch by a week.
-5. **Concurrent Korlogos commitments.** Other client work (NYC DOT, Koi, ARC operations, lab infrastructure) competes for project-lead bandwidth. Sessions C and D in particular need synchronous attention.
+5. **Concurrent Korlogos commitments.** Other client work (a municipal agency, an endpoint vendor, ARC operations, lab infrastructure) competes for project-lead bandwidth. Sessions C and D in particular need synchronous attention.
 
 ---
 

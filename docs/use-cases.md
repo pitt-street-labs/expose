@@ -577,7 +577,7 @@ There is no standard benchmark for EASM attribution accuracy. Commercial vendors
 1. The researcher deploys EXPOSE Core (Apache 2.0) on university compute infrastructure:
 
 ```bash
-git clone https://github.com/korlogos/expose.git
+git clone https://github.com/pitt-street-labs/expose.git
 cd expose
 uv pip install -e ".[all]"
 ```

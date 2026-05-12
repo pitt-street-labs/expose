@@ -2,15 +2,12 @@
 
 ## Project Lead
 
-**[Name placeholder -- project lead to fill before public launch]**
+**Jeffo**
 
 - Role: Creator and project lead
 - Organization: Korlogos / Pitt Street Labs
-- Focus: Cloud cybersecurity architecture, AI security frameworks, federal security
 
-> **Note:** This section must be completed before public launch. Replace the
-> placeholder above with the project lead's name and any additional biographical
-> detail appropriate for the project's public profile.
+> As a cybersecurity researcher, I need extensible methods that offer the latest landscape of options for OSINT, reconnaissance and discovery/enumeration of potential assets to assist both blue and red teams in their never-ending efforts to defend and protect our digital domain.
 
 ## Contributors
 

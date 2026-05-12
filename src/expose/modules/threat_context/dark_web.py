@@ -1,3 +1,8 @@
+# Copyright 2026 Korlogos / Pitt Street Labs. All rights reserved.
+# This file is part of the EXPOSE commercial module and is NOT covered
+# by the Apache 2.0 license that governs the open-source core.
+# Unauthorized copying, distribution, or use is prohibited.
+#
 """Dark web threat intelligence enricher (EXPOSE Threat Context module).
 
 Queries **public** dark web aggregator APIs -- NOT the actual dark web --
@@ -158,7 +163,7 @@ class DarkWebEnricher:
         dehashed_email: str | None = None,
         dehashed_api_key: str | None = None,
         timeout_seconds: float = 30.0,
-        user_agent: str = "expose-collector/0.1 (+https://github.com/korlogos/expose)",
+        user_agent: str = "expose-collector/0.1 (+https://github.com/pitt-street-labs/expose)",
     ) -> None:
         self._hibp_api_key = hibp_api_key
         self._intelx_api_key = intelx_api_key

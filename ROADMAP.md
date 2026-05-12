@@ -41,7 +41,7 @@ GitHub publication, FedRAMP pathway, and MSSP packaging.
 
 ### GitHub publication (#112--#121)
 
-- Public repository under `korlogos/expose` (consent-gated, pending trademark check)
+- Public repository under `pitt-street-labs/expose` (consent-gated, pending trademark check)
 - Polished README with quickstart, architecture diagram, and badge row
 - Published container images (GHCR) with cosign signatures
 - Helm chart on ArtifactHub

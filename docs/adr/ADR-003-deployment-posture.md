@@ -53,7 +53,7 @@ State is externalized: Postgres connection string, object store credentials, sec
 
 ## Alternatives considered
 
-**Self-hosted on ARC only.** Simpler operational story for v1, no cloud bill, full data residency control. Rejected because portability to customer environments is a first-class requirement; "runs on Jeffro's home lab" is a hard sell to clients.
+**Self-hosted on ARC only.** Simpler operational story for v1, no cloud bill, full data residency control. Rejected because portability to customer environments is a first-class requirement; "runs on the operator's lab" is a hard sell to clients.
 
 **Cloud-hosted only (dedicated AWS/Azure account).** Cleaner threat model, professional posture, scanner egress comes from cloud IP space which is operationally correct. Rejected because Korlogos has ARC infrastructure and wants to use it for v1; the portable architecture preserves the option to migrate later.
 

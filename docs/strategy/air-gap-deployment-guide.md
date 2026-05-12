@@ -75,7 +75,7 @@ No internet access is required for any validation operation.
 | **Cloud LLM providers** | Cannot call | Anthropic, OpenAI, Gemini APIs require internet egress |
 | **NATS (split-brain across air gap)** | Cluster incoherent | NATS JetStream requires continuous connectivity between cluster members; cannot span an air gap |
 | **Helm chart pull from remote registry** | Cannot pull | `helm repo add` and `helm pull` require registry access |
-| **Container image pull** | Cannot pull | `ghcr.io/korlogos/expose` requires registry access |
+| **Container image pull** | Cannot pull | `ghcr.io/pitt-street-labs/expose` requires registry access |
 | **SBOM vulnerability scanning** | Stale results | `grype` needs updated vulnerability databases; air-gapped scans use last-synced DB |
 | **CA certificate updates** | Stale trust store | No CRL/OCSP for certificate revocation checks |
 
@@ -307,7 +307,7 @@ Air-gapped Kubernetes clusters cannot pull from `ghcr.io`. Images must be pre-st
 ```bash
 # On internet-connected workstation
 EXPOSE_VERSION="0.1.0"
-SOURCE="ghcr.io/korlogos/expose:${EXPOSE_VERSION}"
+SOURCE="ghcr.io/pitt-street-labs/expose:${EXPOSE_VERSION}"
 
 # Pull multi-arch images
 docker pull --platform linux/amd64 "${SOURCE}"
@@ -315,7 +315,7 @@ docker pull --platform linux/arm64 "${SOURCE}"
 
 # Verify cosign signature before mirroring
 cosign verify "${SOURCE}" \
-    --certificate-identity-regexp '^https://github.com/korlogos/expose/' \
+    --certificate-identity-regexp '^https://github.com/pitt-street-labs/expose/' \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
 # Save to tar for transfer
@@ -333,7 +333,7 @@ docker push "registry.internal/expose:${EXPOSE_VERSION}"
 
 | Image | Purpose | Required |
 |---|---|---|
-| `ghcr.io/korlogos/expose` | EXPOSE engine | Yes |
+| `ghcr.io/pitt-street-labs/expose` | EXPOSE engine | Yes |
 | `postgres:16-bookworm` | Database (if in-cluster dev mode) | Dev only |
 | `minio/minio` | Object storage (if in-cluster) | Lab only |
 | `nats:2.10-alpine` | Message broker | Yes |
@@ -576,7 +576,7 @@ Air-gapped systems lag internet-connected systems on updates. Plan for:
 
 | Asset | Update source | Transfer method | Staleness tolerance |
 |---|---|---|---|
-| EXPOSE container image | `ghcr.io/korlogos/expose` | Image tar via approved medium | Match CVE remediation SLAs (30d high, 90d moderate per SECURITY.md) |
+| EXPOSE container image | `ghcr.io/pitt-street-labs/expose` | Image tar via approved medium | Match CVE remediation SLAs (30d high, 90d moderate per SECURITY.md) |
 | Grype vulnerability DB | `grype db update` on connected host | DB export tar | Weekly recommended; monthly acceptable |
 | Ollama model weights | `ollama pull` on connected host | Model tar | Low urgency; model updates are quality, not security |
 | CA certificate bundle | OS package manager | OS update mechanism | Quarterly recommended |

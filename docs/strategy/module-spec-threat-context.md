@@ -190,7 +190,7 @@ Adding a new source to the module's source registry requires an ethical review b
 
 | Review dimension | Question |
 |---|---|
-| Legality | Is the source a legal source under Korlogos's operational jurisdiction (US federal + state law applicable to Pitt Street Labs, North Carolina) and the operational jurisdictions of typical customers (federal contractors, regulated industries)? |
+| Legality | Is the source a legal source under Korlogos's operational jurisdiction (US federal + state law applicable to Pitt Street Labs) and the operational jurisdictions of typical customers (federal contractors, regulated industries)? |
 | Crawl compliance | Does the source's terms of service or community norms prohibit crawling? If the source is technically permissive but normatively hostile, the source is rejected. |
 | Re-licensing | Are derived observations from this source redistributable to operators as derived metadata? Per-partner license review documented. |
 | Source reliability | Has the source historically produced reliable signals or is it dominated by hoaxes / disinformation? Sources dominated by hoaxes are rejected. |

@@ -21,7 +21,7 @@ _Comprehensive feature walkthrough for operators and security analysts deploying
 ### Installation (pip)
 
 ```bash
-git clone https://github.com/korlogos/expose.git
+git clone https://github.com/pitt-street-labs/expose.git
 cd expose
 
 # Base install
@@ -50,7 +50,7 @@ Optional dependency groups:
 The quickest path to a working EXPOSE instance with database persistence:
 
 ```bash
-git clone https://github.com/korlogos/expose.git
+git clone https://github.com/pitt-street-labs/expose.git
 cd expose
 
 # Start Postgres + API server

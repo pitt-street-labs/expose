@@ -957,7 +957,7 @@ The conservative rule pack raises the `confirmed` threshold from 0.95 to 0.97 an
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/korlogos/expose/main/schemas/rulepack-v1.json",
+  "$schema": "https://raw.githubusercontent.com/pitt-street-labs/expose/main/schemas/rulepack-v1.json",
   "name": "Government / Conservative",
   "tier_thresholds": {
     "confirmed": 0.97,
@@ -1118,7 +1118,7 @@ Dr. Sarah Chen is a postdoctoral researcher at a university security lab studyin
 Dr. Chen deploys EXPOSE Core (Apache 2.0) on university compute infrastructure:
 
 ```bash
-git clone https://github.com/korlogos/expose.git
+git clone https://github.com/pitt-street-labs/expose.git
 cd expose
 uv pip install -e ".[all]"
 ```
@@ -1248,7 +1248,7 @@ Dr. Chen's paper methodology section:
 >
 > To reproduce our results:
 > ```
-> git clone https://github.com/korlogos/expose.git
+> git clone https://github.com/pitt-street-labs/expose.git
 > git checkout v0.2.0
 > expose eval --all --rulepack research/graph-attribution-v1.json
 > ```
@@ -1298,13 +1298,13 @@ Competitors sell asset inventories. EXPOSE sells intelligence -- attributed, sco
 To get started, clone the repository and run your first scan:
 
 ```bash
-git clone https://github.com/korlogos/expose.git
+git clone https://github.com/pitt-street-labs/expose.git
 cd expose
 uv pip install -e ".[all]"
 expose run start your-domain.com --tenant $(uuidgen)
 ```
 
-- **Repository:** [github.com/korlogos/expose](https://github.com/korlogos/expose)
+- **Repository:** [github.com/pitt-street-labs/expose](https://github.com/pitt-street-labs/expose)
 - **Specification:** `docs/SPEC.md`
 - **Quickstart guide:** `docs/quickstart.md`
 - **Competitive comparison:** `docs/why-expose.md`

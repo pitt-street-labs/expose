@@ -1,3 +1,8 @@
+# Copyright 2026 Korlogos / Pitt Street Labs. All rights reserved.
+# This file is part of the EXPOSE commercial module and is NOT covered
+# by the Apache 2.0 license that governs the open-source core.
+# Unauthorized copying, distribution, or use is prohibited.
+#
 """Temporal banner analysis — detect progression patterns in historical banner data.
 
 Combines historical banner/response data from Wayback Machine and Shodan with

@@ -14,7 +14,7 @@ The structure below is a scaffold. Each section has placeholder questions and pr
 *Two to four paragraphs answering: what is the lived experience of being a cybersecurity practitioner — specifically a cloud cybersecurity architect doing CTEM, red team support, and municipal infrastructure work — that creates the gap EXPOSE fills?*
 
 *Anchor questions to consider:*
-- *What did you find frustrating or inadequate about existing tools when doing real client engagements (NYC DOT, Koi deployments, etc.)?*
+- *What did you find frustrating or inadequate about existing tools when doing real client engagements (a large municipal agency, an endpoint security vendor deployments, etc.)?*
 - *What recurring tasks did you find yourself doing manually that should have been automatable?*
 - *Where did existing commercial tools fail you, and how did that shape your view of what was missing?*
 - *What did you notice about the gap between offensive recon tooling and defensive CTEM tooling?*
@@ -103,7 +103,7 @@ When you populate this scaffold:
 
 1. **Write in your own voice.** This document is most effective when it sounds like the practitioner who built it, not a marketing department. First-person is acceptable in section 4. The other sections can use first-person plural ("we built EXPOSE because...") or descriptive prose.
 
-2. **Be specific.** "Frustration with existing tools" is not specific. "The third time I had to manually correlate a Censys query against three passive DNS providers and a registrar pivot to attribute one cloud asset for a NYC DOT vendor assessment, I started thinking about what this should look like as a continuous pipeline" is specific. Specificity is what makes this document credible.
+2. **Be specific.** "Frustration with existing tools" is not specific. "The third time I had to manually correlate a Censys query against three passive DNS providers and a registrar pivot to attribute one cloud asset for a a large municipal agency vendor assessment, I started thinking about what this should look like as a continuous pipeline" is specific. Specificity is what makes this document credible.
 
 3. **Avoid marketing register.** Phrases like "revolutionary," "game-changing," "industry-leading" cheapen the document. Plain language is better.
 

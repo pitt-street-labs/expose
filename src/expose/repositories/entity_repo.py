@@ -419,8 +419,8 @@ class EntityRepository:
             if current_status != _DEFAULT_STATUS:
                 continue
             # Walk up the label hierarchy to find an attributed parent.
-            # e.g. "www.korlogos.com" -> check "korlogos.com"
-            #      "a.b.korlogos.com" -> check "b.korlogos.com", then "korlogos.com"
+            # e.g. "www.example.com" -> check "example.com"
+            #      "a.b.example.com" -> check "b.example.com", then "example.com"
             parts = cid.split(".")
             for i in range(1, len(parts)):
                 parent = ".".join(parts[i:])

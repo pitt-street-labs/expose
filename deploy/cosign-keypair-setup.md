@@ -44,7 +44,7 @@ under a separate secret name (e.g., `COSIGN_PASSWORD`).
 After a multi-arch build pushes a manifest to the registry:
 
 ```bash
-cosign sign --key cosign.key ghcr.io/korlogos/expose:v1.0.0
+cosign sign --key cosign.key ghcr.io/pitt-street-labs/expose:v1.0.0
 ```
 
 cosign prompts for the private key password (or reads it from the
@@ -60,7 +60,7 @@ variants are covered by a single signature.
 Verify a signed image before deployment:
 
 ```bash
-cosign verify --key cosign.pub ghcr.io/korlogos/expose:v1.0.0
+cosign verify --key cosign.pub ghcr.io/pitt-street-labs/expose:v1.0.0
 ```
 
 A successful verification prints the signature payload and exits 0. A failed
@@ -69,7 +69,7 @@ verification exits non-zero -- the image should not be deployed.
 To verify and display certificate/annotation details:
 
 ```bash
-cosign verify --key cosign.pub ghcr.io/korlogos/expose:v1.0.0 | jq .
+cosign verify --key cosign.pub ghcr.io/pitt-street-labs/expose:v1.0.0 | jq .
 ```
 
 ## CI Integration (GitHub Actions)
@@ -93,7 +93,7 @@ Add after the `docker/build-push-action` step, gated on push-to-main:
 - name: Sign container image
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
   uses: sigstore/cosign-installer@v3
-- run: cosign sign --yes --key env://COSIGN_PRIVATE_KEY ghcr.io/korlogos/expose:${{ github.sha }}
+- run: cosign sign --yes --key env://COSIGN_PRIVATE_KEY ghcr.io/pitt-street-labs/expose:${{ github.sha }}
   env:
     COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
     COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
@@ -111,7 +111,7 @@ This eliminates private key management entirely:
 - name: Sign container image (keyless)
   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
   uses: sigstore/cosign-installer@v3
-- run: cosign sign --yes ghcr.io/korlogos/expose:${{ github.sha }}
+- run: cosign sign --yes ghcr.io/pitt-street-labs/expose:${{ github.sha }}
 ```
 
 With keyless signing:
