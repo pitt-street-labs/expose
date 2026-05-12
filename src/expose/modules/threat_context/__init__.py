@@ -1,3 +1,9 @@
+# Copyright 2026 Korlogos / Pitt Street Labs. All rights reserved.
+# This file is part of EXPOSE Commercial Modules and is NOT covered by the
+# Apache 2.0 license that governs the core engine. Unauthorized copying,
+# distribution, or use of this file is strictly prohibited. Contact
+# licensing@korlogos.com for commercial licensing terms.
+
 """EXPOSE Threat Context module (per ADR-009 product surfaces).
 
 This module provides threat intelligence enrichment beyond EXPOSE Core's

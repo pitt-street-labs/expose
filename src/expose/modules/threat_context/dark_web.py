@@ -39,6 +39,12 @@ or ``Crypto``. All HTTP is via ``httpx`` (stdlib TLS).
 
 from __future__ import annotations
 
+# Copyright 2026 Korlogos / Pitt Street Labs. All rights reserved.
+# This file is part of EXPOSE Commercial Modules and is NOT covered by the
+# Apache 2.0 license that governs the core engine. Unauthorized copying,
+# distribution, or use of this file is strictly prohibited. Contact
+# licensing@korlogos.com for commercial licensing terms.
+
 import logging
 import re
 from dataclasses import dataclass, field
