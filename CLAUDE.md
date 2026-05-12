@@ -84,9 +84,10 @@ This repository (`pitt-street-labs/ff6k` on internal Gitea — repo path retains
 | Example rule packs | `examples/rulepacks/` — baseline + cloud-first + conservative (3 packs, auto-validated) |
 | Eval datasets | `examples/eval-datasets/` — confirmed_yours + confirmed_not_yours + ambiguous + adversarial (4 categories) |
 | Strategy docs (new) | `docs/strategy/commercial-moat-and-revenue.md`, `docs/strategy/framework-mapping.md` |
-| Commercial modules | `src/expose/modules/threat_context/` (dark web), `src/expose/modules/identity_surface/` (registrant pivot + org graph + ethics gate), `src/expose/modules/soc_package/` (STIX 2.1 + MISP + IoC feed), `src/expose/modules/ciso_report/` (sector analysis + threat actors + executive summary) |
+| Commercial modules | `src/expose/modules/threat_context/` (dark web + vendor vulnerability + temporal analysis + provider DB + scoring signals), `src/expose/modules/identity_surface/` (registrant pivot + org graph + ethics gate), `src/expose/modules/soc_package/` (STIX 2.1 + MISP + IoC feed + SIEM adapters: Splunk/Sentinel/Chronicle), `src/expose/modules/ciso_report/` (sector analysis + threat actors + executive summary) |
+| OSS build | `scripts/build-oss-dist.sh` — strips `modules/` from distribution. `.gitattributes` marks `modules/` as `export-ignore` |
 | Service layer | `src/expose/services/` — provenance_service, findings_service, run_service (extracted from API handlers) |
-| Temporal analysis | `src/expose/pipeline/temporal_analysis.py` — historical banner progression detection (5 pattern types) |
+| Temporal analysis | `src/expose/modules/threat_context/temporal_analysis.py` (commercial, adapter shim at `pipeline/temporal_analysis.py`) |
 | Enforcement API | `src/expose/api/enforcement.py` — scope refusal audit trail query |
 | SOC/Reports API | `src/expose/api/soc.py` (STIX/MISP/IoC/suspicious), `src/expose/api/reports.py` (CISO report), `src/expose/api/timeline.py` (temporal analysis) |
 | Identity API | `src/expose/api/identity.py` — registrant pivot + org-graph query endpoints |
@@ -105,7 +106,7 @@ This repository (`pitt-street-labs/ff6k` on internal Gitea — repo path retains
 
 ## Issue tracker conventions
 
-- **157+ closed / 15 open / 181 total.** v1-tagged: all closed. All original high-priority issues closed. All critical issues closed as of 2026-05-11 production readiness sprint.
+- **174 closed / 14 open / 188 total.** v1-tagged: all closed. All original high-priority issues closed. All critical issues closed. Moat restructuring issues #183–#188 closed 2026-05-12.
 - New issues from Pre-Push session: #48 (screenshot vision), #49 (trust degradation), #50 (WAF/origin discovery), #51 (dark web indicators), #52 (legal/social mentions).
 - **Session 2026-05-11 (marathon):** 17 issues closed (#72–#90), 30+ commits. D3 graph fix, iterative multi-pass expansion, M&A org search, egress fallback with SOCKS5/tor, 15 new collectors (29 total), relationship creation, multi-TLD expansion with DNS pre-check, credential persistence, admin panel, scan log panel, entity click-to-expand, target profiling + AI-guided collector selection, supply chain inference with 50-provider fingerprint database, SSRF protection, batch DB writes, parallel dispatch, attribution engine. Security review by ChatGPT + Gemini cross-review.
 - **Session 2026-05-11 (prep):** 8-agent deep audit (spec, ADRs, roadmap, session history). 16 new issues filed (#96–#111). M&A pipeline wiring, 38-collector UI (was 13), Gemini LLM provider, help tooltips on all sections, scan form UX fixes. Implementation strategy written for 19-agent 5-wave next session (`~/.claude/plans/expose-tier-abcd-strategy.md`).
@@ -116,6 +117,7 @@ This repository (`pitt-street-labs/ff6k` on internal Gitea — repo path retains
 - **Tier B high (#99–#101):** #100 closed (enforcement audit trail). #99 functional but persistence gap (in-memory schedules). #101 open (artifact signing).
 - **Tier C medium (#102–#108):** ALL CLOSED. ATT&CK annotations verified, attribution fix confirmed, audit logging NIST AU-2/AU-3 complete, Tier 3 gating implemented.
 - **Tier D low (#109–#111):** Open — Identity Surface, Grafana dashboards, evidence storage.
+- **Session 2026-05-12:** Entity persistence RCA + fix (savepoint isolation), attribution scoring SQLAlchemy 2.0 fix, Gemini key deployed, credentials loaded. Moat restructuring: 6 agents moved 7,300+ lines of IP from Apache 2.0 core to proprietary `modules/`. Issues #179, #182–#188 closed. 14 open issues remain (commercial/legal/docs).
 - Labels follow `epic:<slug>`, `area:<slug>`, `priority:<level>`, `type:<kind>`.
 - Reference issues by number in commits: `Closes #N` or `Refs #N`.
 - New work discovered during a session → file an issue immediately (Tier 3, pre-authorized) rather than letting it slip.
@@ -156,7 +158,8 @@ Following `~/CLAUDE.md` change control:
 - **Critical production bugs found and fixed:** (1) `synchronize_session` missing on bulk UPDATE in `update_attribution_scores` — corrupted DB session, all entity upserts silently failed. (2) `batch_upsert` parameter overflow — 40K+ entities exceeded Postgres 65535 param limit, fixed with 500-entity chunking. (3) Alembic migration chain — `run_metadata` column added to model but no migration. (4) Credential resolution mismatch — `sfp_censys`/`sfp_binaryedge` mapped to `None` in SpiderFoot module map. (5) Tenant config 500 — DB `config_jsonb` not merged with defaults. (6) **Entity data loss RCA (2026-05-12):** `session.rollback()` in attribution scoring exception handler destroyed entire transaction — ALL flushed entities lost. Fixed with `session.begin_nested()` savepoints. Also fixed SQLAlchemy 2.0 ORM bulk UPDATE incompatibility by switching to Core `Entity.__table__` + `connection.execute()`. Same savepoint fix for relationship batch_create failures. (7) BGP RIPEstat collector crash on string ASN entries from API.
 - **Vendor Vulnerability DNA (2026-05-11):** NVD API collector with 25 CPE mappings, vendor profile engine with 18 threat actors + 33 EOL entries, CISO report Vendor DNA section, 5 new lead scoring signals. Predicts likely vulnerability classes from vendor CVE history.
 - **QA gate passed:** 25/25 consecutive runs, 32,371 total test executions, zero flakes.
-- **Production deployment v0.2.2 (2026-05-12):** Attribution scoring fix + BGP fix + credentials loaded (8 global + 8 tenant keys) + Gemini LLM enrichment working. First successful production scan: 661 entities for korlogos.com (3 passes, ~3.5 min). Container image tag in Quadlet: `localhost/expose:0.2.2`.
+- **Production deployment v0.2.2 (2026-05-12):** Attribution scoring fix + BGP fix + credentials loaded (8 global + 8 tenant keys) + Gemini LLM enrichment working. First successful production scan: 826 entities, 45 relationships for korlogos.com (3 passes). Container image tag in Quadlet: `localhost/expose:0.2.2`.
+- **Open-core/commercial split (2026-05-12):** Moat-critical IP moved from Apache 2.0 `pipeline/` to proprietary `modules/`. Thin adapter shims in core degrade gracefully. Files: vendor_vulnerability (927 lines), temporal_analysis (1048 lines), SIEM adapters (3 files), provider fingerprint DB (core keeps 5, commercial has 20), lead scoring signals (core keeps 5 basic, commercial has 14 advanced). Build script `scripts/build-oss-dist.sh` strips `modules/` from OSS distribution. `.gitattributes` export-ignore. 18 files have proprietary license headers.
 
 ## Subsequent session order (recommended)
 
