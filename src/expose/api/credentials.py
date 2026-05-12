@@ -212,6 +212,18 @@ _SF_KEY_OVERRIDES: dict[str, tuple[str, str]] = {
         "collector.dark-web-indicators.dehashed_email",
         "dehashed_email",
     ),
+    # Censys uses two separate credentials (api_id + api_secret) unlike most
+    # SpiderFoot modules that have a single api_key. These overrides ensure the
+    # API import route stores them under the backend keys that scan-censys and
+    # ct-censys expect via CREDENTIAL_SPECS key_mapping.
+    "sfp_censys.api_id": (
+        "collector.scan-censys.api_id",
+        "censys_api_id",
+    ),
+    "sfp_censys.api_secret": (
+        "collector.scan-censys.api_secret",
+        "censys_api_secret",
+    ),
 }
 
 
@@ -392,15 +404,18 @@ async def import_spiderfoot(
             errors.append(f"Empty value for key {sf_key!r}")
             continue
 
-        # Check for direct override first (multi-key collectors like dark-web-indicators)
+        # Parse the module name from the key regardless of path taken —
+        # needed for log context on both override and normal paths.
+        parts = sf_key.split(".", 1)
+        sf_module = parts[0]
+
+        # Check for direct override first (multi-key collectors like dark-web-indicators,
+        # Censys api_id/api_secret)
         override = _SF_KEY_OVERRIDES.get(sf_key)
         if override is not None:
             backend_key, _slot_id = override
             slot_def = _SLOTS_BY_ID.get(_slot_id)
         else:
-            # Parse the SpiderFoot key format: "sfp_<module>.<opt>" or just "sfp_<module>"
-            parts = sf_key.split(".", 1)
-            sf_module = parts[0]
             sf_opt = parts[1] if len(parts) > 1 else "api_key"
 
             # Look up the module in the SpiderFoot map

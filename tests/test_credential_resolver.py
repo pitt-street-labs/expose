@@ -995,3 +995,227 @@ class TestTenantScopeValidation:
                 await resolver.resolve(TENANT_B, "test-isolation-miss")
         finally:
             del CREDENTIAL_SPECS["test-isolation-miss"]
+
+
+# ============================================================================
+# SpiderFoot import -> credential resolver integration tests (issue #180)
+# ============================================================================
+#
+# These tests verify that the full chain works:
+#   SpiderFoot import -> backend storage -> CredentialResolver.resolve()
+# They catch mismatches where SpiderFoot stores keys under one backend_key
+# but the resolver looks for a different one.
+
+
+class TestSpiderFootImportToResolverChain:
+    """End-to-end tests: SpiderFoot import writes credentials that the
+    CredentialResolver can find for Shodan, Censys, and BinaryEdge."""
+
+    async def test_shodan_spiderfoot_import_resolves(
+        self,
+        backend: InMemoryBackend,
+        resolver: CredentialResolver,
+    ) -> None:
+        """SpiderFoot sfp_shodan import -> resolve for scan-shodan succeeds."""
+        from expose.import_.spiderfoot import SPIDERFOOT_MODULE_MAP
+
+        # Simulate what SpiderFootImporter.import_to_backend does:
+        # sfp_shodan maps to "shodan-iwide", opt is "api_key"
+        collector_id = SPIDERFOOT_MODULE_MAP["sfp_shodan"]
+        assert collector_id == "shodan-iwide"
+        backend_key = f"collector.{collector_id}.api_key"
+        await backend.set(
+            tenant_id=TENANT_A,
+            key=backend_key,
+            value="test-shodan-key-from-sf",
+        )
+
+        result = await resolver.resolve(TENANT_A, "scan-shodan")
+        assert "shodan_api_key" in result
+        assert result["shodan_api_key"].secret_value == "test-shodan-key-from-sf"  # noqa: S105
+
+    async def test_censys_spiderfoot_import_resolves(
+        self,
+        backend: InMemoryBackend,
+        resolver: CredentialResolver,
+    ) -> None:
+        """SpiderFoot sfp_censys import -> resolve for scan-censys succeeds.
+
+        Censys has two credentials (api_id, api_secret). After the fix,
+        sfp_censys maps to 'scan-censys' so the SQLite importer stores
+        under collector.scan-censys.api_id and collector.scan-censys.api_secret.
+        """
+        from expose.import_.spiderfoot import SPIDERFOOT_MODULE_MAP
+
+        collector_id = SPIDERFOOT_MODULE_MAP["sfp_censys"]
+        assert collector_id == "scan-censys", (
+            "sfp_censys must map to 'scan-censys', not None"
+        )
+
+        # Simulate import of both Censys credentials
+        await backend.set(
+            tenant_id=TENANT_A,
+            key=f"collector.{collector_id}.api_id",
+            value="test-censys-id-from-sf",
+        )
+        await backend.set(
+            tenant_id=TENANT_A,
+            key=f"collector.{collector_id}.api_secret",
+            value="test-censys-secret-from-sf",
+        )
+
+        result = await resolver.resolve(TENANT_A, "scan-censys")
+        assert len(result) == 2
+        assert "censys_api_id" in result
+        assert "censys_api_secret" in result
+        assert result["censys_api_id"].secret_value == "test-censys-id-from-sf"  # noqa: S105
+        assert result["censys_api_secret"].secret_value == "test-censys-secret-from-sf"  # noqa: S105
+
+    async def test_censys_spiderfoot_import_resolves_ct_censys(
+        self,
+        backend: InMemoryBackend,
+        resolver: CredentialResolver,
+    ) -> None:
+        """SpiderFoot sfp_censys import -> resolve for ct-censys also works.
+
+        ct-censys shares the same backend keys as scan-censys via key_mapping.
+        """
+        from expose.import_.spiderfoot import SPIDERFOOT_MODULE_MAP
+
+        collector_id = SPIDERFOOT_MODULE_MAP["sfp_censys"]
+        await backend.set(
+            tenant_id=TENANT_A,
+            key=f"collector.{collector_id}.api_id",
+            value="ct-censys-id",
+        )
+        await backend.set(
+            tenant_id=TENANT_A,
+            key=f"collector.{collector_id}.api_secret",
+            value="ct-censys-secret",
+        )
+
+        result = await resolver.resolve(TENANT_A, "ct-censys")
+        assert "censys_api_id" in result
+        assert "censys_api_secret" in result
+
+    async def test_binaryedge_spiderfoot_import_resolves(
+        self,
+        backend: InMemoryBackend,
+        resolver: CredentialResolver,
+    ) -> None:
+        """SpiderFoot sfp_binaryedge import -> resolve for scan-binaryedge succeeds."""
+        from expose.import_.spiderfoot import SPIDERFOOT_MODULE_MAP
+
+        collector_id = SPIDERFOOT_MODULE_MAP["sfp_binaryedge"]
+        assert collector_id == "scan-binaryedge", (
+            "sfp_binaryedge must map to 'scan-binaryedge', not None"
+        )
+        backend_key = f"collector.{collector_id}.api_key"
+        await backend.set(
+            tenant_id=TENANT_A,
+            key=backend_key,
+            value="test-be-key-from-sf",
+        )
+
+        result = await resolver.resolve(TENANT_A, "scan-binaryedge")
+        assert "binaryedge_api_key" in result
+        assert result["binaryedge_api_key"].secret_value == "test-be-key-from-sf"  # noqa: S105
+
+    async def test_global_credentials_resolve_for_all_three(
+        self,
+        backend: InMemoryBackend,
+        resolver: CredentialResolver,
+    ) -> None:
+        """Global pool credentials resolve for Shodan, Censys, BinaryEdge.
+
+        When keys are stored under the global tenant, any tenant should
+        resolve them via the InMemoryBackend's global fallback.
+        """
+        from expose.secrets.memory_backend import GLOBAL_TENANT_ID
+
+        global_uuid = UUID(GLOBAL_TENANT_ID)
+
+        # Store Shodan globally
+        await backend.set(
+            tenant_id=global_uuid,
+            key="collector.shodan-iwide.api_key",
+            value="global-shodan",
+        )
+        # Store Censys globally
+        await backend.set(
+            tenant_id=global_uuid,
+            key="collector.scan-censys.api_id",
+            value="global-censys-id",
+        )
+        await backend.set(
+            tenant_id=global_uuid,
+            key="collector.scan-censys.api_secret",
+            value="global-censys-secret",
+        )
+        # Store BinaryEdge globally
+        await backend.set(
+            tenant_id=global_uuid,
+            key="collector.scan-binaryedge.api_key",
+            value="global-be-key",
+        )
+
+        # Resolve for an arbitrary tenant (not global) — should fall back
+        result_shodan = await resolver.resolve(TENANT_A, "scan-shodan")
+        assert result_shodan["shodan_api_key"].secret_value == "global-shodan"  # noqa: S105
+
+        result_censys = await resolver.resolve(TENANT_A, "scan-censys")
+        assert result_censys["censys_api_id"].secret_value == "global-censys-id"  # noqa: S105
+        assert result_censys["censys_api_secret"].secret_value == "global-censys-secret"  # noqa: S105
+
+        result_be = await resolver.resolve(TENANT_A, "scan-binaryedge")
+        assert result_be["binaryedge_api_key"].secret_value == "global-be-key"  # noqa: S105
+
+    async def test_shodan_censys_binaryedge_module_map_consistency(self) -> None:
+        """The three collectors fixed in issue #180 have consistent mappings
+        across SPIDERFOOT_MODULE_MAP, CREDENTIAL_SPECS, and KNOWN_SLOTS.
+
+        Verifies that for Shodan, Censys, and BinaryEdge:
+        1. SPIDERFOOT_MODULE_MAP maps to a collector_id (not None)
+        2. The backend keys produced by the import match what CREDENTIAL_SPECS
+           resolves via key_mapping
+        """
+        from expose.api.credentials import KNOWN_SLOTS
+        from expose.import_.spiderfoot import SPIDERFOOT_MODULE_MAP
+
+        # Collect all backend keys referenced by CREDENTIAL_SPECS
+        all_spec_backend_keys: set[str] = set()
+        for spec in CREDENTIAL_SPECS.values():
+            all_spec_backend_keys.update(spec.key_mapping.values())
+            for key in list(spec.required_keys) + list(spec.optional_keys):
+                if key not in spec.key_mapping:
+                    all_spec_backend_keys.add(
+                        f"collector.{spec.collector_id}.{key}"
+                    )
+
+        # Collect all backend keys from KNOWN_SLOTS
+        slot_backend_keys = {s.backend_key for s in KNOWN_SLOTS}
+
+        # The three collectors that must be consistent after the #180 fix
+        checks = {
+            "sfp_shodan": ("shodan-iwide", "collector.shodan-iwide.api_key"),
+            "sfp_censys": ("scan-censys", "collector.scan-censys.api_id"),
+            "sfp_binaryedge": ("scan-binaryedge", "collector.scan-binaryedge.api_key"),
+        }
+
+        for sf_module, (expected_collector, sample_backend_key) in checks.items():
+            # 1. Module map points to the right collector
+            actual = SPIDERFOOT_MODULE_MAP.get(sf_module)
+            assert actual == expected_collector, (
+                f"{sf_module} maps to {actual!r}, expected {expected_collector!r}"
+            )
+
+            # 2. The backend key is reachable via CREDENTIAL_SPECS
+            assert sample_backend_key in all_spec_backend_keys, (
+                f"Backend key {sample_backend_key!r} not found in any "
+                f"CREDENTIAL_SPECS key_mapping or default convention"
+            )
+
+            # 3. The backend key is in KNOWN_SLOTS
+            assert sample_backend_key in slot_backend_keys, (
+                f"Backend key {sample_backend_key!r} not found in KNOWN_SLOTS"
+            )

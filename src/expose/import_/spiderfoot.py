@@ -70,10 +70,11 @@ SPIDERFOOT_MODULE_MAP: dict[str, str | None] = {
     "sfp_securitytrails": "pdns-securitytrails",
     "sfp_passivetotal": "pdns-passivetotal",
     "sfp_zetalytics": "pdns-zetalytics",
+    # Tier 2 paid services with matching EXPOSE collectors (added post-Sprint 2).
+    "sfp_censys": "scan-censys",
+    "sfp_binaryedge": "scan-binaryedge",
     # Tier 2 services on the EXPOSE roadmap but no collector yet.
     "sfp_virustotal": None,
-    "sfp_censys": None,
-    "sfp_binaryedge": None,
     "sfp_dnsdb": None,
     "sfp_circl": None,
     "sfp_greynoise": None,
@@ -181,6 +182,8 @@ class SpiderFootImporter:
     # negative loses a credential the operator wanted.
     CREDENTIAL_OPT_NAMES: ClassVar[set[str]] = {
         "api_key",
+        "api_id",
+        "api_secret",
         "key",
         "apikey",
         "token",

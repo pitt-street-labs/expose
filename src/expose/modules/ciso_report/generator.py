@@ -130,6 +130,56 @@ class ExecutiveSummary:
 
 
 @dataclass(frozen=True)
+class VendorProfile:
+    """Per-vendor CWE distribution and risk summary."""
+
+    vendor: str
+    products: tuple[str, ...]
+    cwe_distribution: tuple[tuple[str, float], ...]  # (CWE-ID, weight)
+    aggregate_risk: float  # 0.0 -- 100.0
+
+
+@dataclass(frozen=True)
+class HighRiskEndpoint:
+    """An endpoint whose compound vendor risk exceeds threshold."""
+
+    identifier: str
+    compound_risk: float  # 0.0 -- 100.0
+    contributing_products: tuple[str, ...]
+    top_cwes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class EolProduct:
+    """A detected end-of-life product still in use."""
+
+    product: str
+    vendor: str
+    endpoint: str
+    eol_reason: str
+
+
+@dataclass(frozen=True)
+class ThreatActorCweAlignment:
+    """Maps a threat actor to CWE patterns found in the vendor stack."""
+
+    actor_name: str
+    matching_cwes: tuple[str, ...]
+    alignment_score: float  # 0.0 -- 1.0
+
+
+@dataclass(frozen=True)
+class VendorDnaAnalysis:
+    """Vendor Vulnerability DNA analysis result."""
+
+    vendor_profiles: tuple[VendorProfile, ...]
+    high_risk_endpoints: tuple[HighRiskEndpoint, ...]
+    eol_products: tuple[EolProduct, ...]
+    patch_velocity_assessment: str
+    threat_actor_alignment: tuple[ThreatActorCweAlignment, ...]
+
+
+@dataclass(frozen=True)
 class CisoReport:
     """Full CISO report containing all analysis sections."""
 
@@ -140,6 +190,7 @@ class CisoReport:
     attraction_assessment: AttractionAssessment
     ranked_targets: tuple[RankedTarget, ...]
     executive_summary: ExecutiveSummary
+    vendor_dna: VendorDnaAnalysis | None = None
 
 
 # ============================================================================
@@ -421,6 +472,206 @@ _DATABASE_PORTS: frozenset[int] = frozenset({
     3306, 5432, 1433, 1521, 27017, 6379, 9042, 5984, 8529,
 })
 
+# ============================================================================
+# Vendor DNA knowledge bases
+# ============================================================================
+
+# Technology/product fingerprints -> vendor mapping with typical CWEs
+_VENDOR_CWE_MAP: dict[str, dict[str, Any]] = {
+    "apache": {
+        "products": ("Apache HTTP Server", "Apache Tomcat", "Apache Struts"),
+        "cwes": (
+            ("CWE-79", 0.25),   # XSS
+            ("CWE-20", 0.20),   # Input Validation
+            ("CWE-22", 0.15),   # Path Traversal
+            ("CWE-502", 0.20),  # Deserialization
+            ("CWE-94", 0.20),   # Code Injection
+        ),
+        "base_risk": 45,
+    },
+    "nginx": {
+        "products": ("nginx", "nginx Plus", "OpenResty"),
+        "cwes": (
+            ("CWE-400", 0.30),  # Resource Exhaustion
+            ("CWE-120", 0.25),  # Buffer Overflow
+            ("CWE-79", 0.20),   # XSS (misconfiguration)
+            ("CWE-918", 0.25),  # SSRF
+        ),
+        "base_risk": 35,
+    },
+    "microsoft": {
+        "products": ("IIS", "ASP.NET", "Exchange", "SharePoint"),
+        "cwes": (
+            ("CWE-287", 0.25),  # Authentication Bypass
+            ("CWE-502", 0.20),  # Deserialization
+            ("CWE-79", 0.15),   # XSS
+            ("CWE-94", 0.20),   # Code Injection
+            ("CWE-269", 0.20),  # Privilege Escalation
+        ),
+        "base_risk": 50,
+    },
+    "php": {
+        "products": ("PHP", "PHP-FPM", "WordPress", "Drupal", "Joomla"),
+        "cwes": (
+            ("CWE-89", 0.25),   # SQL Injection
+            ("CWE-79", 0.20),   # XSS
+            ("CWE-98", 0.20),   # File Inclusion
+            ("CWE-434", 0.20),  # Unrestricted Upload
+            ("CWE-502", 0.15),  # Deserialization
+        ),
+        "base_risk": 55,
+    },
+    "java": {
+        "products": ("Java", "Spring", "Spring Boot", "JBoss", "WebLogic"),
+        "cwes": (
+            ("CWE-502", 0.30),  # Deserialization
+            ("CWE-611", 0.20),  # XXE
+            ("CWE-917", 0.20),  # Expression Language Injection
+            ("CWE-94", 0.15),   # Code Injection
+            ("CWE-20", 0.15),   # Input Validation
+        ),
+        "base_risk": 50,
+    },
+    "openssl": {
+        "products": ("OpenSSL",),
+        "cwes": (
+            ("CWE-120", 0.35),  # Buffer Overflow
+            ("CWE-310", 0.30),  # Cryptographic Issues
+            ("CWE-400", 0.20),  # Resource Exhaustion
+            ("CWE-295", 0.15),  # Certificate Validation
+        ),
+        "base_risk": 40,
+    },
+    "node": {
+        "products": ("Node.js", "Express", "Next.js"),
+        "cwes": (
+            ("CWE-1321", 0.25),  # Prototype Pollution
+            ("CWE-400", 0.20),   # Resource Exhaustion
+            ("CWE-79", 0.20),    # XSS
+            ("CWE-918", 0.15),   # SSRF
+            ("CWE-94", 0.20),    # Code Injection
+        ),
+        "base_risk": 40,
+    },
+    "python": {
+        "products": ("Python", "Django", "Flask", "FastAPI"),
+        "cwes": (
+            ("CWE-94", 0.25),   # Code Injection
+            ("CWE-502", 0.20),  # Deserialization
+            ("CWE-79", 0.20),   # XSS
+            ("CWE-918", 0.20),  # SSRF
+            ("CWE-20", 0.15),   # Input Validation
+        ),
+        "base_risk": 35,
+    },
+}
+
+# Patterns to detect products/vendors from entity properties
+_TECH_FINGERPRINTS: dict[str, list[str]] = {
+    "apache": [
+        "apache", "httpd", "tomcat", "struts",
+    ],
+    "nginx": [
+        "nginx", "openresty",
+    ],
+    "microsoft": [
+        "iis", "asp.net", "microsoft", "exchange", "sharepoint",
+    ],
+    "php": [
+        "php", "wordpress", "drupal", "joomla", "wp-",
+    ],
+    "java": [
+        "java", "spring", "jboss", "weblogic", "wildfly", "tomee",
+    ],
+    "openssl": [
+        "openssl",
+    ],
+    "node": [
+        "node", "express", "next.js", "koa", "npm",
+    ],
+    "python": [
+        "python", "django", "flask", "fastapi", "gunicorn", "uvicorn",
+    ],
+}
+
+# EOL product signatures: (pattern, vendor, product_name, reason)
+_EOL_SIGNATURES: list[tuple[str, str, str, str]] = [
+    ("apache/2.2", "apache", "Apache HTTP Server 2.2", "EOL since 2018-01"),
+    ("apache/2.0", "apache", "Apache HTTP Server 2.0", "EOL since 2013-07"),
+    ("php/5", "php", "PHP 5.x", "EOL since 2018-12"),
+    ("php/7.0", "php", "PHP 7.0", "EOL since 2019-01"),
+    ("php/7.1", "php", "PHP 7.1", "EOL since 2019-12"),
+    ("php/7.2", "php", "PHP 7.2", "EOL since 2020-11"),
+    ("php/7.3", "php", "PHP 7.3", "EOL since 2021-12"),
+    ("php/7.4", "php", "PHP 7.4", "EOL since 2022-11"),
+    ("php/8.0", "php", "PHP 8.0", "EOL since 2023-11"),
+    ("iis/6", "microsoft", "IIS 6.0", "EOL (Windows Server 2003)"),
+    ("iis/7", "microsoft", "IIS 7.0", "EOL (Windows Server 2008)"),
+    ("iis/7.5", "microsoft", "IIS 7.5", "EOL (Windows Server 2008 R2)"),
+    ("openssl/0.", "openssl", "OpenSSL 0.x", "EOL since 2015-12"),
+    ("openssl/1.0", "openssl", "OpenSSL 1.0.x", "EOL since 2020-01"),
+    ("openssl/1.1.0", "openssl", "OpenSSL 1.1.0", "EOL since 2019-09"),
+    ("nginx/1.0.", "nginx", "nginx 1.0.x", "Legacy branch — no patches"),
+    ("nginx/1.2.", "nginx", "nginx 1.2.x", "Legacy branch — no patches"),
+    ("tomcat/6", "apache", "Apache Tomcat 6.x", "EOL since 2016-12"),
+    ("tomcat/7", "apache", "Apache Tomcat 7.x", "EOL since 2023-03"),
+    ("node/8", "node", "Node.js 8.x", "EOL since 2019-12"),
+    ("node/10", "node", "Node.js 10.x", "EOL since 2021-04"),
+    ("node/12", "node", "Node.js 12.x", "EOL since 2022-04"),
+    ("node/14", "node", "Node.js 14.x", "EOL since 2023-04"),
+    ("node/16", "node", "Node.js 16.x", "EOL since 2023-09"),
+    ("python/2.", "python", "Python 2.x", "EOL since 2020-01"),
+    ("python/3.6", "python", "Python 3.6", "EOL since 2021-12"),
+    ("python/3.7", "python", "Python 3.7", "EOL since 2023-06"),
+]
+
+# Threat actor -> CWE affinities (which CWEs each actor group tends to
+# exploit, for alignment scoring)
+_ACTOR_CWE_PREFERENCES: dict[str, list[str]] = {
+    "APT41 (Double Dragon)": [
+        "CWE-94", "CWE-502", "CWE-287", "CWE-78", "CWE-20",
+    ],
+    "Lazarus Group (HIDDEN COBRA)": [
+        "CWE-502", "CWE-94", "CWE-79", "CWE-20", "CWE-434",
+    ],
+    "FIN7 (Carbanak)": [
+        "CWE-94", "CWE-89", "CWE-79", "CWE-502", "CWE-269",
+    ],
+    "APT38 (Lazarus Financial)": [
+        "CWE-287", "CWE-502", "CWE-94", "CWE-78", "CWE-269",
+    ],
+    "Carbanak / FIN7": [
+        "CWE-94", "CWE-89", "CWE-79", "CWE-502", "CWE-269",
+    ],
+    "Silence Group": [
+        "CWE-94", "CWE-79", "CWE-89", "CWE-434", "CWE-78",
+    ],
+    "APT18 (Wekby)": [
+        "CWE-94", "CWE-20", "CWE-287", "CWE-79", "CWE-22",
+    ],
+    "FIN12": [
+        "CWE-287", "CWE-269", "CWE-502", "CWE-78", "CWE-94",
+    ],
+    "Orangeworm": [
+        "CWE-94", "CWE-20", "CWE-502", "CWE-22", "CWE-78",
+    ],
+    "APT29 (Cozy Bear)": [
+        "CWE-287", "CWE-502", "CWE-94", "CWE-269", "CWE-295",
+    ],
+    "APT28 (Fancy Bear)": [
+        "CWE-94", "CWE-79", "CWE-20", "CWE-287", "CWE-78",
+    ],
+    "APT1 (Comment Crew)": [
+        "CWE-94", "CWE-79", "CWE-20", "CWE-502", "CWE-78",
+    ],
+    "LockBit Ransomware": [
+        "CWE-287", "CWE-269", "CWE-502", "CWE-78", "CWE-94",
+    ],
+    "Scattered Spider": [
+        "CWE-287", "CWE-79", "CWE-269", "CWE-94", "CWE-308",
+    ],
+}
+
 
 # ============================================================================
 # Generator
@@ -680,6 +931,296 @@ class CisoReportGenerator:
 
         return targets
 
+    def analyze_vendor_dna(
+        self,
+        entities: list[dict[str, Any]],
+        threat_actors: list[ThreatActorProfile] | None = None,
+    ) -> VendorDnaAnalysis:
+        """Analyze vendor vulnerability DNA from technology stack properties.
+
+        For each entity with technology indicators (``technologies``,
+        ``server_header``, or ``server`` properties), builds a vendor
+        profile with CWE distribution, computes compound risk per
+        endpoint, detects EOL products, assesses patch velocity, and
+        maps threat actors to predicted CWE weaknesses.
+
+        If the ``expose.pipeline.vendor_vulnerability`` module is
+        available, its enrichment data is incorporated.  Otherwise the
+        analysis uses the built-in static knowledge base only.
+        """
+        # Attempt conditional import of pipeline module (may not exist yet)
+        _pipeline_enrich = None
+        try:
+            from expose.pipeline.vendor_vulnerability import (  # noqa: PLC0415
+                enrich_vendor_data,
+            )
+            _pipeline_enrich = enrich_vendor_data
+        except ImportError:
+            logger.debug(
+                "expose.pipeline.vendor_vulnerability not available; "
+                "using built-in knowledge base only"
+            )
+
+        # --- Phase 1: Detect vendors per entity ---
+        # entity_identifier -> set of detected vendor keys
+        entity_vendors: dict[str, set[str]] = {}
+        # entity_identifier -> list of raw tech strings (for EOL check)
+        entity_tech_strings: dict[str, list[str]] = {}
+
+        for entity in entities:
+            identifier = entity.get("canonical_identifier", "unknown")
+            props = entity.get("properties", {})
+
+            tech_signals: list[str] = []
+
+            # Collect technology signals from various property fields
+            technologies = props.get("technologies")
+            if isinstance(technologies, list):
+                tech_signals.extend(str(t).lower() for t in technologies)
+            elif isinstance(technologies, str):
+                tech_signals.append(technologies.lower())
+
+            server_header = props.get("server_header", "")
+            if isinstance(server_header, str) and server_header:
+                tech_signals.append(server_header.lower())
+
+            server = props.get("server", "")
+            if isinstance(server, str) and server:
+                tech_signals.append(server.lower())
+
+            powered_by = props.get("x_powered_by", "")
+            if isinstance(powered_by, str) and powered_by:
+                tech_signals.append(powered_by.lower())
+
+            if not tech_signals:
+                continue
+
+            entity_tech_strings[identifier] = tech_signals
+
+            detected: set[str] = set()
+            for vendor_key, patterns in _TECH_FINGERPRINTS.items():
+                for signal in tech_signals:
+                    if any(p in signal for p in patterns):
+                        detected.add(vendor_key)
+                        break
+
+            if detected:
+                entity_vendors[identifier] = detected
+
+        # If pipeline enrichment is available, attempt to augment
+        if _pipeline_enrich is not None:
+            try:
+                enriched = _pipeline_enrich(entities)
+                # Merge any additional vendor detections from pipeline
+                if isinstance(enriched, dict):
+                    for eid, vendors in enriched.items():
+                        if isinstance(vendors, set):
+                            existing = entity_vendors.get(eid, set())
+                            existing |= vendors
+                            entity_vendors[eid] = existing
+            except Exception:
+                logger.debug(
+                    "vendor_vulnerability pipeline enrichment failed; "
+                    "continuing with built-in detections",
+                    exc_info=True,
+                )
+
+        # --- Phase 2: Build vendor profiles ---
+        # Aggregate across all entities to produce per-vendor summaries
+        vendor_entity_count: dict[str, int] = {}
+        vendor_all_products: dict[str, set[str]] = {}
+        for _eid, vendors in entity_vendors.items():
+            for v in vendors:
+                vendor_entity_count[v] = vendor_entity_count.get(v, 0) + 1
+                info = _VENDOR_CWE_MAP.get(v)
+                if info:
+                    existing = vendor_all_products.get(v, set())
+                    existing |= set(info["products"])
+                    vendor_all_products[v] = existing
+
+        vendor_profiles: list[VendorProfile] = []
+        for vendor_key in sorted(vendor_entity_count, key=lambda k: -vendor_entity_count[k]):
+            info = _VENDOR_CWE_MAP.get(vendor_key)
+            if not info:
+                continue
+            # Scale risk by prevalence (more endpoints = higher aggregate)
+            count = vendor_entity_count[vendor_key]
+            total = max(len(entities), 1)
+            prevalence_factor = min(1.5, 1.0 + (count / total) * 0.5)
+            aggregate_risk = min(
+                100.0,
+                float(info["base_risk"]) * prevalence_factor,
+            )
+
+            vendor_profiles.append(VendorProfile(
+                vendor=vendor_key,
+                products=tuple(sorted(vendor_all_products.get(vendor_key, set()))),
+                cwe_distribution=tuple(info["cwes"]),
+                aggregate_risk=round(aggregate_risk, 1),
+            ))
+
+        # --- Phase 3: Compute compound risk per endpoint ---
+        high_risk_endpoints: list[HighRiskEndpoint] = []
+        for identifier, vendors in entity_vendors.items():
+            # Compound risk: combine base risks from all detected vendors
+            compound = 0.0
+            products: list[str] = []
+            cwe_set: set[str] = set()
+
+            for v in vendors:
+                info = _VENDOR_CWE_MAP.get(v)
+                if info:
+                    compound += float(info["base_risk"])
+                    products.extend(info["products"])
+                    for cwe_id, _weight in info["cwes"]:
+                        cwe_set.add(cwe_id)
+
+            # Cap at 100
+            compound = min(100.0, compound)
+
+            if compound > 60:  # noqa: PLR2004
+                # Sort CWEs by total weight across vendors for this endpoint
+                cwe_weights: dict[str, float] = {}
+                for v in vendors:
+                    info = _VENDOR_CWE_MAP.get(v)
+                    if info:
+                        for cwe_id, weight in info["cwes"]:
+                            cwe_weights[cwe_id] = (
+                                cwe_weights.get(cwe_id, 0.0) + weight
+                            )
+                top_cwes = sorted(
+                    cwe_weights, key=lambda c: -cwe_weights[c],
+                )[:5]
+
+                high_risk_endpoints.append(HighRiskEndpoint(
+                    identifier=identifier,
+                    compound_risk=round(compound, 1),
+                    contributing_products=tuple(sorted(set(products))),
+                    top_cwes=tuple(top_cwes),
+                ))
+
+        # Sort by compound risk descending
+        high_risk_endpoints.sort(
+            key=lambda e: e.compound_risk, reverse=True,
+        )
+
+        # --- Phase 4: Detect EOL products ---
+        eol_products: list[EolProduct] = []
+        seen_eol: set[tuple[str, str]] = set()  # (endpoint, product)
+
+        for identifier, tech_strings in entity_tech_strings.items():
+            for sig_pattern, sig_vendor, sig_product, sig_reason in _EOL_SIGNATURES:
+                for ts in tech_strings:
+                    if sig_pattern in ts:
+                        key = (identifier, sig_product)
+                        if key not in seen_eol:
+                            seen_eol.add(key)
+                            eol_products.append(EolProduct(
+                                product=sig_product,
+                                vendor=sig_vendor,
+                                endpoint=identifier,
+                                eol_reason=sig_reason,
+                            ))
+
+        # --- Phase 5: Patch velocity assessment ---
+        patch_velocity_assessment = self._assess_patch_velocity(
+            entity_vendors, entity_tech_strings, eol_products, entities,
+        )
+
+        # --- Phase 6: Threat actor alignment ---
+        # Collect all CWEs present in the detected vendor stack
+        all_stack_cwes: set[str] = set()
+        for v_key in set().union(*(entity_vendors.values())) if entity_vendors else set():
+            info = _VENDOR_CWE_MAP.get(v_key)
+            if info:
+                for cwe_id, _w in info["cwes"]:
+                    all_stack_cwes.add(cwe_id)
+
+        actor_alignment: list[ThreatActorCweAlignment] = []
+        actors_to_check = (
+            [a.name for a in threat_actors] if threat_actors
+            else list(_ACTOR_CWE_PREFERENCES.keys())
+        )
+
+        for actor_name in actors_to_check:
+            prefs = _ACTOR_CWE_PREFERENCES.get(actor_name, [])
+            if not prefs:
+                continue
+            matching = [c for c in prefs if c in all_stack_cwes]
+            if matching:
+                score = len(matching) / len(prefs)
+                actor_alignment.append(ThreatActorCweAlignment(
+                    actor_name=actor_name,
+                    matching_cwes=tuple(matching),
+                    alignment_score=round(score, 2),
+                ))
+
+        # Sort by alignment score descending
+        actor_alignment.sort(
+            key=lambda a: a.alignment_score, reverse=True,
+        )
+
+        return VendorDnaAnalysis(
+            vendor_profiles=tuple(vendor_profiles),
+            high_risk_endpoints=tuple(high_risk_endpoints),
+            eol_products=tuple(eol_products),
+            patch_velocity_assessment=patch_velocity_assessment,
+            threat_actor_alignment=tuple(actor_alignment),
+        )
+
+    def _assess_patch_velocity(
+        self,
+        entity_vendors: dict[str, set[str]],
+        entity_tech_strings: dict[str, list[str]],
+        eol_products: list[EolProduct],
+        entities: list[dict[str, Any]],
+    ) -> str:
+        """Produce a qualitative patch velocity assessment string."""
+        if not entity_vendors:
+            return (
+                "Insufficient technology fingerprint data to assess patch "
+                "velocity. No vendor-identifiable technology was detected in "
+                "the scanned entities."
+            )
+
+        total_endpoints = max(len(entities), 1)
+        vendor_endpoints = len(entity_vendors)
+        eol_count = len(eol_products)
+        unique_vendors = set()
+        for vendors in entity_vendors.values():
+            unique_vendors |= vendors
+
+        if eol_count > 3:  # noqa: PLR2004
+            return (
+                f"POOR: {eol_count} end-of-life products detected across "
+                f"{vendor_endpoints} of {total_endpoints} endpoints. "
+                f"Multiple unpatched components indicate systemic patch "
+                f"management failures. Immediate remediation required for "
+                f"all EOL products."
+            )
+        if eol_count > 0:
+            return (
+                f"BELOW AVERAGE: {eol_count} end-of-life product(s) detected. "
+                f"{vendor_endpoints} of {total_endpoints} endpoints expose "
+                f"vendor-identifiable technology across {len(unique_vendors)} "
+                f"vendor(s). EOL products should be upgraded or replaced as "
+                f"part of a regular patch cycle."
+            )
+        if vendor_endpoints / total_endpoints > 0.5:  # noqa: PLR2004
+            return (
+                f"MODERATE: No end-of-life products detected. "
+                f"{vendor_endpoints} of {total_endpoints} endpoints expose "
+                f"vendor-identifiable technology across {len(unique_vendors)} "
+                f"vendor(s). Current versions detected but version currency "
+                f"should be validated against vendor advisories."
+            )
+        return (
+            f"ADEQUATE: No end-of-life products detected. "
+            f"{vendor_endpoints} of {total_endpoints} endpoints expose "
+            f"vendor-identifiable technology. Limited vendor exposure "
+            f"reduces patch-related risk surface."
+        )
+
     def generate_executive_summary(
         self,
         entities: list[dict[str, Any]],
@@ -687,6 +1228,7 @@ class CisoReportGenerator:
         threat_actors: list[ThreatActorProfile],
         attraction: AttractionAssessment,
         ranked_targets: list[RankedTarget],
+        vendor_dna: VendorDnaAnalysis | None = None,
     ) -> ExecutiveSummary:
         """Aggregate all analyses into a structured executive summary."""
         # Organization profile
@@ -715,10 +1257,24 @@ class CisoReportGenerator:
             entities, attraction, ranked_targets,
         )
 
+        # Vendor DNA findings (injected into key findings)
+        if vendor_dna is not None:
+            key_findings.extend(
+                self._extract_vendor_dna_findings(vendor_dna),
+            )
+
         # Recommendations
         recommendations = self._generate_recommendations(
             entities, attraction, ranked_targets,
         )
+
+        # Vendor DNA recommendations
+        if vendor_dna is not None:
+            vendor_recs = self._generate_vendor_dna_recommendations(
+                vendor_dna,
+                start_priority=len(recommendations) + 1,
+            )
+            recommendations.extend(vendor_recs)
 
         # Metrics
         metrics = self._compute_metrics(entities)
@@ -745,8 +1301,9 @@ class CisoReportGenerator:
         actors = self.profile_threat_actors(sector, entities)
         attraction = self.assess_attraction(entities)
         targets = self.rank_likely_targets(entities)
+        vendor_dna = self.analyze_vendor_dna(entities, actors)
         summary = self.generate_executive_summary(
-            entities, sector, actors, attraction, targets,
+            entities, sector, actors, attraction, targets, vendor_dna,
         )
 
         return CisoReport(
@@ -757,6 +1314,7 @@ class CisoReportGenerator:
             attraction_assessment=attraction,
             ranked_targets=tuple(targets),
             executive_summary=summary,
+            vendor_dna=vendor_dna,
         )
 
     # ========================================================================
@@ -1296,19 +1854,147 @@ class CisoReportGenerator:
             coverage_stats=coverage_stats,
         )
 
+    def _extract_vendor_dna_findings(
+        self,
+        vendor_dna: VendorDnaAnalysis,
+    ) -> list[KeyFinding]:
+        """Extract key findings from vendor DNA analysis."""
+        findings: list[KeyFinding] = []
+
+        # EOL products
+        if len(vendor_dna.eol_products) > 0:
+            severity = "critical" if len(vendor_dna.eol_products) > 2 else "high"  # noqa: PLR2004
+            product_names = sorted({p.product for p in vendor_dna.eol_products})
+            findings.append(KeyFinding(
+                title=(
+                    f"{len(vendor_dna.eol_products)} end-of-life product(s) "
+                    f"detected in technology stack"
+                ),
+                severity=severity,
+                description=(
+                    f"The following EOL products were detected: "
+                    f"{', '.join(product_names)}. End-of-life software "
+                    f"receives no security patches and represents an "
+                    f"unmitigated vulnerability surface."
+                ),
+            ))
+
+        # High-risk endpoints
+        if len(vendor_dna.high_risk_endpoints) > 0:
+            findings.append(KeyFinding(
+                title=(
+                    f"{len(vendor_dna.high_risk_endpoints)} endpoint(s) with "
+                    f"high compound vendor risk"
+                ),
+                severity="high",
+                description=(
+                    f"{len(vendor_dna.high_risk_endpoints)} endpoint(s) have "
+                    f"a compound vendor vulnerability risk score exceeding 60. "
+                    f"These endpoints run multiple technology stacks with "
+                    f"overlapping CWE exposure patterns, increasing the "
+                    f"probability of exploitable vulnerabilities."
+                ),
+            ))
+
+        # Threat actor alignment
+        high_alignment = [
+            a for a in vendor_dna.threat_actor_alignment
+            if a.alignment_score >= 0.6  # noqa: PLR2004
+        ]
+        if high_alignment:
+            actor_names = [a.actor_name for a in high_alignment[:3]]
+            findings.append(KeyFinding(
+                title="Vendor stack aligns with known threat actor TTPs",
+                severity="high",
+                description=(
+                    f"The detected technology stack's CWE profile aligns with "
+                    f"known exploitation patterns of: "
+                    f"{', '.join(actor_names)}. "
+                    f"These threat actors have demonstrated capability and "
+                    f"intent to exploit the vulnerability classes present in "
+                    f"the organization's vendor stack."
+                ),
+            ))
+
+        return findings
+
+    def _generate_vendor_dna_recommendations(
+        self,
+        vendor_dna: VendorDnaAnalysis,
+        start_priority: int,
+    ) -> list[Recommendation]:
+        """Generate recommendations from vendor DNA analysis."""
+        recs: list[Recommendation] = []
+        priority = start_priority
+
+        # EOL product remediation
+        if vendor_dna.eol_products:
+            eol_vendors = sorted({p.vendor for p in vendor_dna.eol_products})
+            recs.append(Recommendation(
+                priority=priority,
+                title="Replace end-of-life software components",
+                description=(
+                    f"{len(vendor_dna.eol_products)} EOL product(s) detected "
+                    f"from vendor(s): {', '.join(eol_vendors)}. Upgrade to "
+                    f"vendor-supported versions immediately. EOL software "
+                    f"receives no security patches and is a primary target "
+                    f"for automated exploitation."
+                ),
+                effort="immediate",
+            ))
+            priority += 1
+
+        # High-risk endpoint remediation
+        if vendor_dna.high_risk_endpoints:
+            recs.append(Recommendation(
+                priority=priority,
+                title="Reduce compound vendor risk on high-exposure endpoints",
+                description=(
+                    f"{len(vendor_dna.high_risk_endpoints)} endpoint(s) have "
+                    f"compound vendor risk above 60. Reduce technology stack "
+                    f"complexity, apply vendor-specific hardening guides, and "
+                    f"implement WAF rules targeting the dominant CWE patterns "
+                    f"for these endpoints."
+                ),
+                effort="short-term",
+            ))
+            priority += 1
+
+        # Vendor diversity
+        if len(vendor_dna.vendor_profiles) > 3:  # noqa: PLR2004
+            recs.append(Recommendation(
+                priority=priority,
+                title="Consolidate technology vendor footprint",
+                description=(
+                    f"{len(vendor_dna.vendor_profiles)} distinct technology "
+                    f"vendors detected across the attack surface. High vendor "
+                    f"diversity increases the patch management burden and "
+                    f"expands the CWE exposure surface. Consider standardizing "
+                    f"on fewer technology stacks where operationally feasible."
+                ),
+                effort="long-term",
+            ))
+
+        return recs
+
 
 __all__ = [
     "AttractionAssessment",
     "AttractionFactor",
     "CisoReport",
     "CisoReportGenerator",
+    "EolProduct",
     "ExecutiveSummary",
+    "HighRiskEndpoint",
     "KeyFinding",
     "OrganizationProfile",
     "RankedTarget",
     "Recommendation",
     "ReportMetrics",
     "SectorAnalysis",
+    "ThreatActorCweAlignment",
     "ThreatActorProfile",
     "ThreatLandscape",
+    "VendorDnaAnalysis",
+    "VendorProfile",
 ]

@@ -93,6 +93,11 @@ _SIGNAL_PHRASES: dict[str, str] = {
     "deprecated_tls": "deprecated TLS configuration",
     "dns_exposure": "DNS misconfiguration",
     "http_technology_exposure": "HTTP technology exposure",
+    "vendor_cve_density": "high vendor CVE density",
+    "eol_product": "end-of-life product",
+    "predicted_rce": "predicted RCE-class weakness",
+    "active_exploitation": "actively exploited (CISA KEV)",
+    "slow_patch_velocity": "slow patch velocity",
 }
 
 
@@ -206,6 +211,21 @@ class LeadScoringEngine:
 
         # 14. HTTP technology exposure (+5-10)
         signals.extend(self._check_http_exposure(obs))
+
+        # 15. Vendor CVE density (+10-20)
+        signals.extend(self._check_vendor_cve_density(obs))
+
+        # 16. End-of-life product (+15-25)
+        signals.extend(self._check_eol_product(obs))
+
+        # 17. Predicted RCE-class weakness (+20)
+        signals.extend(self._check_predicted_rce(obs))
+
+        # 18. Active exploitation — CISA KEV (+25)
+        signals.extend(self._check_active_exploitation(obs))
+
+        # 19. Slow patch velocity (+10)
+        signals.extend(self._check_slow_patch_velocity(obs))
 
         # Aggregate
         raw_score = sum(s.points for s in signals)
@@ -736,6 +756,203 @@ class LeadScoringEngine:
                 return signals
 
         return signals
+
+    # -- Vendor vulnerability signal methods -----------------------------------
+
+    # CWE classes that indicate RCE-capable weakness patterns.
+    _RCE_CWE_CLASSES: frozenset[str] = frozenset({
+        "CWE-94",   # Code Injection
+        "CWE-502",  # Deserialization of Untrusted Data
+        "CWE-78",   # OS Command Injection
+        "CWE-119",  # Buffer Overflow (Improper Restriction of Operations)
+    })
+
+    @staticmethod
+    def _check_vendor_cve_density(
+        observations: list[dict[str, Any]],
+    ) -> list[ScoringSignal]:
+        """Vendor CVE density → +10 (>50), +15 (>100), +20 (>200) points.
+
+        Examines ``vendor-cve-history`` observations for the total CVE count
+        associated with the vendor.  Higher CVE counts indicate a vendor with
+        a larger historical vulnerability footprint, which increases the
+        probability of unpatched or undiscovered issues in their products.
+        """
+        for obs in observations:
+            cid = obs.get("_collector_id") or obs.get("collector_id", "")
+            if cid != "vendor-cve-history":
+                continue
+
+            payload = obs.get("structured_payload", obs)
+            cve_count = payload.get("cve_count", 0)
+            if not isinstance(cve_count, int):
+                continue
+
+            if cve_count > 200:  # noqa: PLR2004
+                return [
+                    ScoringSignal(
+                        signal_name="vendor_cve_density",
+                        points=20,
+                        evidence=f"Vendor has {cve_count} historical CVEs (>200)",
+                        source_module="vendor_cve_history",
+                    )
+                ]
+            if cve_count > 100:  # noqa: PLR2004
+                return [
+                    ScoringSignal(
+                        signal_name="vendor_cve_density",
+                        points=15,
+                        evidence=f"Vendor has {cve_count} historical CVEs (>100)",
+                        source_module="vendor_cve_history",
+                    )
+                ]
+            if cve_count > 50:  # noqa: PLR2004
+                return [
+                    ScoringSignal(
+                        signal_name="vendor_cve_density",
+                        points=10,
+                        evidence=f"Vendor has {cve_count} historical CVEs (>50)",
+                        source_module="vendor_cve_history",
+                    )
+                ]
+
+        return []
+
+    @staticmethod
+    def _check_eol_product(
+        observations: list[dict[str, Any]],
+    ) -> list[ScoringSignal]:
+        """End-of-life product → +15 (EOL), +25 (EOL with >50 CVEs) points.
+
+        Examines observations for ``eol_status == true``.  End-of-life products
+        no longer receive security patches, making every existing vulnerability
+        permanent.  If the product also has a high CVE count, the risk compounds.
+        """
+        for obs in observations:
+            payload = obs.get("structured_payload", obs)
+            eol_status = payload.get("eol_status")
+
+            if eol_status is not True:
+                continue
+
+            cve_count = payload.get("cve_count", 0)
+            if isinstance(cve_count, int) and cve_count > 50:  # noqa: PLR2004
+                return [
+                    ScoringSignal(
+                        signal_name="eol_product",
+                        points=25,
+                        evidence=f"End-of-life product with {cve_count} CVEs",
+                        source_module="vendor_cve_history",
+                    )
+                ]
+
+            return [
+                ScoringSignal(
+                    signal_name="eol_product",
+                    points=15,
+                    evidence="End-of-life product — no further security patches",
+                    source_module="vendor_cve_history",
+                )
+            ]
+
+        return []
+
+    @staticmethod
+    def _check_predicted_rce(
+        observations: list[dict[str, Any]],
+    ) -> list[ScoringSignal]:
+        """Predicted RCE-class weakness → +20 points.
+
+        Examines ``vendor-cve-history`` observations for the vendor's top CWE
+        classes.  If any RCE-capable CWE (Code Injection CWE-94,
+        Deserialization CWE-502, OS Command Injection CWE-78, or Buffer
+        Overflow CWE-119) appears with frequency >10%, the vendor's products
+        are statistically likely to contain RCE-class vulnerabilities.
+        """
+        for obs in observations:
+            cid = obs.get("_collector_id") or obs.get("collector_id", "")
+            if cid != "vendor-cve-history":
+                continue
+
+            payload = obs.get("structured_payload", obs)
+            top_cwes: list[dict[str, Any]] = payload.get("top_cwes", [])
+
+            for cwe_entry in top_cwes:
+                cwe_id = cwe_entry.get("cwe_id", "")
+                frequency = cwe_entry.get("frequency", 0.0)
+                if not isinstance(frequency, (int, float)):
+                    continue
+                if cwe_id in LeadScoringEngine._RCE_CWE_CLASSES and frequency > 0.10:  # noqa: PLR2004
+                    return [
+                        ScoringSignal(
+                            signal_name="predicted_rce",
+                            points=20,
+                            evidence=f"{cwe_id} appears in {frequency:.0%} of vendor CVEs",
+                            source_module="vendor_cve_history",
+                        )
+                    ]
+
+        return []
+
+    @staticmethod
+    def _check_active_exploitation(
+        observations: list[dict[str, Any]],
+    ) -> list[ScoringSignal]:
+        """Active exploitation confirmed by CISA KEV → +25 points.
+
+        Examines ``vendor-cve-history`` observations for ``kev_count > 0``.
+        The CISA Known Exploited Vulnerabilities catalog confirms that at
+        least one vulnerability from this vendor has been actively exploited
+        in the wild — a strong signal for real-world risk.
+        """
+        for obs in observations:
+            cid = obs.get("_collector_id") or obs.get("collector_id", "")
+            if cid != "vendor-cve-history":
+                continue
+
+            payload = obs.get("structured_payload", obs)
+            kev_count = payload.get("kev_count", 0)
+            if isinstance(kev_count, int) and kev_count > 0:
+                return [
+                    ScoringSignal(
+                        signal_name="active_exploitation",
+                        points=25,
+                        evidence=f"{kev_count} vendor CVE(s) in CISA KEV catalog",
+                        source_module="vendor_cve_history",
+                    )
+                ]
+
+        return []
+
+    @staticmethod
+    def _check_slow_patch_velocity(
+        observations: list[dict[str, Any]],
+    ) -> list[ScoringSignal]:
+        """Slow patch velocity → +10 points.
+
+        Examines ``vendor-cve-history`` observations for
+        ``patch_velocity_days > 60``.  A vendor that takes more than 60 days
+        on average to release patches leaves customers exposed for extended
+        periods, increasing the exploitation window.
+        """
+        for obs in observations:
+            cid = obs.get("_collector_id") or obs.get("collector_id", "")
+            if cid != "vendor-cve-history":
+                continue
+
+            payload = obs.get("structured_payload", obs)
+            velocity = payload.get("patch_velocity_days")
+            if isinstance(velocity, (int, float)) and velocity > 60:  # noqa: PLR2004
+                return [
+                    ScoringSignal(
+                        signal_name="slow_patch_velocity",
+                        points=10,
+                        evidence=f"Average patch time: {velocity:.0f} days (>60 day threshold)",
+                        source_module="vendor_cve_history",
+                    )
+                ]
+
+        return []
 
 
 __all__ = [

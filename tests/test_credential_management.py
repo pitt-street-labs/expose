@@ -247,6 +247,128 @@ class TestImportSpiderFoot:
         data = resp.json()
         assert data["imported_count"] == 3
 
+    async def test_import_censys_stores_under_correct_backend_keys(
+        self, client: TestClient, backend: InMemoryBackend
+    ) -> None:
+        """Censys api_id/api_secret import via SpiderFoot stores under
+        the backend keys that scan-censys and ct-censys expect."""
+        resp = client.post(
+            f"/v1/tenants/{TENANT_ID_STR}/credentials/import/spiderfoot",
+            json={
+                "credentials": {
+                    "sfp_censys.api_id": "CENSYS_ID_123",
+                    "sfp_censys.api_secret": "CENSYS_SECRET_456",
+                }
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["imported_count"] == 2
+        assert "censys_api_id" in data["slot_names"]
+        assert "censys_api_secret" in data["slot_names"]
+
+        # Verify the backend has the keys under the correct paths
+        api_id = await backend.get(
+            tenant_id=TENANT_ID, key="collector.scan-censys.api_id"
+        )
+        assert api_id == "CENSYS_ID_123"
+        api_secret = await backend.get(
+            tenant_id=TENANT_ID, key="collector.scan-censys.api_secret"
+        )
+        assert api_secret == "CENSYS_SECRET_456"
+
+    async def test_import_binaryedge_stores_under_correct_backend_key(
+        self, client: TestClient, backend: InMemoryBackend
+    ) -> None:
+        """BinaryEdge api_key import via SpiderFoot stores under the
+        backend key that scan-binaryedge expects."""
+        resp = client.post(
+            f"/v1/tenants/{TENANT_ID_STR}/credentials/import/spiderfoot",
+            json={
+                "credentials": {
+                    "sfp_binaryedge.api_key": "BE_KEY_789",
+                }
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["imported_count"] == 1
+        assert "binaryedge_api_key" in data["slot_names"]
+
+        # Verify the backend key path
+        value = await backend.get(
+            tenant_id=TENANT_ID, key="collector.scan-binaryedge.api_key"
+        )
+        assert value == "BE_KEY_789"
+
+    async def test_import_spiderfoot_full_chain_censys(
+        self, client: TestClient, backend: InMemoryBackend
+    ) -> None:
+        """Full chain: SpiderFoot import -> backend store -> resolver -> collector config.
+
+        This is the regression test for issue #180: the credential resolver
+        must find credentials stored via SpiderFoot import.
+        """
+        from expose.pipeline.credential_resolver import CredentialResolver
+
+        # 1. Import via SpiderFoot API
+        client.post(
+            f"/v1/tenants/{TENANT_ID_STR}/credentials/import/spiderfoot",
+            json={
+                "credentials": {
+                    "sfp_censys.api_id": "CHAIN_CENSYS_ID",
+                    "sfp_censys.api_secret": "CHAIN_CENSYS_SECRET",
+                }
+            },
+        )
+
+        # 2. Resolve via CredentialResolver — this is what the dispatcher does
+        resolver = CredentialResolver(backend)
+        result = await resolver.resolve(TENANT_ID, "scan-censys")
+
+        # 3. Verify the resolver found both keys
+        assert len(result) == 2
+        assert result["censys_api_id"].secret_value == "CHAIN_CENSYS_ID"  # noqa: S105
+        assert result["censys_api_secret"].secret_value == "CHAIN_CENSYS_SECRET"  # noqa: S105
+
+    async def test_import_spiderfoot_full_chain_binaryedge(
+        self, client: TestClient, backend: InMemoryBackend
+    ) -> None:
+        """Full chain: SpiderFoot import -> resolver for BinaryEdge."""
+        from expose.pipeline.credential_resolver import CredentialResolver
+
+        client.post(
+            f"/v1/tenants/{TENANT_ID_STR}/credentials/import/spiderfoot",
+            json={
+                "credentials": {
+                    "sfp_binaryedge.api_key": "CHAIN_BE_KEY",
+                }
+            },
+        )
+
+        resolver = CredentialResolver(backend)
+        result = await resolver.resolve(TENANT_ID, "scan-binaryedge")
+        assert result["binaryedge_api_key"].secret_value == "CHAIN_BE_KEY"  # noqa: S105
+
+    async def test_import_spiderfoot_full_chain_shodan(
+        self, client: TestClient, backend: InMemoryBackend
+    ) -> None:
+        """Full chain: SpiderFoot import -> resolver for Shodan (control case)."""
+        from expose.pipeline.credential_resolver import CredentialResolver
+
+        client.post(
+            f"/v1/tenants/{TENANT_ID_STR}/credentials/import/spiderfoot",
+            json={
+                "credentials": {
+                    "sfp_shodan.api_key": "CHAIN_SHODAN_KEY",
+                }
+            },
+        )
+
+        resolver = CredentialResolver(backend)
+        result = await resolver.resolve(TENANT_ID, "scan-shodan")
+        assert result["shodan_api_key"].secret_value == "CHAIN_SHODAN_KEY"  # noqa: S105
+
 
 # ============================================================================
 # API Router — Import Bundle

@@ -1374,6 +1374,11 @@ class TestSignalPhraseCoverage:
             "deprecated_tls",
             "dns_exposure",
             "http_technology_exposure",
+            "vendor_cve_density",
+            "eol_product",
+            "predicted_rce",
+            "active_exploitation",
+            "slow_patch_velocity",
         }
         for name in expected_names:
             assert name in _SIGNAL_PHRASES, f"Missing phrase for signal: {name}"
@@ -1397,6 +1402,11 @@ class TestSignalPhraseCoverage:
             "deprecated_tls",
             "dns_exposure",
             "http_technology_exposure",
+            "vendor_cve_density",
+            "eol_product",
+            "predicted_rce",
+            "active_exploitation",
+            "slow_patch_velocity",
         }
         for name in _SIGNAL_PHRASES:
             assert name in expected_names, f"Orphan phrase for unknown signal: {name}"
@@ -1452,3 +1462,463 @@ class TestNewSignalModels:
             assert 0 <= sig.points <= 100
             assert sig.signal_name == "http_technology_exposure"
             assert sig.source_module == "http_fingerprint"
+
+
+# ===========================================================================
+# Helpers for vendor vulnerability observations
+# ===========================================================================
+
+
+def _vendor_cve_obs(**payload_fields: object) -> dict[str, object]:
+    """Build a minimal vendor-cve-history observation dict."""
+    sp: dict[str, object] = {
+        "vendor_name": "AcmeCorp",
+        "cve_count": 0,
+        "kev_count": 0,
+        "patch_velocity_days": 30,
+        "top_cwes": [],
+    }
+    sp.update(payload_fields)
+    return {"_collector_id": "vendor-cve-history", "structured_payload": sp}
+
+
+# ===========================================================================
+# Vendor CVE density signal tests
+# ===========================================================================
+
+
+class TestVendorCveDensitySignal:
+    """Vendor CVE density -> +10 (>50), +15 (>100), +20 (>200) points."""
+
+    def test_over_200_cves_adds_20(self) -> None:
+        obs = [_vendor_cve_obs(cve_count=250)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "vendor_cve_density"]
+        assert len(sigs) == 1
+        assert sigs[0].points == 20
+        assert "250" in sigs[0].evidence
+        assert ">200" in sigs[0].evidence
+
+    def test_exactly_201_adds_20(self) -> None:
+        obs = [_vendor_cve_obs(cve_count=201)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "vendor_cve_density"]
+        assert sigs[0].points == 20
+
+    def test_exactly_200_adds_15(self) -> None:
+        """200 is not >200, so falls to the >100 tier."""
+        obs = [_vendor_cve_obs(cve_count=200)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "vendor_cve_density"]
+        assert sigs[0].points == 15
+
+    def test_over_100_cves_adds_15(self) -> None:
+        obs = [_vendor_cve_obs(cve_count=150)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "vendor_cve_density"]
+        assert len(sigs) == 1
+        assert sigs[0].points == 15
+        assert ">100" in sigs[0].evidence
+
+    def test_exactly_100_adds_10(self) -> None:
+        """100 is not >100, so falls to the >50 tier."""
+        obs = [_vendor_cve_obs(cve_count=100)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "vendor_cve_density"]
+        assert sigs[0].points == 10
+
+    def test_over_50_cves_adds_10(self) -> None:
+        obs = [_vendor_cve_obs(cve_count=75)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "vendor_cve_density"]
+        assert len(sigs) == 1
+        assert sigs[0].points == 10
+        assert ">50" in sigs[0].evidence
+
+    def test_exactly_50_no_signal(self) -> None:
+        """50 is not >50, so no signal fires."""
+        obs = [_vendor_cve_obs(cve_count=50)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "vendor_cve_density"]
+        assert len(sigs) == 0
+
+    def test_zero_cves_no_signal(self) -> None:
+        obs = [_vendor_cve_obs(cve_count=0)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "vendor_cve_density"]
+        assert len(sigs) == 0
+
+    def test_no_vendor_obs_no_signal(self) -> None:
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=[])
+        sigs = [s for s in result.contributing_signals if s.signal_name == "vendor_cve_density"]
+        assert len(sigs) == 0
+
+    def test_signal_source_module(self) -> None:
+        obs = [_vendor_cve_obs(cve_count=300)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "vendor_cve_density"]
+        assert sigs[0].source_module == "vendor_cve_history"
+
+
+# ===========================================================================
+# EOL product signal tests
+# ===========================================================================
+
+
+class TestEolProductSignal:
+    """End-of-life product -> +15 (EOL), +25 (EOL + >50 CVEs) points."""
+
+    def test_eol_product_adds_15(self) -> None:
+        obs = [_vendor_cve_obs(eol_status=True, cve_count=10)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "eol_product"]
+        assert len(sigs) == 1
+        assert sigs[0].points == 15
+        assert "End-of-life" in sigs[0].evidence
+
+    def test_eol_with_high_cves_adds_25(self) -> None:
+        obs = [_vendor_cve_obs(eol_status=True, cve_count=100)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "eol_product"]
+        assert len(sigs) == 1
+        assert sigs[0].points == 25
+        assert "100" in sigs[0].evidence
+
+    def test_eol_with_exactly_51_cves_adds_25(self) -> None:
+        obs = [_vendor_cve_obs(eol_status=True, cve_count=51)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "eol_product"]
+        assert sigs[0].points == 25
+
+    def test_eol_with_exactly_50_cves_adds_15(self) -> None:
+        """50 is not >50, so gets the base EOL score."""
+        obs = [_vendor_cve_obs(eol_status=True, cve_count=50)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "eol_product"]
+        assert sigs[0].points == 15
+
+    def test_eol_zero_cves_adds_15(self) -> None:
+        obs = [_vendor_cve_obs(eol_status=True, cve_count=0)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "eol_product"]
+        assert sigs[0].points == 15
+
+    def test_not_eol_no_signal(self) -> None:
+        obs = [_vendor_cve_obs(eol_status=False, cve_count=500)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "eol_product"]
+        assert len(sigs) == 0
+
+    def test_eol_missing_no_signal(self) -> None:
+        obs = [_vendor_cve_obs(cve_count=500)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "eol_product"]
+        assert len(sigs) == 0
+
+    def test_signal_source_module(self) -> None:
+        obs = [_vendor_cve_obs(eol_status=True)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "eol_product"]
+        assert sigs[0].source_module == "vendor_cve_history"
+
+
+# ===========================================================================
+# Predicted RCE signal tests
+# ===========================================================================
+
+
+class TestPredictedRceSignal:
+    """Predicted RCE-class weakness -> +20 points."""
+
+    def test_cwe_94_high_frequency_adds_20(self) -> None:
+        obs = [_vendor_cve_obs(top_cwes=[{"cwe_id": "CWE-94", "frequency": 0.15}])]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "predicted_rce"]
+        assert len(sigs) == 1
+        assert sigs[0].points == 20
+        assert "CWE-94" in sigs[0].evidence
+
+    def test_cwe_502_high_frequency_adds_20(self) -> None:
+        obs = [_vendor_cve_obs(top_cwes=[{"cwe_id": "CWE-502", "frequency": 0.12}])]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "predicted_rce"]
+        assert sigs[0].points == 20
+        assert "CWE-502" in sigs[0].evidence
+
+    def test_cwe_78_high_frequency_adds_20(self) -> None:
+        obs = [_vendor_cve_obs(top_cwes=[{"cwe_id": "CWE-78", "frequency": 0.20}])]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "predicted_rce"]
+        assert sigs[0].points == 20
+        assert "CWE-78" in sigs[0].evidence
+
+    def test_cwe_119_high_frequency_adds_20(self) -> None:
+        obs = [_vendor_cve_obs(top_cwes=[{"cwe_id": "CWE-119", "frequency": 0.25}])]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "predicted_rce"]
+        assert sigs[0].points == 20
+        assert "CWE-119" in sigs[0].evidence
+
+    def test_rce_cwe_at_exactly_10_percent_no_signal(self) -> None:
+        """0.10 is not >0.10, so no signal fires."""
+        obs = [_vendor_cve_obs(top_cwes=[{"cwe_id": "CWE-94", "frequency": 0.10}])]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "predicted_rce"]
+        assert len(sigs) == 0
+
+    def test_rce_cwe_below_threshold_no_signal(self) -> None:
+        obs = [_vendor_cve_obs(top_cwes=[{"cwe_id": "CWE-94", "frequency": 0.05}])]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "predicted_rce"]
+        assert len(sigs) == 0
+
+    def test_non_rce_cwe_high_frequency_no_signal(self) -> None:
+        """CWE-79 (XSS) is not RCE-class, even at high frequency."""
+        obs = [_vendor_cve_obs(top_cwes=[{"cwe_id": "CWE-79", "frequency": 0.40}])]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "predicted_rce"]
+        assert len(sigs) == 0
+
+    def test_empty_top_cwes_no_signal(self) -> None:
+        obs = [_vendor_cve_obs(top_cwes=[])]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "predicted_rce"]
+        assert len(sigs) == 0
+
+    def test_mixed_cwes_first_rce_fires(self) -> None:
+        """When multiple CWEs exist, the first RCE-class one above threshold fires."""
+        obs = [
+            _vendor_cve_obs(
+                top_cwes=[
+                    {"cwe_id": "CWE-79", "frequency": 0.30},  # XSS, not RCE
+                    {"cwe_id": "CWE-502", "frequency": 0.15},  # Deserialization, RCE
+                    {"cwe_id": "CWE-78", "frequency": 0.12},  # OS command, RCE
+                ]
+            )
+        ]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "predicted_rce"]
+        assert len(sigs) == 1
+        assert "CWE-502" in sigs[0].evidence
+
+    def test_signal_source_module(self) -> None:
+        obs = [_vendor_cve_obs(top_cwes=[{"cwe_id": "CWE-94", "frequency": 0.15}])]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "predicted_rce"]
+        assert sigs[0].source_module == "vendor_cve_history"
+
+
+# ===========================================================================
+# Active exploitation (CISA KEV) signal tests
+# ===========================================================================
+
+
+class TestActiveExploitationSignal:
+    """Active exploitation in CISA KEV -> +25 points."""
+
+    def test_kev_count_positive_adds_25(self) -> None:
+        obs = [_vendor_cve_obs(kev_count=3)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "active_exploitation"]
+        assert len(sigs) == 1
+        assert sigs[0].points == 25
+        assert "3" in sigs[0].evidence
+        assert "CISA KEV" in sigs[0].evidence
+
+    def test_kev_count_one_adds_25(self) -> None:
+        obs = [_vendor_cve_obs(kev_count=1)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "active_exploitation"]
+        assert sigs[0].points == 25
+
+    def test_kev_count_zero_no_signal(self) -> None:
+        obs = [_vendor_cve_obs(kev_count=0)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "active_exploitation"]
+        assert len(sigs) == 0
+
+    def test_no_vendor_obs_no_signal(self) -> None:
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=[])
+        sigs = [s for s in result.contributing_signals if s.signal_name == "active_exploitation"]
+        assert len(sigs) == 0
+
+    def test_signal_source_module(self) -> None:
+        obs = [_vendor_cve_obs(kev_count=5)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "active_exploitation"]
+        assert sigs[0].source_module == "vendor_cve_history"
+
+
+# ===========================================================================
+# Slow patch velocity signal tests
+# ===========================================================================
+
+
+class TestSlowPatchVelocitySignal:
+    """Slow patch velocity -> +10 points."""
+
+    def test_velocity_over_60_adds_10(self) -> None:
+        obs = [_vendor_cve_obs(patch_velocity_days=90)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "slow_patch_velocity"]
+        assert len(sigs) == 1
+        assert sigs[0].points == 10
+        assert "90" in sigs[0].evidence
+
+    def test_velocity_61_adds_10(self) -> None:
+        obs = [_vendor_cve_obs(patch_velocity_days=61)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "slow_patch_velocity"]
+        assert sigs[0].points == 10
+
+    def test_velocity_exactly_60_no_signal(self) -> None:
+        """60 is not >60, so no signal fires."""
+        obs = [_vendor_cve_obs(patch_velocity_days=60)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "slow_patch_velocity"]
+        assert len(sigs) == 0
+
+    def test_velocity_30_no_signal(self) -> None:
+        obs = [_vendor_cve_obs(patch_velocity_days=30)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "slow_patch_velocity"]
+        assert len(sigs) == 0
+
+    def test_no_vendor_obs_no_signal(self) -> None:
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=[])
+        sigs = [s for s in result.contributing_signals if s.signal_name == "slow_patch_velocity"]
+        assert len(sigs) == 0
+
+    def test_signal_source_module(self) -> None:
+        obs = [_vendor_cve_obs(patch_velocity_days=120)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "slow_patch_velocity"]
+        assert sigs[0].source_module == "vendor_cve_history"
+
+    def test_velocity_float_over_60_adds_10(self) -> None:
+        """Float values should also be accepted."""
+        obs = [_vendor_cve_obs(patch_velocity_days=75.5)]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        sigs = [s for s in result.contributing_signals if s.signal_name == "slow_patch_velocity"]
+        assert sigs[0].points == 10
+
+
+# ===========================================================================
+# Vendor signals — composite and integration tests
+# ===========================================================================
+
+
+class TestVendorSignalsCombined:
+    """Composite tests for multiple vendor vulnerability signals firing together."""
+
+    def test_all_vendor_signals_fire_together(self) -> None:
+        """A worst-case vendor profile should fire all five signals."""
+        obs = [
+            _vendor_cve_obs(
+                cve_count=300,  # >200 -> vendor_cve_density +20
+                eol_status=True,  # EOL + >50 CVEs -> eol_product +25
+                kev_count=5,  # >0 -> active_exploitation +25
+                patch_velocity_days=120,  # >60 -> slow_patch_velocity +10
+                top_cwes=[{"cwe_id": "CWE-78", "frequency": 0.18}],  # RCE -> predicted_rce +20
+            )
+        ]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+
+        signal_names = {s.signal_name for s in result.contributing_signals}
+        assert "vendor_cve_density" in signal_names
+        assert "eol_product" in signal_names
+        assert "predicted_rce" in signal_names
+        assert "active_exploitation" in signal_names
+        assert "slow_patch_velocity" in signal_names
+
+    def test_vendor_signals_total_points(self) -> None:
+        """Max vendor signal contribution: 20+25+20+25+10 = 100."""
+        obs = [
+            _vendor_cve_obs(
+                cve_count=500,
+                eol_status=True,
+                kev_count=10,
+                patch_velocity_days=180,
+                top_cwes=[{"cwe_id": "CWE-119", "frequency": 0.30}],
+            )
+        ]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        vendor_signal_names = {
+            "vendor_cve_density", "eol_product", "predicted_rce",
+            "active_exploitation", "slow_patch_velocity",
+        }
+        vendor_points = sum(
+            s.points for s in result.contributing_signals
+            if s.signal_name in vendor_signal_names
+        )
+        assert vendor_points == 100
+
+    def test_vendor_signals_capped_at_100_with_others(self) -> None:
+        """Vendor signals + WAF + non-prod all fire but total capped at 100."""
+        env = _make_env(is_non_prod=True)
+        obs = [
+            _vendor_cve_obs(
+                cve_count=500,
+                eol_status=True,
+                kev_count=10,
+                patch_velocity_days=180,
+                top_cwes=[{"cwe_id": "CWE-119", "frequency": 0.30}],
+            )
+        ]
+        result = _ENGINE.score_entity(
+            entity_identifier="staging.example.com",
+            observations=obs,
+            environment=env,
+            waf_detected=False,
+        )
+        assert result.score == 100
+        assert result.priority_tier == PriorityTier.CRITICAL
+
+
+# ===========================================================================
+# Updated signal phrase coverage for vendor signals
+# ===========================================================================
+
+
+class TestVendorSignalPhraseCoverage:
+    """Verify _SIGNAL_PHRASES covers vendor vulnerability signal names."""
+
+    def test_vendor_signal_phrases_exist(self) -> None:
+        from expose.pipeline.lead_scoring import _SIGNAL_PHRASES
+
+        vendor_signal_names = {
+            "vendor_cve_density",
+            "eol_product",
+            "predicted_rce",
+            "active_exploitation",
+            "slow_patch_velocity",
+        }
+        for name in vendor_signal_names:
+            assert name in _SIGNAL_PHRASES, f"Missing phrase for vendor signal: {name}"
+
+    def test_vendor_signal_models_valid(self) -> None:
+        """All vendor signals produce valid ScoringSignal instances."""
+        obs = [
+            _vendor_cve_obs(
+                cve_count=300,
+                eol_status=True,
+                kev_count=5,
+                patch_velocity_days=120,
+                top_cwes=[{"cwe_id": "CWE-78", "frequency": 0.18}],
+            )
+        ]
+        result = _ENGINE.score_entity(entity_identifier="example.com", observations=obs)
+        vendor_signal_names = {
+            "vendor_cve_density", "eol_product", "predicted_rce",
+            "active_exploitation", "slow_patch_velocity",
+        }
+        vendor_sigs = [
+            s for s in result.contributing_signals if s.signal_name in vendor_signal_names
+        ]
+        assert len(vendor_sigs) == 5
+        for sig in vendor_sigs:
+            assert isinstance(sig, ScoringSignal)
+            assert 0 <= sig.points <= 100
+            assert sig.signal_name
+            assert sig.evidence
+            assert sig.source_module == "vendor_cve_history"

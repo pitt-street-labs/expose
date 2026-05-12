@@ -148,6 +148,61 @@ class ExecutiveSummaryResponse(BaseModel):
     is_placeholder: bool = True
 
 
+class VendorProfileResponse(BaseModel):
+    """Per-vendor CWE distribution and risk summary."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    vendor: str
+    products: list[str]
+    cwe_distribution: list[tuple[str, float]]
+    aggregate_risk: float = Field(ge=0.0, le=100.0)
+
+
+class HighRiskEndpointResponse(BaseModel):
+    """An endpoint whose compound vendor risk exceeds threshold."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    identifier: str
+    compound_risk: float = Field(ge=0.0, le=100.0)
+    contributing_products: list[str]
+    top_cwes: list[str]
+
+
+class EolProductResponse(BaseModel):
+    """A detected end-of-life product still in use."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    product: str
+    vendor: str
+    endpoint: str
+    eol_reason: str
+
+
+class ThreatActorCweAlignmentResponse(BaseModel):
+    """Maps a threat actor to CWE patterns found in the vendor stack."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    actor_name: str
+    matching_cwes: list[str]
+    alignment_score: float = Field(ge=0.0, le=1.0)
+
+
+class VendorDnaAnalysisResponse(BaseModel):
+    """Vendor Vulnerability DNA analysis section of the CISO report."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    vendor_profiles: list[VendorProfileResponse]
+    high_risk_endpoints: list[HighRiskEndpointResponse]
+    eol_products: list[EolProductResponse]
+    patch_velocity_assessment: str
+    threat_actor_alignment: list[ThreatActorCweAlignmentResponse]
+
+
 class CisoReportResponse(BaseModel):
     """Full CISO report response."""
 
@@ -161,6 +216,7 @@ class CisoReportResponse(BaseModel):
     attraction_assessment: AttractionAssessmentResponse
     ranked_targets: list[RankedTargetResponse]
     executive_summary: ExecutiveSummaryResponse
+    vendor_dna: VendorDnaAnalysisResponse | None = None
     is_placeholder: bool = True
 
 
@@ -177,6 +233,8 @@ _PLACEHOLDER_ENTITIES: list[dict[str, Any]] = [
             "tls_version": "TLS1.0",
             "is_self_signed": True,
             "security_headers": {},
+            "server_header": "Apache/2.2.34 (Unix) PHP/5.6.40",
+            "technologies": ["PHP", "MySQL", "Apache"],
         },
         "attribution_status": "confirmed",
         "attribution_confidence": 0.95,
@@ -189,6 +247,8 @@ _PLACEHOLDER_ENTITIES: list[dict[str, Any]] = [
             "open_ports": [{"port": 443}, {"port": 8443}],
             "tls_version": "TLS1.2",
             "security_headers": {"strict_transport_security": True},
+            "server_header": "nginx/1.24.0",
+            "x_powered_by": "Express",
         },
         "attribution_status": "confirmed",
         "attribution_confidence": 0.90,
@@ -335,6 +395,52 @@ async def _load_entities(
         return _PLACEHOLDER_ENTITIES, True
 
 
+def _vendor_dna_to_response(
+    vendor_dna: Any,
+) -> VendorDnaAnalysisResponse | None:
+    """Convert a VendorDnaAnalysis dataclass to the Pydantic response model."""
+    if vendor_dna is None:
+        return None
+    return VendorDnaAnalysisResponse(
+        vendor_profiles=[
+            VendorProfileResponse(
+                vendor=vp.vendor,
+                products=list(vp.products),
+                cwe_distribution=list(vp.cwe_distribution),
+                aggregate_risk=vp.aggregate_risk,
+            )
+            for vp in vendor_dna.vendor_profiles
+        ],
+        high_risk_endpoints=[
+            HighRiskEndpointResponse(
+                identifier=ep.identifier,
+                compound_risk=ep.compound_risk,
+                contributing_products=list(ep.contributing_products),
+                top_cwes=list(ep.top_cwes),
+            )
+            for ep in vendor_dna.high_risk_endpoints
+        ],
+        eol_products=[
+            EolProductResponse(
+                product=eol.product,
+                vendor=eol.vendor,
+                endpoint=eol.endpoint,
+                eol_reason=eol.eol_reason,
+            )
+            for eol in vendor_dna.eol_products
+        ],
+        patch_velocity_assessment=vendor_dna.patch_velocity_assessment,
+        threat_actor_alignment=[
+            ThreatActorCweAlignmentResponse(
+                actor_name=ta.actor_name,
+                matching_cwes=list(ta.matching_cwes),
+                alignment_score=ta.alignment_score,
+            )
+            for ta in vendor_dna.threat_actor_alignment
+        ],
+    )
+
+
 def _report_to_response(
     report: Any,
     tenant_id: UUID,
@@ -437,6 +543,9 @@ def _report_to_response(
             ),
             generated_at=report.generated_at,
             is_placeholder=is_placeholder,
+        ),
+        vendor_dna=_vendor_dna_to_response(
+            getattr(report, "vendor_dna", None),
         ),
         is_placeholder=is_placeholder,
     )
