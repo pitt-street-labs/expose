@@ -72,22 +72,49 @@ def _extract_apex_domains(seeds: Sequence[Seed]) -> frozenset[str]:
     return frozenset(apex)
 
 
-def _is_in_scope(value: str, seed_type: SeedType, apex_domains: frozenset[str]) -> bool:
+def _extract_org_names(seeds: Sequence[Seed]) -> frozenset[str]:
+    """Extract organization-like names from original seeds for scope anchoring.
+
+    Collects explicit org seeds and derives org names from domain seeds
+    (e.g., ``korlogos.com`` yields ``korlogos``).
+    """
+    names: set[str] = set()
+    for seed in seeds:
+        val = seed.value.strip().lower()
+        if seed.seed_type == SeedType.ORGANIZATION:
+            names.add(val)
+        elif seed.seed_type == SeedType.DOMAIN:
+            parts = val.split(".")
+            if len(parts) >= 2:
+                names.add(parts[-2])
+    return frozenset(names)
+
+
+def _is_in_scope(
+    value: str,
+    seed_type: SeedType,
+    apex_domains: frozenset[str],
+    org_names: frozenset[str] | None = None,
+) -> bool:
     """Check whether a candidate seed is anchored to the original scope.
 
     Domain seeds must share an apex domain with the original seeds.
-    IP, CIDR, and organization seeds pass through (they are controlled
-    by other filters).
+    Organization seeds must match an original org name or domain label.
+    IP and CIDR seeds pass through (controlled by other filters).
     """
     if not apex_domains:
         return True
-    if seed_type != SeedType.DOMAIN:
+    if seed_type == SeedType.DOMAIN:
+        parts = value.strip().lower().split(".")
+        if len(parts) >= 2:
+            candidate_apex = ".".join(parts[-2:])
+            return candidate_apex in apex_domains
+        return False
+    if seed_type == SeedType.ORGANIZATION and org_names:
+        return value.strip().lower() in org_names
+    if seed_type in (SeedType.IP, SeedType.CIDR):
         return True
-    parts = value.strip().lower().split(".")
-    if len(parts) >= 2:
-        candidate_apex = ".".join(parts[-2:])
-        return candidate_apex in apex_domains
-    return False
+    return seed_type != SeedType.ORGANIZATION
 
 
 def entities_to_seeds(
@@ -120,6 +147,7 @@ def entities_to_seeds(
         input entity sequence; first occurrence wins when deduplicating.
     """
     apex_domains = _extract_apex_domains(anchor_seeds) if anchor_seeds else frozenset()
+    org_names = _extract_org_names(anchor_seeds) if anchor_seeds else frozenset()
 
     seeds: list[Seed] = []
     seen: set[tuple[str, str]] = set()
@@ -150,9 +178,9 @@ def entities_to_seeds(
         if key in already_scanned or key in seen:
             continue
 
-        # Scope anchor check: reject domain entities that don't share an
-        # apex domain with the original seeds.
-        if not _is_in_scope(value, seed_type, apex_domains):
+        # Scope anchor check: reject entities that aren't anchored to
+        # the original seeds.
+        if not _is_in_scope(value, seed_type, apex_domains, org_names):
             logger.debug(
                 "Scope filter: rejecting %s %r — not anchored to original seeds",
                 seed_type.value,
@@ -237,19 +265,20 @@ def filter_seeds_by_scope(
     seeds: list[Seed],
     anchor_seeds: Sequence[Seed],
 ) -> list[Seed]:
-    """Remove domain seeds that fall outside the original scope.
+    """Remove seeds that fall outside the original scope.
 
-    Applies the same apex-domain anchor check used by ``entities_to_seeds``
+    Applies the same scope check used by ``entities_to_seeds``
     to an arbitrary seed list. Use this as a final gate after ``expand_seeds``
-    to catch domains introduced by org-seed expansion or M&A expansion that
-    don't relate to the original target.
+    to catch domains and org names introduced by org-seed expansion or M&A
+    expansion that don't relate to the original target.
     """
     apex_domains = _extract_apex_domains(anchor_seeds)
-    if not apex_domains:
+    org_names = _extract_org_names(anchor_seeds)
+    if not apex_domains and not org_names:
         return seeds
     result = []
     for seed in seeds:
-        if _is_in_scope(seed.value, seed.seed_type, apex_domains):
+        if _is_in_scope(seed.value, seed.seed_type, apex_domains, org_names):
             result.append(seed)
         else:
             logger.debug(
