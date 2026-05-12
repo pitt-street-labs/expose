@@ -7,10 +7,11 @@ JSON responses.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import httpx
@@ -47,6 +48,12 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures" / "collectors" / "ct_crtsh"
 def _clear_crtsh_cache() -> None:
     """Clear crt.sh response cache before each test to prevent leakage."""
     clear_crt_sh_cache()
+
+
+@pytest.fixture(autouse=True)
+def _no_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch asyncio.sleep to be instant so retry tests run fast."""
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
 
 
 def _load_fixture(name: str) -> str:
@@ -633,6 +640,111 @@ class TestCrtShResponseCache:
             assert r1.subject.identifier_value == r2.subject.identifier_value
             assert r1.structured_payload["serial_number"] == r2.structured_payload["serial_number"]
             assert r1.structured_payload["sans"] == r2.structured_payload["sans"]
+
+
+class TestCrtShRetryLogic:
+    """Test 11: retry with exponential backoff on transient failures."""
+
+    @respx.mock
+    async def test_succeeds_on_second_attempt_after_500(self) -> None:
+        fixture = _load_fixture("happy_path.json")
+        route = respx.get("https://crt.sh/", params__contains={"output": "json"})
+        route.side_effect = [
+            httpx.Response(500, text="Internal Server Error"),
+            httpx.Response(200, text=fixture),
+        ]
+
+        collector = CrtShCollector(_make_config())
+        results = await _collect_all(collector, _make_seed("example.com"))
+
+        assert len(results) == 2
+        assert route.call_count == 2
+
+    @respx.mock
+    async def test_succeeds_on_third_attempt_after_two_500s(self) -> None:
+        fixture = _load_fixture("happy_path.json")
+        route = respx.get("https://crt.sh/", params__contains={"output": "json"})
+        route.side_effect = [
+            httpx.Response(500, text="Internal Server Error"),
+            httpx.Response(503, text="Service Unavailable"),
+            httpx.Response(200, text=fixture),
+        ]
+
+        collector = CrtShCollector(_make_config())
+        results = await _collect_all(collector, _make_seed("example.com"))
+
+        assert len(results) == 2
+        assert route.call_count == 3
+
+    @respx.mock
+    async def test_succeeds_after_transient_network_error(self) -> None:
+        fixture = _load_fixture("happy_path.json")
+        route = respx.get("https://crt.sh/", params__contains={"output": "json"})
+        route.side_effect = [
+            httpx.ConnectError("connection refused"),
+            httpx.Response(200, text=fixture),
+        ]
+
+        collector = CrtShCollector(_make_config())
+        results = await _collect_all(collector, _make_seed("example.com"))
+
+        assert len(results) == 2
+        assert route.call_count == 2
+
+    @respx.mock
+    async def test_exhausts_all_retries_on_persistent_500(self) -> None:
+        route = respx.get("https://crt.sh/", params__contains={"output": "json"})
+        route.side_effect = [
+            httpx.Response(500, text="Internal Server Error"),
+            httpx.Response(500, text="Internal Server Error"),
+            httpx.Response(500, text="Internal Server Error"),
+        ]
+
+        collector = CrtShCollector(_make_config())
+        with pytest.raises(CollectorSourceUnreachableError, match="500"):
+            await _collect_all(collector, _make_seed())
+
+        assert route.call_count == 3
+
+    @respx.mock
+    async def test_no_retry_on_404(self) -> None:
+        route = respx.get("https://crt.sh/", params__contains={"output": "json"}).mock(
+            return_value=httpx.Response(404),
+        )
+
+        collector = CrtShCollector(_make_config())
+        results = await _collect_all(collector, _make_seed("not-found.com"))
+
+        assert results == []
+        assert route.call_count == 1
+
+    @respx.mock
+    async def test_no_retry_on_429(self) -> None:
+        route = respx.get("https://crt.sh/", params__contains={"output": "json"}).mock(
+            return_value=httpx.Response(429, text="Too Many Requests"),
+        )
+
+        collector = CrtShCollector(_make_config())
+        with pytest.raises(CollectorSourceUnreachableError, match="429"):
+            await _collect_all(collector, _make_seed())
+
+        assert route.call_count == 1
+
+    @respx.mock
+    async def test_org_search_retries_on_500(self) -> None:
+        fixture = _load_fixture("org_search.json")
+        route = respx.get("https://crt.sh/", params__contains={"output": "json"})
+        route.side_effect = [
+            httpx.Response(502, text="Bad Gateway"),
+            httpx.Response(200, text=fixture),
+        ]
+
+        collector = CrtShCollector(_make_config())
+        seed = Seed(seed_type=SeedType.ORGANIZATION, value="Acme Corp")
+        results = await _collect_all(collector, seed)
+
+        assert len(results) >= 4
+        assert route.call_count == 2
 
 
 class TestCrtShRegistration:

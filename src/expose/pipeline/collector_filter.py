@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 COLLECTOR_RULES: dict[str, dict[str, list[str]]] = {
     "cloud_proxied": {
-        "skip": ["active-port-surface"],  # scanning CDN edge, not target
+        "skip": ["active-port-surface", "active-port-probe"],  # scanning CDN edge, not target
         "prioritize": ["ct-certspotter", "ct-crtsh"],  # many subdomains behind CDN
     },
     "email_outsourced": {
@@ -50,6 +50,7 @@ COLLECTOR_RULES: dict[str, dict[str, list[str]]] = {
     "high_cert_count": {
         "skip": [
             "active-port-surface",
+            "active-port-probe",
             "active-http-fingerprint",
         ],  # too many targets for active probing
         "prioritize": ["ct-certspotter", "ct-crtsh", "ct-censys"],

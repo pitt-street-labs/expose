@@ -40,3 +40,4 @@ import expose.collectors.builtin.mail_header_analyzer  # noqa: F401
 import expose.collectors.builtin.otx_alienvault  # noqa: F401
 import expose.collectors.builtin.common_crawl  # noqa: F401
 import expose.collectors.builtin.dark_web_indicators  # noqa: F401
+import expose.collectors.builtin.active_port_probe  # noqa: F401

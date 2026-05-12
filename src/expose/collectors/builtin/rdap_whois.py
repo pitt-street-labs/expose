@@ -580,8 +580,12 @@ class RdapWhoisCollector(Collector):
                     port43_raw, SanitizationFieldKind.GENERIC
                 ).value
 
+        # Extract DNSSEC status from secureDNS object.
+        secure_dns = data.get("secureDNS", {})
+        dnssec_signed = secure_dns.get("delegationSigned", False) if isinstance(secure_dns, dict) else False
+
         # Build structured payload — omit None values for clean output.
-        payload: dict[str, Any] = {}
+        payload: dict[str, Any] = {"dnssec": dnssec_signed}
         if registrant_org is not None:
             payload["registrant_org"] = registrant_org
         if registrar_name is not None:

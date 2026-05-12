@@ -171,6 +171,10 @@ class LeadScoringEngine:
     })
     _WEB_PORTS: frozenset[int] = frozenset({80, 443, 8080, 8443})
 
+    _ACTIVE_PORT_SCANNER_IDS: frozenset[str] = frozenset({
+        "active-port-surface", "active-port-probe",
+    })
+
     _PASSIVE_SCANNER_IDS: frozenset[str] = frozenset({
         "scan-shodan", "scan-censys", "scan-binaryedge",
     })
@@ -323,14 +327,15 @@ class LeadScoringEngine:
     ) -> list[ScoringSignal]:
         """Open port risk -> +5 (web-only), +10 (medium), +20 (high) points.
 
-        Examines ``active-port-surface`` observations for open ports and
-        classifies them by risk tier.  Only the highest-risk tier fires --
-        a target with both high-risk and web-only ports gets +20, not +25.
+        Examines ``active-port-surface`` and ``active-port-probe`` observations
+        for open ports and classifies them by risk tier.  Only the highest-risk
+        tier fires -- a target with both high-risk and web-only ports gets +20,
+        not +25.
         """
         for obs in observations:
             cid = obs.get("_collector_id") or obs.get("collector_id", "")
 
-            if cid == "active-port-surface":
+            if cid in LeadScoringEngine._ACTIVE_PORT_SCANNER_IDS:
                 payload = obs.get("structured_payload", obs)
                 open_ports: list[int] = payload.get("open_ports", [])
                 if not open_ports:
@@ -431,7 +436,7 @@ class LeadScoringEngine:
         for obs in observations:
             cid = obs.get("_collector_id") or obs.get("collector_id", "")
 
-            if cid == "active-tls-handshake":
+            if cid in {"active-tls-handshake", "active-port-probe"}:
                 payload = obs.get("structured_payload", obs)
                 tls_version: str = payload.get("tls_version") or ""
                 cipher_suite: str = payload.get("cipher_suite") or ""
@@ -487,7 +492,7 @@ class LeadScoringEngine:
         for obs in observations:
             cid = obs.get("_collector_id") or obs.get("collector_id", "")
 
-            if cid == "active-tls-handshake":
+            if cid in {"active-tls-handshake", "active-port-probe"}:
                 payload = obs.get("structured_payload", obs)
                 subject_cn = payload.get("cert_subject_cn") or ""
                 issuer_cn = payload.get("cert_issuer_cn") or ""
@@ -675,7 +680,7 @@ class LeadScoringEngine:
                     )
                 )
 
-        if dnssec is not None and not dnssec:
+        if not dnssec:
             signals.append(
                 ScoringSignal(
                     signal_name="no_dnssec",

@@ -27,6 +27,7 @@ payload, so downstream consumers can distinguish the two collectors' output.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -60,6 +61,10 @@ _CRT_SH_BASE_URL = "https://crt.sh/"
 _CRT_SH_JSON_URL = "https://crt.sh/"
 
 _DEFAULT_RECENCY_HOURS = 24
+
+_RETRY_MAX_ATTEMPTS = 3
+_RETRY_DELAYS = (2.0, 4.0, 8.0)
+_CRT_SH_TIMEOUT = 45.0
 
 
 def _parse_sans(name_value: str) -> list[str]:
@@ -177,6 +182,72 @@ class CertstreamCollector(Collector):
             config.extra.get("recency_hours", _DEFAULT_RECENCY_HOURS)
         )
 
+    async def _fetch_crtsh(
+        self,
+        params: dict[str, str],
+        label: str,
+    ) -> httpx.Response | None:
+        timeout = max(self.config.request_timeout_seconds, _CRT_SH_TIMEOUT)
+        last_exc: Exception | None = None
+
+        for attempt in range(1, _RETRY_MAX_ATTEMPTS + 1):
+            try:
+                async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(timeout),
+                    headers={"User-Agent": self.config.user_agent},
+                ) as client:
+                    response = await client.get(_CRT_SH_JSON_URL, params=params)
+
+                    if response.status_code == 404:
+                        return None
+
+                    if response.status_code >= 500:
+                        last_exc = httpx.HTTPStatusError(
+                            f"crt.sh returned HTTP {response.status_code}",
+                            request=response.request,
+                            response=response,
+                        )
+                        if attempt < _RETRY_MAX_ATTEMPTS:
+                            delay = _RETRY_DELAYS[attempt - 1]
+                            logger.warning(
+                                "ct-certstream: %s got HTTP %d, retrying in %.0fs (attempt %d/%d)",
+                                label, response.status_code, delay, attempt, _RETRY_MAX_ATTEMPTS,
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+                        response.raise_for_status()
+
+                    response.raise_for_status()
+
+                    if attempt > 1:
+                        logger.info(
+                            "ct-certstream: %s succeeded on attempt %d/%d",
+                            label, attempt, _RETRY_MAX_ATTEMPTS,
+                        )
+
+                    return response
+
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code if exc.response is not None else "unknown"
+                raise CollectorSourceUnreachableError(
+                    f"crt.sh returned HTTP {status} for {label}"
+                ) from last_exc
+            except httpx.HTTPError as exc:
+                last_exc = exc
+                if attempt < _RETRY_MAX_ATTEMPTS:
+                    delay = _RETRY_DELAYS[attempt - 1]
+                    logger.warning(
+                        "ct-certstream: %s network error (%s), retrying in %.0fs (attempt %d/%d)",
+                        label, exc, delay, attempt, _RETRY_MAX_ATTEMPTS,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                msg = f"crt.sh unreachable for {label}: {exc}"
+                raise CollectorSourceUnreachableError(msg) from exc
+
+        msg = f"crt.sh unreachable for {label} after {_RETRY_MAX_ATTEMPTS} attempts"
+        raise CollectorSourceUnreachableError(msg) from last_exc
+
     async def expand(self, seed: Seed) -> AsyncIterator[Observation]:
         if seed.seed_type != SeedType.DOMAIN:
             logger.warning(
@@ -187,40 +258,27 @@ class CertstreamCollector(Collector):
             return
 
         domain = seed.value.strip()
-        url = _CRT_SH_JSON_URL
         params = {
             "q": f"%.{domain}",
             "output": "json",
             "exclude": "expired",
         }
+        label = f"domain {domain!r}"
 
-        try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(self.config.request_timeout_seconds),
-                headers={"User-Agent": self.config.user_agent},
-            ) as client:
-                response = await client.get(url, params=params)
-                response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            msg = (
-                f"crt.sh returned HTTP {exc.response.status_code} "
-                f"for domain {domain!r}"
-            )
-            raise CollectorSourceUnreachableError(msg) from exc
-        except httpx.HTTPError as exc:
-            msg = f"crt.sh unreachable for domain {domain!r}: {exc}"
-            raise CollectorSourceUnreachableError(msg) from exc
+        response = await self._fetch_crtsh(params, label)
+        if response is None:
+            return
 
         try:
             raw: Any = response.json()
         except Exception as exc:
-            msg = f"crt.sh returned malformed JSON for domain {domain!r}: {exc}"
+            msg = f"crt.sh returned malformed JSON for {label}: {exc}"
             raise CollectorSourceUnreachableError(msg) from exc
 
         if not isinstance(raw, list):
             msg = (
                 f"crt.sh returned {type(raw).__name__} instead of "
-                f"JSON array for domain {domain!r}"
+                f"JSON array for {label}"
             )
             raise CollectorSourceUnreachableError(msg)
 

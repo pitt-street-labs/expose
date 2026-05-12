@@ -2229,21 +2229,21 @@ class TestNoDnssecSignal:
         sigs = [s for s in result.contributing_signals if s.signal_name == "no_dnssec"]
         assert len(sigs) == 0
 
-    def test_dnssec_none_no_signal(self) -> None:
+    def test_dnssec_none_fires_signal(self) -> None:
         props = {"dnssec": None}
         result = _ENGINE.score_entity(
             entity_identifier="example.com", entity_properties=props
         )
         sigs = [s for s in result.contributing_signals if s.signal_name == "no_dnssec"]
-        assert len(sigs) == 0
+        assert len(sigs) == 1
 
-    def test_dnssec_absent_no_signal(self) -> None:
+    def test_dnssec_absent_fires_signal(self) -> None:
         props = {"registrar": "SomeRegistrar"}
         result = _ENGINE.score_entity(
             entity_identifier="example.com", entity_properties=props
         )
         sigs = [s for s in result.contributing_signals if s.signal_name == "no_dnssec"]
-        assert len(sigs) == 0
+        assert len(sigs) == 1
 
     def test_signal_source_module(self) -> None:
         props = {"dnssec": False}

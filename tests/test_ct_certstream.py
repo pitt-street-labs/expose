@@ -9,8 +9,10 @@ recency filtering can be tested deterministically.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import httpx
@@ -53,6 +55,12 @@ def _load_fixture(name: str, *, recent: bool = True) -> str:
         raw.replace("RECENT_PLACEHOLDER", recent_dt.strftime("%Y-%m-%dT%H:%M:%S"))
         .replace("FUTURE_PLACEHOLDER", future_dt.strftime("%Y-%m-%dT%H:%M:%S"))
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch asyncio.sleep to be instant so retry tests run fast."""
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
 
 
 def _make_config(
@@ -448,6 +456,79 @@ class TestCertstreamMetadata:
 
     def test_requires_credentials(self) -> None:
         assert CertstreamCollector.requires_credentials is False
+
+
+class TestCertstreamRetryLogic:
+    """Retry with exponential backoff on transient failures."""
+
+    @respx.mock
+    async def test_succeeds_on_second_attempt_after_500(self) -> None:
+        fixture = _load_fixture("recent_certs.json", recent=True)
+        route = respx.get("https://crt.sh/", params__contains={"output": "json"})
+        route.side_effect = [
+            httpx.Response(500, text="Internal Server Error"),
+            httpx.Response(200, text=fixture),
+        ]
+
+        collector = CertstreamCollector(_make_config())
+        results = await _collect_all(collector, _make_seed("example.com"))
+
+        assert len(results) == 2
+        assert route.call_count == 2
+
+    @respx.mock
+    async def test_succeeds_after_transient_network_error(self) -> None:
+        fixture = _load_fixture("recent_certs.json", recent=True)
+        route = respx.get("https://crt.sh/", params__contains={"output": "json"})
+        route.side_effect = [
+            httpx.ConnectError("connection refused"),
+            httpx.Response(200, text=fixture),
+        ]
+
+        collector = CertstreamCollector(_make_config())
+        results = await _collect_all(collector, _make_seed("example.com"))
+
+        assert len(results) == 2
+        assert route.call_count == 2
+
+    @respx.mock
+    async def test_exhausts_all_retries_on_persistent_500(self) -> None:
+        route = respx.get("https://crt.sh/", params__contains={"output": "json"})
+        route.side_effect = [
+            httpx.Response(500, text="Internal Server Error"),
+            httpx.Response(500, text="Internal Server Error"),
+            httpx.Response(500, text="Internal Server Error"),
+        ]
+
+        collector = CertstreamCollector(_make_config())
+        with pytest.raises(CollectorSourceUnreachableError, match="500"):
+            await _collect_all(collector, _make_seed())
+
+        assert route.call_count == 3
+
+    @respx.mock
+    async def test_no_retry_on_404(self) -> None:
+        route = respx.get(
+            "https://crt.sh/", params__contains={"output": "json"}
+        ).mock(return_value=httpx.Response(404))
+
+        collector = CertstreamCollector(_make_config())
+        results = await _collect_all(collector, _make_seed("not-found.com"))
+
+        assert results == []
+        assert route.call_count == 1
+
+    @respx.mock
+    async def test_no_retry_on_429(self) -> None:
+        route = respx.get(
+            "https://crt.sh/", params__contains={"output": "json"}
+        ).mock(return_value=httpx.Response(429, text="Too Many Requests"))
+
+        collector = CertstreamCollector(_make_config())
+        with pytest.raises(CollectorSourceUnreachableError, match="429"):
+            await _collect_all(collector, _make_seed())
+
+        assert route.call_count == 1
 
 
 class TestCertstreamRegistration:

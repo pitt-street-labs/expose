@@ -1589,27 +1589,84 @@ class CisoReportGenerator:
         risk_score: float,
     ) -> str:
         """Build a human-readable justification for a target's ranking."""
+        props = entity.get("properties", {})
+        entity_type = entity.get("entity_type", "")
         identifier = entity.get("canonical_identifier", "unknown")
-        parts: list[str] = [f"{identifier}: risk score {risk_score:.1f}."]
+        parts: list[str] = []
 
         ports = self._extract_ports(entity)
         mgmt = ports & _MANAGEMENT_PORTS
         dbs = ports & _DATABASE_PORTS
 
-        if mgmt:
-            parts.append(
-                f"Exposed management ports: {', '.join(str(p) for p in sorted(mgmt))}."
-            )
-        if dbs:
-            parts.append(
-                f"Exposed database ports: {', '.join(str(p) for p in sorted(dbs))}."
-            )
+        registrar = (
+            props.get("registrar")
+            or props.get("registrar_name")
+            or props.get("rdap_registrar")
+            or ""
+        )
+        if isinstance(registrar, str):
+            registrar = registrar.strip()
 
-        props = entity.get("properties", {})
+        nameservers = props.get("nameservers") or props.get("name_servers") or []
+        has_cdn = props.get("cdn_provider") or props.get("is_cdn")
+        has_proxy = props.get("is_proxied") or props.get("waf_detected")
+        tls_version = str(props.get("tls_version", "")).lower()
+        is_internal = any(m in identifier.lower() for m in _INTERNAL_HOSTNAME_MARKERS)
+
+        if entity_type == "domain" and registrar:
+            ns_detail = ""
+            if nameservers:
+                ns_domains = {s.rstrip(".").rsplit(".", 2)[-2] + "." + s.rstrip(".").rsplit(".", 1)[-1]
+                              for s in nameservers if isinstance(s, str) and "." in s}
+                if len(ns_domains) == 1:
+                    ns_detail = f" All nameservers on {next(iter(ns_domains))}."
+            parts.append(f"Registered with {registrar}.{ns_detail}")
+        elif entity_type == "domain" and is_internal:
+            parts.append("Internal hostname pattern exposed in public records.")
+
+        if entity_type == "ip_address":
+            if not has_cdn and not has_proxy:
+                parts.append("IP directly exposed with no CDN or proxy protection.")
+            elif has_cdn:
+                cdn_name = props.get("cdn_provider", "CDN")
+                parts.append(f"Behind {cdn_name} but directly resolvable.")
+
+        if is_internal and entity_type != "domain":
+            parts.append("Internal naming convention leaked in public data.")
+
+        if props.get("_ma_discovery") or props.get("acquisition"):
+            parts.append("Discovered via M&A activity — likely inherited asset.")
+
+        if dbs:
+            port_names = ", ".join(str(p) for p in sorted(dbs))
+            parts.append(f"Database ports exposed ({port_names}).")
+        if mgmt:
+            port_names = ", ".join(str(p) for p in sorted(mgmt))
+            parts.append(f"Management ports exposed ({port_names}).")
+        if ports and not dbs and not mgmt:
+            parts.append(f"{len(ports)} open port(s) detected.")
+
+        tls_parts: list[str] = []
+        if tls_version in ("tls1.0", "tls 1.0", "tlsv1", "ssl3", "sslv3"):
+            tls_parts.append(f"deprecated TLS ({tls_version.upper()})")
         if props.get("is_self_signed"):
-            parts.append("Self-signed certificate detected.")
+            tls_parts.append("self-signed certificate")
         if props.get("is_expired"):
-            parts.append("Expired certificate detected.")
+            tls_parts.append("expired certificate")
+        if tls_parts:
+            parts.append(f"TLS issues: {', '.join(tls_parts)}.")
+
+        headers = props.get("security_headers")
+        if isinstance(headers, dict) and headers and not headers.get("strict_transport_security"):
+            parts.append("Missing HSTS header.")
+
+        if not parts:
+            if risk_score >= 70:
+                parts.append("High composite risk from lead score and exposure factors.")
+            elif risk_score >= 40:
+                parts.append("Moderate risk based on external exposure profile.")
+            else:
+                parts.append("Low individual risk; included for surface completeness.")
 
         return " ".join(parts)
 

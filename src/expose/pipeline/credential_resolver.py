@@ -202,6 +202,10 @@ CREDENTIAL_SPECS: dict[str, CollectorCredentialSpec] = {
         required_keys=["hibp_api_key"],
         optional_keys=["intelx_api_key", "dehashed_email", "dehashed_api_key"],
     ),
+    "active-port-probe": CollectorCredentialSpec(
+        collector_id="active-port-probe",
+        required_keys=[],
+    ),
 }
 
 
