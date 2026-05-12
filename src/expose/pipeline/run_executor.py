@@ -547,6 +547,10 @@ class RunExecutor:
                     "Attribution scoring failed after pass %d", pass_number
                 )
                 pipeline_errors_total.add(1, {"component": "executor", "error_type": type(exc).__name__})
+                try:
+                    await self._entity_repo._session.rollback()
+                except Exception:
+                    pass
 
             # --- Stage 4a: Rule-based attribution evaluation -----------------
             try:
