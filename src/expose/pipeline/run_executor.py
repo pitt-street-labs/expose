@@ -679,8 +679,11 @@ class RunExecutor:
                     )
                     pipeline_errors_total.add(1, {"component": "executor", "error_type": type(exc).__name__})
 
-            # Convert discovered entities to new seeds
-            new_seeds = entities_to_seeds(entities, already_scanned)
+            # Convert discovered entities to new seeds (scope-anchored to
+            # original seeds to prevent ISP/third-party contamination).
+            new_seeds = entities_to_seeds(
+                entities, already_scanned, anchor_seeds=seeds,
+            )
             new_seeds.extend(
                 extract_org_seeds_from_properties(entities, already_scanned)
             )

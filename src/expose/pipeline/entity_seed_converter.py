@@ -56,9 +56,45 @@ _ENTITY_TYPE_TO_SEED_TYPE: dict[str, SeedType] = {
 _REGISTRANT_ORG_KEYS: tuple[str, ...] = ("registrant_org", "_registrant_org")
 
 
+def _extract_apex_domains(seeds: Sequence[Seed]) -> frozenset[str]:
+    """Extract apex domains from a set of seeds for scope anchoring.
+
+    Given seeds like ``["sub.korlogos.com", "www.korlogos.com", "192.168.1.1"]``,
+    returns ``frozenset({"korlogos.com"})``.
+    """
+    apex: set[str] = set()
+    for seed in seeds:
+        if seed.seed_type != SeedType.DOMAIN:
+            continue
+        parts = seed.value.strip().lower().split(".")
+        if len(parts) >= 2:
+            apex.add(".".join(parts[-2:]))
+    return frozenset(apex)
+
+
+def _is_in_scope(value: str, seed_type: SeedType, apex_domains: frozenset[str]) -> bool:
+    """Check whether a candidate seed is anchored to the original scope.
+
+    Domain seeds must share an apex domain with the original seeds.
+    IP, CIDR, and organization seeds pass through (they are controlled
+    by other filters).
+    """
+    if not apex_domains:
+        return True
+    if seed_type != SeedType.DOMAIN:
+        return True
+    parts = value.strip().lower().split(".")
+    if len(parts) >= 2:
+        candidate_apex = ".".join(parts[-2:])
+        return candidate_apex in apex_domains
+    return False
+
+
 def entities_to_seeds(
     entities: Sequence[Entity],
     already_scanned: set[tuple[str, str]],
+    *,
+    anchor_seeds: Sequence[Seed] | None = None,
 ) -> list[Seed]:
     """Convert entities to typed seeds, excluding already-scanned pairs.
 
@@ -70,6 +106,12 @@ def entities_to_seeds(
         Set of ``(seed_type_value, canonical_identifier)`` pairs that have
         already been dispatched to collectors.  Seeds matching a pair in this
         set are silently skipped to avoid redundant work.
+    anchor_seeds:
+        Original operator-provided seeds used for scope anchoring.  When
+        provided, domain entities are only promoted to seeds if they share
+        an apex domain with the originals.  This prevents transitive
+        discoveries (e.g., ISP domains found via SPF chain following or
+        BGP lookups) from polluting the scan with unrelated infrastructure.
 
     Returns
     -------
@@ -77,6 +119,8 @@ def entities_to_seeds(
         Deduplicated list of seeds ready for dispatch.  Order follows the
         input entity sequence; first occurrence wins when deduplicating.
     """
+    apex_domains = _extract_apex_domains(anchor_seeds) if anchor_seeds else frozenset()
+
     seeds: list[Seed] = []
     seen: set[tuple[str, str]] = set()
 
@@ -104,6 +148,16 @@ def entities_to_seeds(
 
         # Skip if already scanned or already seen in this batch.
         if key in already_scanned or key in seen:
+            continue
+
+        # Scope anchor check: reject domain entities that don't share an
+        # apex domain with the original seeds.
+        if not _is_in_scope(value, seed_type, apex_domains):
+            logger.debug(
+                "Scope filter: rejecting %s %r — not anchored to original seeds",
+                seed_type.value,
+                value,
+            )
             continue
 
         seen.add(key)
@@ -182,4 +236,6 @@ def extract_org_seeds_from_properties(
 __all__ = [
     "entities_to_seeds",
     "extract_org_seeds_from_properties",
+    "_extract_apex_domains",
+    "_is_in_scope",
 ]
