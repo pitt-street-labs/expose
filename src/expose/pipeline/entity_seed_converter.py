@@ -233,9 +233,37 @@ def extract_org_seeds_from_properties(
     return seeds
 
 
+def filter_seeds_by_scope(
+    seeds: list[Seed],
+    anchor_seeds: Sequence[Seed],
+) -> list[Seed]:
+    """Remove domain seeds that fall outside the original scope.
+
+    Applies the same apex-domain anchor check used by ``entities_to_seeds``
+    to an arbitrary seed list. Use this as a final gate after ``expand_seeds``
+    to catch domains introduced by org-seed expansion or M&A expansion that
+    don't relate to the original target.
+    """
+    apex_domains = _extract_apex_domains(anchor_seeds)
+    if not apex_domains:
+        return seeds
+    result = []
+    for seed in seeds:
+        if _is_in_scope(seed.value, seed.seed_type, apex_domains):
+            result.append(seed)
+        else:
+            logger.debug(
+                "Scope filter (post-expand): rejecting %s %r",
+                seed.seed_type.value,
+                seed.value,
+            )
+    return result
+
+
 __all__ = [
     "entities_to_seeds",
     "extract_org_seeds_from_properties",
+    "filter_seeds_by_scope",
     "_extract_apex_domains",
     "_is_in_scope",
 ]

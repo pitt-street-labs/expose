@@ -47,6 +47,7 @@ from expose.pipeline.takeover_detection import TakeoverRisk, detect_takeover_ris
 from expose.pipeline.entity_seed_converter import (
     entities_to_seeds,
     extract_org_seeds_from_properties,
+    filter_seeds_by_scope,
 )
 from expose.pipeline.ma_expansion import expand_ma_seeds
 from expose.pipeline.seed_expansion import expand_seeds
@@ -701,8 +702,9 @@ class RunExecutor:
             if not new_seeds:
                 break
 
-            # Expand new seeds, filter non-resolving domains, update tracking
+            # Expand new seeds, scope-filter expanded domains, then DNS-filter
             current_seeds = expand_seeds(new_seeds)
+            current_seeds = filter_seeds_by_scope(current_seeds, seeds)
             current_seeds = await self._dns_filter_seeds(current_seeds)
             expanded_count += len(current_seeds)
             already_scanned.update(
