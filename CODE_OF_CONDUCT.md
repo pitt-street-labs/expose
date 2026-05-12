@@ -1,62 +1,85 @@
-# Code of Conduct
 
-This project adopts the **Contributor Covenant version 2.1** as its Code of Conduct.
+# Contributor Covenant Code of Conduct
 
-The full text is available at: https://www.contributor-covenant.org/version/2/1/code_of_conduct/
+## Our Pledge
 
-To populate this file with the full Contributor Covenant 2.1 text, run:
+We as members, contributors, and leaders pledge to make participation in our community a harassment-free experience for everyone, regardless of age, body size, visible or invisible disability, ethnicity, sex characteristics, gender identity and expression, level of experience, education, socio-economic status, nationality, personal appearance, race, caste, color, religion, or sexual identity and orientation.
 
-```bash
-curl -L https://www.contributor-covenant.org/version/2/1/code_of_conduct.md -o CODE_OF_CONDUCT.md
-```
+We pledge to act and interact in ways that contribute to an open, welcoming, diverse, inclusive, and healthy community.
 
-## Project-specific addenda
+## Our Standards
 
-The following project-specific additions apply alongside the Contributor Covenant.
+Examples of behavior that contributes to a positive environment for our community include:
 
-### Reporting
+* Demonstrating empathy and kindness toward other people
+* Being respectful of differing opinions, viewpoints, and experiences
+* Giving and gracefully accepting constructive feedback
+* Accepting responsibility and apologizing to those affected by our mistakes, and learning from the experience
+* Focusing on what is best not just for us as individuals, but for the overall community
 
-Code of Conduct violations should be reported to **conduct@korlogos.com**. Reports are reviewed by the Korlogos maintainer team. Reports are kept confidential to the extent compatible with addressing the issue.
+Examples of unacceptable behavior include:
 
-Response timeline:
+* The use of sexualized language or imagery, and sexual attention or advances of any kind
+* Trolling, insulting or derogatory comments, and personal or political attacks
+* Public or private harassment
+* Publishing others' private information, such as a physical or email address, without their explicit permission
+* Other conduct which could reasonably be considered inappropriate in a professional setting
 
-- **Acknowledgment of report:** within 72 hours.
-- **Initial review:** within 7 days.
-- **Resolution communication:** within 30 days for most cases; complex cases may take longer with status updates to the reporter.
+## Enforcement Responsibilities
 
-### Enforcement ladder
+Community leaders are responsible for clarifying and enforcing our standards of acceptable behavior and will take appropriate and fair corrective action in response to any behavior that they deem inappropriate, threatening, offensive, or harmful.
 
-We follow a graduated enforcement model:
+Community leaders have the right and responsibility to remove, edit, or reject comments, commits, code, wiki edits, issues, and other contributions that are not aligned to this Code of Conduct, and will communicate reasons for moderation decisions when appropriate.
 
-1. **Private warning** — first-time violations of community standards typically result in a private message clarifying expectations.
-2. **Public warning** — repeated or more serious violations result in a public moderation note in the relevant venue.
-3. **Temporary suspension** — significant violations or continued patterns result in temporary loss of community participation rights (typically 30-90 days).
-4. **Permanent ban** — the most serious violations or persistent patterns result in permanent removal from project spaces.
+## Scope
 
-Each step has a clear written rationale shared with the affected individual. Appeals are reviewed by maintainers not involved in the original decision.
+This Code of Conduct applies within all community spaces, and also applies when an individual is officially representing the community in public spaces. Examples of representing our community include using an official e-mail address, posting via an official social media account, or acting as an appointed representative at an online or offline event.
 
-### Scope
+## Enforcement
 
-This Code of Conduct applies in all project spaces:
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the community leaders responsible for enforcement at conduct@korlogos.com. All complaints will be reviewed and investigated promptly and fairly.
 
-- The GitHub repository (issues, pull requests, discussions, code review, wiki).
-- Any official communication channels (mailing lists, Slack/Discord if added).
-- Project events (conferences, meetups, talks given on behalf of the project).
-- Public representations of the project.
+All community leaders are obligated to respect the privacy and security of the reporter of any incident.
 
-It also applies when an individual is officially representing the project in public spaces.
+## Enforcement Guidelines
 
-### Transparency
+Community leaders will follow these Community Impact Guidelines in determining the consequences for any action they deem in violation of this Code of Conduct:
 
-Annually (target: each January), maintainers publish a transparency summary including:
+### 1. Correction
 
-- Number of Code of Conduct reports received in the prior year.
-- Number resulting in each enforcement step.
-- Categories of issues raised (without identifying details).
-- Process improvements made in response.
+**Community Impact**: Use of inappropriate language or other behavior deemed unprofessional or unwelcome in the community.
 
-The first transparency report is targeted for January 2027.
+**Consequence**: A private, written warning from community leaders, providing clarity around the nature of the violation and an explanation of why the behavior was inappropriate. A public apology may be requested.
 
-## Maintainer commitment
+### 2. Warning
 
-Korlogos maintainers commit to upholding the Contributor Covenant in their own conduct as well as in moderating the community. Maintainers who violate the Code of Conduct face the same enforcement ladder as community members, applied by the broader maintainer team.
+**Community Impact**: A violation through a single incident or series of actions.
+
+**Consequence**: A warning with consequences for continued behavior. No interaction with the people involved, including unsolicited interaction with those enforcing the Code of Conduct, for a specified period of time. This includes avoiding interactions in community spaces as well as external channels like social media. Violating these terms may lead to a temporary or permanent ban.
+
+### 3. Temporary Ban
+
+**Community Impact**: A serious violation of community standards, including sustained inappropriate behavior.
+
+**Consequence**: A temporary ban from any sort of interaction or public communication with the community for a specified period of time. No public or private interaction with the people involved, including unsolicited interaction with those enforcing the Code of Conduct, is allowed during this period. Violating these terms may lead to a permanent ban.
+
+### 4. Permanent Ban
+
+**Community Impact**: Demonstrating a pattern of violation of community standards, including sustained inappropriate behavior, harassment of an individual, or aggression toward or disparagement of classes of individuals.
+
+**Consequence**: A permanent ban from any sort of public interaction within the community.
+
+## Attribution
+
+This Code of Conduct is adapted from the [Contributor Covenant][homepage], version 2.1, available at [https://www.contributor-covenant.org/version/2/1/code_of_conduct.html][v2.1].
+
+Community Impact Guidelines were inspired by [Mozilla's code of conduct enforcement ladder][Mozilla CoC].
+
+For answers to common questions about this code of conduct, see the FAQ at [https://www.contributor-covenant.org/faq][FAQ]. Translations are available at [https://www.contributor-covenant.org/translations][translations].
+
+[homepage]: https://www.contributor-covenant.org
+[v2.1]: https://www.contributor-covenant.org/version/2/1/code_of_conduct.html
+[Mozilla CoC]: https://github.com/mozilla/diversity
+[FAQ]: https://www.contributor-covenant.org/faq
+[translations]: https://www.contributor-covenant.org/translations
+

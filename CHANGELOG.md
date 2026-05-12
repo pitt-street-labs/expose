@@ -5,6 +5,40 @@ All notable changes to EXPOSE are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-05-12
+
+### Added
+
+- API key authentication (`EXPOSE_API_KEY` env var, Bearer/X-API-Key headers, /healthz exempt)
+- Scan delta/comparison API (`GET /v1/tenants/{tid}/runs/{rid}/delta?baseline_run_id=...`)
+- Email delivery API (`POST /v1/tenants/{tid}/reports/ciso/deliver` with configurable SMTP)
+- Active port probe collector (Tier 3, direct TCP connect scan on 30 common ports + TLS handshake)
+- Registrar/nameserver supply chain risk scoring (GoDaddy +15, single NS dependency +10, no DNSSEC +5)
+- CISO report finding rules: internal hostname leakage, sensitive IP exposure, missing HTTPS, single registrar
+- Context-specific report justifications (registrar data, internal patterns, port exposure, TLS issues)
+- CT log retry logic (3x exponential backoff on 5xx/network errors, 45s timeout floor)
+- Attribution inheritance (subdomains inherit medium attribution from parent domains)
+- Community rule pack contribution framework and docs
+- Competitive positioning, pricing tiers, MSSP licensing, data provider roadmap docs
+- RDAP collector extracts DNSSEC status from secureDNS.delegationSigned
+- LLM enrichment auto-enables when EXPOSE_GEMINI_API_KEY is set
+
+### Fixed
+
+- ISP contamination in multi-pass expansion (582 optimum.com entities → 0 via scope-anchored seed feedback)
+- Entity properties merge instead of overwrite (Postgres jsonb || operator preserves data from all collectors)
+- Tier-3 dispatch gate timing (operator seeds bypass attribution gate, pass 2+ seeds carry attribution)
+- Tenant config persists to database (config_jsonb column, survives container restarts)
+- Lead scoring signals accept Shodan/Censys/BinaryEdge data (collector ID + property key mapping)
+- Attribution scoring no longer downgrades seed entities from medium to unattributed
+- DNSSEC absent treated as no DNSSEC (was only firing on explicit False)
+
+### Security
+
+- API authentication required for all endpoints (except /healthz)
+- Pre-publication PII redaction, secret scrub, org name unification
+- Gemini Pro security review completed (DNS rebinding, timing attacks flagged for future hardening)
+
 ## [0.2.0] - 2026-05-11
 
 ### Added
