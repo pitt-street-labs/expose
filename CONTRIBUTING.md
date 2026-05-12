@@ -431,6 +431,21 @@ For Code of Conduct concerns, email `conduct@korlogos.com`.
 
 EXPOSE Core is licensed under [Apache 2.0](LICENSE). By contributing, you agree that your contributions will be licensed under the same terms. The DCO sign-off on each commit is the mechanism for this agreement.
 
+### Open-core boundary
+
+EXPOSE uses an open-core model. Community contributions go to the **Core** (Apache 2.0). The following directories contain proprietary commercial modules and are **not open for community contribution**:
+
+- `src/expose/modules/threat_context/`
+- `src/expose/modules/identity_surface/`
+- `src/expose/modules/soc_package/`
+- `src/expose/modules/ciso_report/`
+
+These directories are stripped from the open-source distribution and are not included in `git archive` builds. PRs touching these paths will be closed.
+
+### Why DCO and not a CLA
+
+We use the DCO (not a Contributor License Agreement) because it's lightweight and well-understood. The DCO certifies origin and right-to-submit; it does not grant relicensing rights beyond Apache 2.0. Your Core contributions remain Apache 2.0 and will not be relicensed into proprietary modules without your explicit written consent. If we ever need broader rights for a specific contribution, we will ask individually -- not through a blanket CLA.
+
 EXPOSE Threat Context, EXPOSE Identity Surface, and EXPOSE Research are separate products with their own licenses (see [GOVERNANCE.md](GOVERNANCE.md) for details on the open-core structure).
 
 ## Questions
