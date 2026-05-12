@@ -94,12 +94,18 @@ This repository (`pitt-street-labs/ff6k` on internal Gitea — repo path retains
 | Typed payloads | `src/expose/types/collector_payloads.py` — DnsPayload, HttpPayload, TlsPayload, PortScanPayload models |
 | Eval harness | `src/expose/eval/` — runner, metrics, CLI; `examples/eval-datasets/` — 60 reference cases across 4 categories |
 | Legal/social collector | `src/expose/collectors/builtin/legal_social_mentions.py` — WIPO UDRP + NIST NVD + urlscan.io |
+| Vendor CVE collector | `src/expose/collectors/builtin/vendor_cve_history.py` — NVD API, 25 CPE mappings, CWE distribution |
+| Vendor vulnerability engine | `src/expose/pipeline/vendor_vulnerability.py` — predictive exposure, 18 threat actors, 33 EOL entries |
+| Artifact signing | `src/expose/api/signing.py` — Ed25519 keypair, detached .sig, verify endpoint + CLI |
 | Observability subchart | `deploy/helm-chart/charts/observability/` — optional Prometheus + Grafana bundle |
-| Tests | `tests/` — **4651+ tests as of 92e5c65.** 145+ test files. |
+| Hero use cases | `docs/hero-use-cases.md` — 5 end-to-end customer walkthroughs (1312 lines) |
+| QA gate | `scripts/qa-gate-25.sh` — 25-pass consecutive test suite runner |
+| Deployment | Node1 Quadlet: `expose-api` + `expose-postgres` on port 8096, DNS at `expose.int.korlogos.com` |
+| Tests | `tests/` — **4939+ tests as of 4159dbd.** 155+ test files. |
 
 ## Issue tracker conventions
 
-- **139+ closed / 13 open / 172 total.** v1-tagged: all closed. All original high-priority issues closed. All critical issues closed as of 2026-05-11 production readiness sprint.
+- **157+ closed / 15 open / 181 total.** v1-tagged: all closed. All original high-priority issues closed. All critical issues closed as of 2026-05-11 production readiness sprint.
 - New issues from Pre-Push session: #48 (screenshot vision), #49 (trust degradation), #50 (WAF/origin discovery), #51 (dark web indicators), #52 (legal/social mentions).
 - **Session 2026-05-11 (marathon):** 17 issues closed (#72–#90), 30+ commits. D3 graph fix, iterative multi-pass expansion, M&A org search, egress fallback with SOCKS5/tor, 15 new collectors (29 total), relationship creation, multi-TLD expansion with DNS pre-check, credential persistence, admin panel, scan log panel, entity click-to-expand, target profiling + AI-guided collector selection, supply chain inference with 50-provider fingerprint database, SSRF protection, batch DB writes, parallel dispatch, attribution engine. Security review by ChatGPT + Gemini cross-review.
 - **Session 2026-05-11 (prep):** 8-agent deep audit (spec, ADRs, roadmap, session history). 16 new issues filed (#96–#111). M&A pipeline wiring, 38-collector UI (was 13), Gemini LLM provider, help tooltips on all sections, scan form UX fixes. Implementation strategy written for 19-agent 5-wave next session (`~/.claude/plans/expose-tier-abcd-strategy.md`).
@@ -146,6 +152,10 @@ Following `~/CLAUDE.md` change control:
 - **run_metadata column** added to Run model (JSONB, NOT NULL, default `{}`). All `Run()` constructors across source and tests must include `run_metadata={}`. Enforcement refusals stored at `run_metadata["enforcement_refusals"]`.
 - **Shared TokenStore pattern:** `auth.py` exports `default_token_store` singleton. All API modules should import from `auth.py` rather than creating their own `TokenStore()`.
 - **Connection pooling pattern:** Active HTTP and favicon collectors create `httpx.AsyncClient` once per `expand()` call (via `async with`) and pass to sub-methods. Do not create clients per-request inside loops.
+- **Production deployment (2026-05-11):** Node1 Quadlet at port 8096. Postgres + API containers, DNS at `expose.int.korlogos.com`, TLS via central proxy, Prometheus scraping, portal registered. Credential file volume-mounted at `/data/credentials.json` via `EXPOSE_CREDENTIALS_PATH` env var.
+- **Critical production bugs found and fixed:** (1) `synchronize_session` missing on bulk UPDATE in `update_attribution_scores` — corrupted DB session, all entity upserts silently failed. (2) `batch_upsert` parameter overflow — 40K+ entities exceeded Postgres 65535 param limit, fixed with 500-entity chunking. (3) Alembic migration chain — `run_metadata` column added to model but no migration. (4) Credential resolution mismatch — `sfp_censys`/`sfp_binaryedge` mapped to `None` in SpiderFoot module map. (5) Tenant config 500 — DB `config_jsonb` not merged with defaults.
+- **Vendor Vulnerability DNA (2026-05-11):** NVD API collector with 25 CPE mappings, vendor profile engine with 18 threat actors + 33 EOL entries, CISO report Vendor DNA section, 5 new lead scoring signals. Predicts likely vulnerability classes from vendor CVE history.
+- **QA gate passed:** 25/25 consecutive runs, 32,371 total test executions, zero flakes.
 
 ## Subsequent session order (recommended)
 
