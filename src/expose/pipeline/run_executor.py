@@ -538,19 +538,18 @@ class RunExecutor:
             )
 
             # --- Update attribution scores based on collector diversity -------
+            # Wrap in a SAVEPOINT so failures don't roll back entity upserts.
             try:
-                await self._entity_repo.update_attribution_scores(
-                    tenant_id=TenantId(tenant_id),
-                )
+                async with self._entity_repo._session.begin_nested():
+                    await self._entity_repo.update_attribution_scores(
+                        tenant_id=TenantId(tenant_id),
+                    )
             except Exception as exc:
                 logger.exception(
-                    "Attribution scoring failed after pass %d", pass_number
+                    "Attribution scoring failed after pass %d (savepoint rolled back, entities preserved)",
+                    pass_number,
                 )
                 pipeline_errors_total.add(1, {"component": "executor", "error_type": type(exc).__name__})
-                try:
-                    await self._entity_repo._session.rollback()
-                except Exception:
-                    pass
 
             # --- Stage 4a: Rule-based attribution evaluation -----------------
             try:
@@ -1647,14 +1646,11 @@ class RunExecutor:
 
         if getattr(self._relationship_repo, "supports_batch_create", False) is True:
             try:
-                await self._relationship_repo.batch_create(rel_dicts)
+                async with self._relationship_repo._session.begin_nested():
+                    await self._relationship_repo.batch_create(rel_dicts)
             except Exception as exc:
-                logger.exception("Batch relationship creation failed")
+                logger.exception("Batch relationship creation failed (savepoint rolled back, entities preserved)")
                 pipeline_errors_total.add(1, {"component": "relationship_extraction", "error_type": type(exc).__name__})
-                try:
-                    await self._relationship_repo._session.rollback()
-                except Exception:
-                    pass
         else:
             for rel in rel_dicts:
                 try:

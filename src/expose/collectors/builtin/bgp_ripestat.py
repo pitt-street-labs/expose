@@ -105,6 +105,10 @@ class RipeStatCollector(Collector):
             return
 
         for asn_entry in asns_raw:
+            if isinstance(asn_entry, str):
+                asn_entry = {"asn": asn_entry, "holder": ""}
+            if not isinstance(asn_entry, dict):
+                continue
             asn_num = asn_entry.get("asn")
             holder_raw = asn_entry.get("holder", "")
             if asn_num is None:

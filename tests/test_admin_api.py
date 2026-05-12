@@ -473,28 +473,33 @@ async def test_bulk_credential_test(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Bulk test returns a result for every known credential slot."""
+    from expose.api.credentials import set_backend, _backend as original_backend  # noqa: PLC0415
+    from expose.secrets.memory_backend import InMemoryBackend  # noqa: PLC0415
+
     tid = await _seed_tenant(session_factory, "bulk-cred-tenant")
 
-    resp = await client.post(f"/v1/admin/tenants/{tid}/credentials/test-all")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "results" in data
-    results = data["results"]
+    fresh_backend = InMemoryBackend()
+    set_backend(fresh_backend)
+    try:
+        resp = await client.post(f"/v1/admin/tenants/{tid}/credentials/test-all")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "results" in data
+        results = data["results"]
 
-    # Should have one result per known slot
-    from expose.api.credentials import KNOWN_SLOTS  # noqa: PLC0415
+        from expose.api.credentials import KNOWN_SLOTS  # noqa: PLC0415
 
-    assert len(results) == len(KNOWN_SLOTS)
+        assert len(results) == len(KNOWN_SLOTS)
 
-    # Each result should have the expected shape
-    for result in results:
-        assert "credential_id" in result
-        assert "status" in result
-        assert "message" in result
+        for result in results:
+            assert "credential_id" in result
+            assert "status" in result
+            assert "message" in result
 
-    # All should be "not_configured" since we haven't stored any creds
-    statuses = {r["status"] for r in results}
-    assert statuses == {"not_configured"}
+        statuses = {r["status"] for r in results}
+        assert statuses == {"not_configured"}
+    finally:
+        set_backend(original_backend)
 
 
 # === 9. Org suggest -- fuzzy matching ==========================================
@@ -634,27 +639,27 @@ async def test_bulk_credential_test_with_configured(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Bulk test correctly reports configured credentials."""
-    from expose.api.credentials import set_backend  # noqa: PLC0415
+    from expose.api.credentials import set_backend, _backend as original_backend  # noqa: PLC0415
     from expose.secrets.memory_backend import InMemoryBackend  # noqa: PLC0415
 
     tid = await _seed_tenant(session_factory, "bulk-cred-configured-tenant")
 
-    # Store a credential in the backend
     backend = InMemoryBackend()
     set_backend(backend)
-    await backend.set(
-        tenant_id=tid,
-        key="collector.shodan-iwide.api_key",
-        value="test-api-key-12345",
-    )
+    try:
+        await backend.set(
+            tenant_id=tid,
+            key="collector.shodan-iwide.api_key",
+            value="test-api-key-12345",
+        )
 
-    resp = await client.post(f"/v1/admin/tenants/{tid}/credentials/test-all")
-    assert resp.status_code == 200
-    data = resp.json()
-    results = data["results"]
+        resp = await client.post(f"/v1/admin/tenants/{tid}/credentials/test-all")
+        assert resp.status_code == 200
+        data = resp.json()
+        results = data["results"]
 
-    # Find the Shodan result
-    shodan_results = [r for r in results if r["credential_id"] == "shodan_api_key"]
-    assert len(shodan_results) == 1
-    # It should be "ok" or "failed" (health check may fail in test), but NOT "not_configured"
-    assert shodan_results[0]["status"] != "not_configured"
+        shodan_results = [r for r in results if r["credential_id"] == "shodan_api_key"]
+        assert len(shodan_results) == 1
+        assert shodan_results[0]["status"] != "not_configured"
+    finally:
+        set_backend(original_backend)

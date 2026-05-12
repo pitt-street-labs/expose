@@ -350,20 +350,17 @@ class EntityRepository:
             for eid, ns, nc in updates
         ]
         bulk_update = (
-            update(Entity)
+            update(Entity.__table__)
             .where(
-                Entity.id == bindparam("eid"),
+                Entity.__table__.c.id == bindparam("eid"),
             )
             .values(
                 attribution_status=bindparam("new_status"),
                 attribution_confidence=bindparam("new_confidence"),
             )
         )
-        await self._session.execute(
-            bulk_update,
-            values_params,
-            execution_options={"synchronize_session": False},
-        )
+        conn = await self._session.connection()
+        await conn.execute(bulk_update, values_params)
         await self._session.flush()
         return len(updates)
 
