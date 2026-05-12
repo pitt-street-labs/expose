@@ -284,7 +284,9 @@ def filter_seeds_by_scope(
         return seeds
     result = []
     for seed in seeds:
-        if _is_in_scope(seed.value, seed.seed_type, apex_domains, org_names):
+        if seed.properties.get("source") == "ma_expansion":
+            result.append(seed)
+        elif _is_in_scope(seed.value, seed.seed_type, apex_domains, org_names):
             result.append(seed)
         else:
             logger.debug(
