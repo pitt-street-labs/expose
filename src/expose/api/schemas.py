@@ -122,6 +122,39 @@ class EntityList(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Scan delta response models (run comparison / delta API)
+# ---------------------------------------------------------------------------
+
+
+class EntityDelta(BaseModel):
+    """A single entity change between two scan runs."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    entity_identifier: str
+    entity_type: str
+    change_type: str  # "new", "removed", "score_changed", "properties_changed"
+    previous_score: int | None = None
+    current_score: int | None = None
+    score_delta: int | None = None
+    details: str = ""
+
+
+class ScanDeltaResponse(BaseModel):
+    """Delta between a current run and a baseline run."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    tenant_id: str
+    current_run_id: str
+    baseline_run_id: str
+    new_entities: list[EntityDelta]
+    removed_entities: list[EntityDelta]
+    score_changes: list[EntityDelta]
+    summary: str
+
+
+# ---------------------------------------------------------------------------
 # Run trigger request / response models (run trigger API)
 # ---------------------------------------------------------------------------
 

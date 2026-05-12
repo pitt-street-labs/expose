@@ -292,9 +292,23 @@ class PipelineDispatcher:
         """Enforce Tier-3 attribution gate; return a DENIED result or None."""
         if collector_cls.tier != CollectorTier.TIER_3:
             return None
+
+        # Propagate attribution_status from seed properties when available
+        # so that seeds carrying attribution from prior passes (or from
+        # entity-to-seed conversion) are evaluated correctly.
+        from expose.types.canonical import AttributionTier as _AT  # noqa: PLC0415
+
+        attr_status = job.seed.properties.get("attribution_status")
+        attr_tier: _AT | None = None
+        if attr_status is not None:
+            try:
+                attr_tier = _AT(attr_status)
+            except ValueError:
+                pass  # unrecognized status → treat as unattributed (None)
+
         entity = EntityAttributionView(
             entity_identifier=job.seed.value,
-            attribution_tier=None,
+            attribution_tier=attr_tier,
         )
         try:
             assert_tier_3_dispatch_allowed(entity, self._tenant_scope)
@@ -328,8 +342,19 @@ class PipelineDispatcher:
         Checks ``attribution_status`` from the seed's ``properties`` dict.
         Entities with status ``unattributed`` or ``requires_review`` are denied
         Tier-3 active collectors with reason ``entity_not_attributed_for_tier3``.
+
+        Operator-provided seeds (present in the tenant's explicit authorization
+        scope) bypass this gate — they are implicitly authorized for active
+        probing regardless of attribution status.
         """
         if collector_cls.tier != CollectorTier.TIER_3:
+            return None
+
+        # Operator-provided seeds are implicitly authorized for Tier-3
+        # dispatch.  They were explicitly submitted by the operator, so
+        # blocking them on attribution status that hasn't been computed
+        # yet would prevent active collectors from ever firing on pass 1.
+        if self._tenant_scope.contains(job.seed.value):
             return None
 
         attribution_status = job.seed.properties.get("attribution_status")

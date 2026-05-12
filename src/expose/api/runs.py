@@ -30,17 +30,19 @@ if TYPE_CHECKING:
 
 from expose.types.shared import RunId, TenantId
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from expose.api.schemas import (
+    EntityDelta,
     EntityList,
     EntityResponse,
     RunCreate,
     RunList,
     RunResponse,
     RunStarted,
+    ScanDeltaResponse,
 )
 from expose.api.tenants import get_session
 from expose.db.models import Entity, Run, Tenant
@@ -668,6 +670,211 @@ async def download_artifact(
         content=artifact_result.json_bytes,
         media_type="application/json",
         headers=headers,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /tenants/{tenant_id}/runs/{run_id}/delta — compare two runs
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/tenants/{tenant_id}/runs/{run_id}/delta",
+    response_model=ScanDeltaResponse,
+)
+async def get_run_delta(
+    tenant_id: UUID,
+    run_id: UUID,
+    session: SessionDep,
+    baseline_run_id: UUID = Query(..., description="Run ID of the baseline to compare against"),
+) -> ScanDeltaResponse:
+    """Compare entities between a current run and a baseline run.
+
+    Returns new entities, removed entities, and score changes between the
+    two runs.  Entities are matched by ``(entity_type, canonical_identifier)``
+    using the pure ``compute_delta`` engine from the pipeline layer.
+
+    * **404** — either run does not exist or belongs to another tenant.
+    """
+    from expose.pipeline.delta import EntitySnapshot, compute_delta  # noqa: PLC0415
+
+    # 1. Load both runs and verify they belong to this tenant
+    current_run_stmt = select(Run).where(Run.id == run_id, Run.tenant_id == tenant_id)
+    result = await session.execute(current_run_stmt)
+    current_run = result.scalar_one_or_none()
+    if current_run is None:
+        raise HTTPException(status_code=404, detail="Current run not found")
+
+    baseline_run_stmt = select(Run).where(Run.id == baseline_run_id, Run.tenant_id == tenant_id)
+    result = await session.execute(baseline_run_stmt)
+    baseline_run = result.scalar_one_or_none()
+    if baseline_run is None:
+        raise HTTPException(status_code=404, detail="Baseline run not found")
+
+    # 2. Load entities for each run's time window
+    #    "Baseline" entities: last_observed_at >= baseline.started_at
+    #      AND last_observed_at < current.started_at
+    #    "Current" entities: last_observed_at >= current.started_at
+    #    For a simpler approach that works even when runs overlap or timestamps
+    #    are coarse: use first_observed_at to identify new entities and
+    #    last_observed_at to identify removed ones.
+
+    # Current run entities: entities observed during or after the current run
+    current_entity_stmt = select(Entity).where(
+        Entity.tenant_id == tenant_id,
+        Entity.last_observed_at >= current_run.started_at,
+    )
+    result = await session.execute(current_entity_stmt)
+    current_entities = list(result.scalars().all())
+
+    # Baseline run entities: entities observed during the baseline window
+    # (between baseline start and current start)
+    baseline_entity_stmt = select(Entity).where(
+        Entity.tenant_id == tenant_id,
+        Entity.last_observed_at >= baseline_run.started_at,
+        Entity.last_observed_at < current_run.started_at,
+    )
+    result = await session.execute(baseline_entity_stmt)
+    baseline_entities_exclusive = list(result.scalars().all())
+
+    # Also include entities that span both runs (observed in both windows)
+    # by combining baseline-exclusive with entities present in current that
+    # existed before the current run started.
+    baseline_identifiers = {
+        (e.entity_type, e.canonical_identifier) for e in baseline_entities_exclusive
+    }
+    for e in current_entities:
+        if e.first_observed_at < current_run.started_at:
+            baseline_identifiers.add((e.entity_type, e.canonical_identifier))
+
+    # Rebuild baseline snapshot list: entities in the baseline window plus
+    # entities from current that existed before current run started
+    baseline_entity_map: dict[tuple[str, str], Entity] = {
+        (e.entity_type, e.canonical_identifier): e
+        for e in baseline_entities_exclusive
+    }
+    for e in current_entities:
+        key = (e.entity_type, e.canonical_identifier)
+        if e.first_observed_at < current_run.started_at and key not in baseline_entity_map:
+            baseline_entity_map[key] = e
+
+    # 3. Build EntitySnapshot lists for the pure delta engine
+    def _to_snapshot(entity: Entity) -> EntitySnapshot:
+        lead_score = (entity.properties or {}).get("_lead_score", 0)
+        return EntitySnapshot(
+            entity_id=entity.id,
+            canonical_identifier=entity.canonical_identifier,
+            entity_type=entity.entity_type,
+            attribution_status=entity.attribution_status,
+            attribution_confidence=float(entity.attribution_confidence),
+            properties=entity.properties or {},
+        )
+
+    baseline_snapshots = [_to_snapshot(e) for e in baseline_entity_map.values()]
+    current_snapshots = [_to_snapshot(e) for e in current_entities]
+
+    # 4. Compute delta
+    delta = compute_delta(baseline_snapshots, current_snapshots)
+
+    # 5. Transform to API response model
+    new_entities: list[EntityDelta] = []
+    for snap in delta.added:
+        score = snap.properties.get("_lead_score")
+        new_entities.append(
+            EntityDelta(
+                entity_identifier=snap.canonical_identifier,
+                entity_type=snap.entity_type,
+                change_type="new",
+                current_score=int(score) if score is not None else None,
+                details=f"First observed in run {run_id}",
+            )
+        )
+
+    removed_entities: list[EntityDelta] = []
+    for snap in delta.removed:
+        score = snap.properties.get("_lead_score")
+        removed_entities.append(
+            EntityDelta(
+                entity_identifier=snap.canonical_identifier,
+                entity_type=snap.entity_type,
+                change_type="removed",
+                previous_score=int(score) if score is not None else None,
+                details=f"Not observed in run {run_id}",
+            )
+        )
+
+    score_changes: list[EntityDelta] = []
+    for changed in delta.changed:
+        # Check for score changes in properties
+        prop_changes = [c for c in changed.changes if c.field == "properties"]
+        old_score = None
+        new_score = None
+        if prop_changes:
+            old_props = prop_changes[0].old_value or {}
+            new_props = prop_changes[0].new_value or {}
+            old_score = old_props.get("_lead_score")
+            new_score = new_props.get("_lead_score")
+
+        # Also check for attribution changes
+        attr_changes = [c for c in changed.changes if c.field == "attribution_status"]
+        conf_changes = [c for c in changed.changes if c.field == "attribution_confidence"]
+
+        change_details: list[str] = []
+        change_type = "properties_changed"
+
+        if old_score is not None and new_score is not None and old_score != new_score:
+            change_type = "score_changed"
+            change_details.append(
+                f"Score: {old_score} -> {new_score}"
+            )
+
+        if attr_changes:
+            change_details.append(
+                f"Attribution: {attr_changes[0].old_value} -> {attr_changes[0].new_value}"
+            )
+
+        if conf_changes:
+            change_details.append(
+                f"Confidence: {conf_changes[0].old_value} -> {conf_changes[0].new_value}"
+            )
+
+        if not change_details:
+            change_details.append("Properties changed")
+
+        prev_s = int(old_score) if old_score is not None else None
+        curr_s = int(new_score) if new_score is not None else None
+        s_delta = (curr_s - prev_s) if curr_s is not None and prev_s is not None else None
+
+        score_changes.append(
+            EntityDelta(
+                entity_identifier=changed.canonical_identifier,
+                entity_type=changed.entity_type,
+                change_type=change_type,
+                previous_score=prev_s,
+                current_score=curr_s,
+                score_delta=s_delta,
+                details="; ".join(change_details),
+            )
+        )
+
+    # 6. Build summary
+    parts: list[str] = []
+    if new_entities:
+        parts.append(f"{len(new_entities)} new asset{'s' if len(new_entities) != 1 else ''}")
+    if removed_entities:
+        parts.append(f"{len(removed_entities)} removed")
+    if score_changes:
+        parts.append(f"{len(score_changes)} score change{'s' if len(score_changes) != 1 else ''}")
+    summary = ", ".join(parts) if parts else "No changes detected"
+
+    return ScanDeltaResponse(
+        tenant_id=str(tenant_id),
+        current_run_id=str(run_id),
+        baseline_run_id=str(baseline_run_id),
+        new_entities=new_entities,
+        removed_entities=removed_entities,
+        score_changes=score_changes,
+        summary=summary,
     )
 
 

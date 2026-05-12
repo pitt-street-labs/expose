@@ -43,9 +43,15 @@ def _make_app() -> Any:
 
 
 @pytest.fixture(autouse=True)
-def _clear_config_store() -> None:
-    """Reset the in-memory config store before each test."""
+def _clear_config_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reset the in-memory config store and clear the Gemini env var.
+
+    Most tests expect the vanilla defaults (``llm_enabled=False``).
+    Tests that exercise the env-aware path set ``EXPOSE_GEMINI_API_KEY``
+    explicitly within the test body.
+    """
     tenant_config._configs.clear()
+    monkeypatch.delenv("EXPOSE_GEMINI_API_KEY", raising=False)
 
 
 @pytest.fixture
@@ -80,6 +86,25 @@ async def test_get_default_config(client: AsyncClient, tenant_id: UUID) -> None:
     assert data["llm_cost_ceiling_per_run"] == 0.0
     assert data["updated_by"] is None
     assert "updated_at" in data
+
+
+# === 1b. Env-aware LLM defaults when EXPOSE_GEMINI_API_KEY is set =========
+
+
+async def test_get_default_config_with_gemini_key(
+    client: AsyncClient,
+    tenant_id: UUID,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When EXPOSE_GEMINI_API_KEY is set, defaults enable LLM enrichment."""
+    monkeypatch.setenv("EXPOSE_GEMINI_API_KEY", "test-key-12345")
+    resp = await client.get(f"/v1/tenants/{tenant_id}/config/")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["llm_enabled"] is True
+    assert data["llm_provider"] == "gemini"
+    assert data["llm_model"] == "gemini-2.5-flash"
+    assert data["llm_cost_ceiling_per_run"] == 1.0
 
 
 # === 2. PUT replaces entire config ==========================================

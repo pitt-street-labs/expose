@@ -73,9 +73,10 @@ class EntityRepository:
 
         - On insert: a fresh ``id`` (UUID4) is assigned and ``first_observed_at``
           / ``last_observed_at`` default to ``NOW()`` from the schema.
-        - On conflict: ``properties`` is replaced wholesale with the incoming
-          dict (last-writer-wins per field; collectors are responsible for
-          merging their own retained properties before calling), and
+        - On conflict: ``properties`` is shallow-merged — existing keys from
+          prior collectors are preserved, and the incoming dict adds or
+          overwrites its own keys via Postgres ``||`` on jsonb.  This allows
+          properties from multiple collectors to accumulate on the same entity.
           ``attribution_status`` / ``attribution_confidence`` are taken from
           the incoming call (the attribution engine is the authoritative writer
           when it re-evaluates a node). ``last_observed_at`` advances to
@@ -97,7 +98,12 @@ class EntityRepository:
         upsert_stmt = insert_stmt.on_conflict_do_update(
             constraint="uq_entities_tenant_type_identifier",
             set_={
-                "properties": insert_stmt.excluded.properties,
+                # Merge new properties INTO existing ones (shallow).
+                # Preserves keys from prior collectors while allowing
+                # the current collector to add or update its own keys.
+                "properties": text(
+                    "COALESCE(entities.properties, '{}'::jsonb) || EXCLUDED.properties"
+                ),
                 "attribution_status": insert_stmt.excluded.attribution_status,
                 "attribution_confidence": insert_stmt.excluded.attribution_confidence,
                 "last_observed_at": text("NOW()"),
@@ -177,7 +183,15 @@ class EntityRepository:
         upsert_stmt = insert_stmt.on_conflict_do_update(
             constraint="uq_entities_tenant_type_identifier",
             set_={
-                "properties": insert_stmt.excluded.properties,
+                # Merge new properties INTO existing ones rather than
+                # replacing wholesale.  COALESCE handles the case where
+                # existing properties is NULL.  Postgres ``||`` on jsonb
+                # does a shallow top-level merge — new keys are added,
+                # existing keys are overwritten only if present in the
+                # incoming dict.
+                "properties": text(
+                    "COALESCE(entities.properties, '{}'::jsonb) || EXCLUDED.properties"
+                ),
                 "attribution_status": insert_stmt.excluded.attribution_status,
                 "attribution_confidence": insert_stmt.excluded.attribution_confidence,
                 "last_observed_at": text("NOW()"),

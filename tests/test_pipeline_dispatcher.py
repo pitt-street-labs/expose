@@ -1389,18 +1389,25 @@ class TestEnforcementDispatcherIntegration:
 
 
 class TestTier3AttributionGate:
-    """Tests for the Tier-3 attribution status gate in PipelineDispatcher."""
+    """Tests for the Tier-3 attribution status gate in PipelineDispatcher.
+
+    Operator-provided seeds (those in the tenant's explicit authorization
+    scope) bypass the attribution gate — they are implicitly authorized for
+    active probing.  Discovered entities NOT in scope are still gated on
+    attribution status.
+    """
 
     @pytest.mark.asyncio
-    async def test_tier3_gate_denied_unattributed(
+    async def test_tier3_gate_denied_unattributed_discovered_entity(
         self,
         registry: CollectorRegistry,
         scope_with_example: TenantAuthorizationScope,
     ) -> None:
-        """Tier-3 dispatch denied when entity attribution_status is 'unattributed'."""
+        """Tier-3 dispatch denied for discovered (non-operator) entity with 'unattributed' status."""
+        # sub.other.com is NOT in scope_with_example — simulates a discovered entity
         seed = Seed(
             seed_type=SeedType.DOMAIN,
-            value="example.com",
+            value="sub.other.com",
             properties={"attribution_status": "unattributed"},
         )
         dispatcher = PipelineDispatcher(registry, scope_with_example, TENANT_ID)
@@ -1411,15 +1418,15 @@ class TestTier3AttributionGate:
         assert result.observations == []
 
     @pytest.mark.asyncio
-    async def test_tier3_gate_denied_requires_review(
+    async def test_tier3_gate_denied_requires_review_discovered_entity(
         self,
         registry: CollectorRegistry,
         scope_with_example: TenantAuthorizationScope,
     ) -> None:
-        """Tier-3 dispatch denied when entity attribution_status is 'requires_review'."""
+        """Tier-3 dispatch denied for discovered entity with 'requires_review' status."""
         seed = Seed(
             seed_type=SeedType.DOMAIN,
-            value="example.com",
+            value="sub.other.com",
             properties={"attribution_status": "requires_review"},
         )
         dispatcher = PipelineDispatcher(registry, scope_with_example, TENANT_ID)
@@ -1427,6 +1434,43 @@ class TestTier3AttributionGate:
 
         assert result.status == DispatchStatus.DENIED
         assert result.error_message == "entity_not_attributed_for_tier3"
+
+    @pytest.mark.asyncio
+    async def test_tier3_gate_allowed_operator_seed_unattributed(
+        self,
+        registry: CollectorRegistry,
+        scope_with_example: TenantAuthorizationScope,
+    ) -> None:
+        """Operator-provided seeds bypass attribution gate even when 'unattributed'."""
+        seed = Seed(
+            seed_type=SeedType.DOMAIN,
+            value="example.com",
+            properties={"attribution_status": "unattributed"},
+        )
+        dispatcher = PipelineDispatcher(registry, scope_with_example, TENANT_ID)
+        result = await dispatcher.dispatch(_make_job("mock-tier3", seed))
+
+        # example.com is in scope -> operator-provided -> bypass attribution gate
+        assert result.status == DispatchStatus.SUCCESS
+        assert len(result.observations) == 1
+
+    @pytest.mark.asyncio
+    async def test_tier3_gate_allowed_operator_seed_no_attribution(
+        self,
+        registry: CollectorRegistry,
+        scope_with_example: TenantAuthorizationScope,
+    ) -> None:
+        """Operator-provided seeds pass when attribution_status is absent from properties."""
+        seed = Seed(
+            seed_type=SeedType.DOMAIN,
+            value="example.com",
+            properties={},
+        )
+        dispatcher = PipelineDispatcher(registry, scope_with_example, TENANT_ID)
+        result = await dispatcher.dispatch(_make_job("mock-tier3", seed))
+
+        assert result.status == DispatchStatus.SUCCESS
+        assert len(result.observations) == 1
 
     @pytest.mark.asyncio
     async def test_tier3_gate_allowed_confirmed(
@@ -1446,6 +1490,25 @@ class TestTier3AttributionGate:
         assert result.status == DispatchStatus.SUCCESS
         assert len(result.observations) == 1
         assert result.observations[0].collector_id == "mock-tier3"
+
+    @pytest.mark.asyncio
+    async def test_tier3_gate_allowed_confirmed_discovered_entity(
+        self,
+        registry: CollectorRegistry,
+        scope_with_example: TenantAuthorizationScope,
+    ) -> None:
+        """Discovered entity with 'confirmed' attribution passes Tier-3 gate."""
+        seed = Seed(
+            seed_type=SeedType.DOMAIN,
+            value="sub.other.com",
+            properties={"attribution_status": "confirmed"},
+        )
+        dispatcher = PipelineDispatcher(registry, scope_with_example, TENANT_ID)
+        result = await dispatcher.dispatch(_make_job("mock-tier3", seed))
+
+        # confirmed attribution passes even for entities not in explicit scope
+        assert result.status == DispatchStatus.SUCCESS
+        assert len(result.observations) == 1
 
     @pytest.mark.asyncio
     async def test_tier3_gate_tier1_not_affected(

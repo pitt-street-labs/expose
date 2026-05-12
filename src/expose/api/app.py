@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 
 _app_weak_ref: weakref.ref[FastAPI] | None = None
 
@@ -33,6 +33,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from expose import __version__
+from expose.api.auth_middleware import require_api_key
 from expose.api.admin import router as admin_router
 from expose.api.credentials import global_router as global_credentials_router
 from expose.api.credentials import router as credentials_router
@@ -316,6 +317,7 @@ def create_app(
         title="EXPOSE API",
         version=__version__,
         lifespan=_lifespan,
+        dependencies=[Depends(require_api_key)],
     )
 
     # Stash settings so the lifespan can read them.

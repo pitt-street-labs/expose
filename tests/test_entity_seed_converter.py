@@ -220,11 +220,14 @@ class TestEntitiesToSeedsEdgeCases:
         seeds = entities_to_seeds([entity], set())
         assert len(seeds) == 1
 
-    def test_seed_properties_are_empty_dict(self) -> None:
-        """Converted seeds should have empty properties (no entity props leakage)."""
+    def test_seed_properties_carry_attribution_only(self) -> None:
+        """Converted seeds carry attribution_status but no other entity properties."""
         entity = _make_entity("domain", "example.com", {"some_key": "val"})
         seeds = entities_to_seeds([entity], set())
-        assert seeds[0].properties == {}
+        # attribution_status is propagated for Tier-3 dispatch gating;
+        # arbitrary entity properties (some_key) must NOT leak through.
+        assert "some_key" not in seeds[0].properties
+        assert seeds[0].properties.get("attribution_status") == "confirmed"
 
 
 # ===================================================================

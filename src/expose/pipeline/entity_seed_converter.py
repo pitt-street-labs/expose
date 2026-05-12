@@ -189,11 +189,17 @@ def entities_to_seeds(
             continue
 
         seen.add(key)
+        # Carry the entity's attribution_status into the seed properties
+        # so Tier-3 dispatch gates can evaluate pass 2+ seeds correctly
+        # without requiring a separate DB lookup.
+        seed_props: dict[str, str] = {}
+        if hasattr(entity, "attribution_status") and entity.attribution_status:
+            seed_props["attribution_status"] = entity.attribution_status
         seeds.append(
             Seed(
                 seed_type=seed_type,
                 value=value,
-                properties={},
+                properties=seed_props,
             )
         )
 

@@ -7,13 +7,17 @@ Implements per-tenant configuration management:
 * **Patch**  -- ``PATCH /v1/tenants/{tenant_id}/config`` -> 200
 
 Configuration covers scope rules, collector selection, scheduling,
-egress profile, and LLM enrichment settings.  State is stored in-memory
-(module-level dict) for Phase 1; database persistence lands in Phase 3.
+egress profile, and LLM enrichment settings.  Config is persisted in
+the ``config_jsonb`` column under a ``"tenant_config"`` sub-key so it
+does not collide with other data stored in that column (e.g. ``state``
+from the tenants API).  An in-memory cache (``_configs``) is populated
+from the DB at startup and kept in sync on writes for fast reads.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -106,14 +110,37 @@ class TenantConfigUpdate(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# In-memory config store (Phase 1 -- replaced by DB in Phase 3)
+# In-memory config cache -- populated from DB at startup, kept in sync on
+# every PUT/PATCH so reads are fast and don't hit the database.
 # ---------------------------------------------------------------------------
 
 _configs: dict[UUID, dict[str, object]] = {}
 
+# Sub-key within the shared ``config_jsonb`` column used exclusively by this
+# module.  Other users of the column (e.g. tenant state) use top-level keys,
+# so namespacing avoids collisions.
+_DB_CONFIG_KEY = "tenant_config"
+
+
+def _make_serializable(cfg: dict[str, object]) -> dict[str, object]:
+    """Return a JSON-safe copy of *cfg* (datetimes -> ISO, UUIDs -> str)."""
+    serializable: dict[str, object] = {}
+    for k, v in cfg.items():
+        if isinstance(v, datetime):
+            serializable[k] = v.isoformat()
+        elif isinstance(v, UUID):
+            serializable[k] = str(v)
+        else:
+            serializable[k] = v
+    return serializable
+
 
 async def _persist_config(tenant_id: UUID, cfg: dict[str, object]) -> None:
-    """Write config to Tenant.config_jsonb for persistence across restarts."""
+    """Merge config into ``Tenant.config_jsonb[_DB_CONFIG_KEY]``.
+
+    This performs a read-modify-write so that other top-level keys in the
+    column (e.g. ``"state"`` written by the tenants API) are preserved.
+    """
     try:
         from expose.api.app import _app_ref  # noqa: PLC0415
 
@@ -124,23 +151,26 @@ async def _persist_config(tenant_id: UUID, cfg: dict[str, object]) -> None:
         if sf is None:
             return
 
-        from sqlalchemy import update  # noqa: PLC0415
+        from sqlalchemy import select, update  # noqa: PLC0415
         from expose.db.models import Tenant  # noqa: PLC0415
 
-        serializable = {}
-        for k, v in cfg.items():
-            if isinstance(v, datetime):
-                serializable[k] = v.isoformat()
-            elif isinstance(v, UUID):
-                serializable[k] = str(v)
-            else:
-                serializable[k] = v
+        serializable = _make_serializable(cfg)
 
         async with sf() as session:
+            # Read the existing column so we can merge without clobbering.
+            result = await session.execute(
+                select(Tenant.config_jsonb).where(Tenant.id == tenant_id)
+            )
+            row = result.one_or_none()
+            existing: dict[str, object] = dict(row[0]) if row and row[0] else {}
+
+            # Write our config under the namespaced sub-key.
+            existing[_DB_CONFIG_KEY] = serializable
+
             await session.execute(
                 update(Tenant)
                 .where(Tenant.id == tenant_id)
-                .values(config_jsonb=serializable)
+                .values(config_jsonb=existing)
             )
             await session.commit()
     except Exception:
@@ -165,17 +195,29 @@ async def load_configs_from_db() -> None:
         async with sf() as session:
             result = await session.execute(select(Tenant))
             for tenant in result.scalars().all():
-                if tenant.config_jsonb:
+                raw: dict[str, object] = tenant.config_jsonb or {}
+                saved_config = raw.get(_DB_CONFIG_KEY)
+                if saved_config and isinstance(saved_config, dict):
                     merged = _default_config(tenant.id)
-                    merged.update(tenant.config_jsonb)
+                    merged.update(saved_config)
                     _configs[tenant.id] = merged
-                    logger.info("Loaded config from DB for tenant %s", tenant.id)
+                    logger.info(
+                        "Loaded config from DB for tenant %s", tenant.id
+                    )
     except Exception:
         logger.debug("Config DB load failed (non-fatal)", exc_info=True)
 
 
 def _default_config(tenant_id: UUID) -> dict[str, object]:
-    """Return sensible defaults for a tenant that has no stored config."""
+    """Return sensible defaults for a tenant that has no stored config.
+
+    LLM enrichment defaults are environment-aware: when
+    ``EXPOSE_GEMINI_API_KEY`` is set, enrichment is enabled automatically
+    with the Gemini provider and ``gemini-2.5-flash`` model.  This
+    eliminates the need to manually configure LLM settings after every
+    restart while still allowing per-tenant overrides via PUT/PATCH.
+    """
+    _gemini_key_present = bool(os.environ.get("EXPOSE_GEMINI_API_KEY"))
     return {
         "tenant_id": tenant_id,
         "scope_rules": [],
@@ -184,10 +226,10 @@ def _default_config(tenant_id: UUID) -> dict[str, object]:
         "egress_profile": "direct",
         "egress_fallbacks": [],
         "socks5_proxy": None,
-        "llm_enabled": False,
-        "llm_provider": None,
-        "llm_model": None,
-        "llm_cost_ceiling_per_run": 0.0,
+        "llm_enabled": _gemini_key_present,
+        "llm_provider": "gemini" if _gemini_key_present else None,
+        "llm_model": "gemini-2.5-flash" if _gemini_key_present else None,
+        "llm_cost_ceiling_per_run": 1.0 if _gemini_key_present else 0.0,
         "updated_at": datetime.now(UTC),
         "updated_by": None,
     }

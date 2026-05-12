@@ -1076,6 +1076,12 @@ class RunExecutor:
                     "attribution_status": "confirmed" if is_seed else "unattributed",
                     "attribution_confidence": Decimal("1.000") if is_seed else Decimal("0.000"),
                 })
+
+            # --- Pre-merge: collapse duplicate entities from different
+            # collectors so that properties accumulate rather than the
+            # last observation silently overwriting the first.
+            entity_dicts = _merge_entity_dicts(entity_dicts)
+
             try:
                 upserted = await self._entity_repo.batch_upsert(entity_dicts)
                 for entity in upserted:
@@ -1956,6 +1962,55 @@ def _observation_properties(obs: Observation) -> dict[str, Any]:
     if obs.warnings:
         props["_warnings"] = list(obs.warnings)
     return props
+
+
+def _merge_entity_dicts(entity_dicts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge entity dicts that share the same (tenant_id, entity_type, canonical_identifier).
+
+    When multiple collectors observe the same entity in a single batch,
+    their properties must accumulate rather than the last one silently
+    overwriting the first.  For example, Shodan writes port data and RDAP
+    writes registrar data — both should be present on the entity.
+
+    Merge rules (shallow, top-level keys only):
+    - Underscore-prefixed keys (``_collector_id``, ``_observed_at``, etc.)
+      use last-writer-wins — they are metadata about the most recent
+      observation.
+    - All other keys merge additively — earlier values are preserved
+      unless a later observation provides the same key.
+
+    Non-properties fields (``attribution_status``, ``attribution_confidence``)
+    keep the highest-confidence value.
+    """
+    seen: dict[tuple, dict[str, Any]] = {}
+    for e in entity_dicts:
+        key = (str(e["tenant_id"]), e["entity_type"], e["canonical_identifier"])
+        if key not in seen:
+            seen[key] = dict(e)
+        else:
+            existing = seen[key]
+            old_props = existing["properties"]
+            new_props = e["properties"]
+
+            # Separate underscore-prefixed metadata from data keys
+            merged: dict[str, Any] = {}
+            for k, v in old_props.items():
+                merged[k] = v
+            for k, v in new_props.items():
+                if k.startswith("_"):
+                    # Metadata: last-writer-wins (always overwrite)
+                    merged[k] = v
+                else:
+                    # Data keys: new value wins for same key, but
+                    # keys absent from new_props are preserved
+                    merged[k] = v
+            existing["properties"] = merged
+
+            # Keep the highest attribution confidence
+            if e.get("attribution_confidence", 0) > existing.get("attribution_confidence", 0):
+                existing["attribution_status"] = e["attribution_status"]
+                existing["attribution_confidence"] = e["attribution_confidence"]
+    return list(seen.values())
 
 
 __all__ = [
