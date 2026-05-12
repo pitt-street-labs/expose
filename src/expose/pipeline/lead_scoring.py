@@ -105,6 +105,9 @@ _SIGNAL_PHRASES: dict[str, str] = {
     "predicted_rce": "predicted RCE-class weakness",
     "active_exploitation": "actively exploited (CISA KEV)",
     "slow_patch_velocity": "slow patch velocity",
+    "registrar_breach_history": "registrar with breach history",
+    "single_registrar_dependency": "single-registrar NS dependency",
+    "no_dnssec": "DNSSEC not enabled",
 }
 
 
@@ -168,6 +171,17 @@ class LeadScoringEngine:
     })
     _WEB_PORTS: frozenset[int] = frozenset({80, 443, 8080, 8443})
 
+    _PASSIVE_SCANNER_IDS: frozenset[str] = frozenset({
+        "scan-shodan", "scan-censys", "scan-binaryedge",
+    })
+
+    _PASSIVE_HIGH_RISK_PORTS: frozenset[int] = frozenset({
+        22, 23, 3389, 8080, 445,
+    })
+    _PASSIVE_MEDIUM_RISK_PORTS: frozenset[int] = frozenset({
+        135, 1883, 5672, 5900, 3306, 5432, 27017, 6379,
+    })
+
     # Weak cipher keywords (case-insensitive substring match).
     _WEAK_CIPHER_KEYWORDS: tuple[str, ...] = ("RC4", "DES", "3DES", "NULL", "EXPORT")
 
@@ -183,6 +197,7 @@ class LeadScoringEngine:
         saas_gaps: list[Any] | None = None,
         vision_analysis: Any | None = None,
         is_transitive_ma: bool = False,
+        entity_properties: dict[str, Any] | None = None,
     ) -> LeadScore:
         """Score a single entity based on all available signals.
 
@@ -207,6 +222,9 @@ class LeadScoringEngine:
             Screenshot/banner analysis result.
         is_transitive_ma:
             Whether the entity was discovered via M&A transitive search.
+        entity_properties:
+            Entity-level properties from RDAP/WHOIS and other collectors,
+            including ``registrar``, ``nameservers``, and ``dnssec`` fields.
 
         Returns
         -------
@@ -233,6 +251,9 @@ class LeadScoringEngine:
         # 5. Missing security headers (+5)
         signals.extend(self._check_missing_headers(obs))
 
+        # 6. Registrar / nameserver supply chain risk (+5-15)
+        signals.extend(self._check_registrar_risk(entity_properties or {}))
+
         # --- Advanced signals (from commercial registry) ---
         # Each registry function receives the full kwargs and extracts
         # what it needs.
@@ -245,6 +266,7 @@ class LeadScoringEngine:
             "saas_gaps": saas_gaps,
             "vision_analysis": vision_analysis,
             "is_transitive_ma": is_transitive_ma,
+            "entity_properties": entity_properties or {},
         }
         for signal_fn in _SIGNAL_REGISTRY:
             signals.extend(signal_fn(**signal_kwargs))
@@ -307,44 +329,85 @@ class LeadScoringEngine:
         """
         for obs in observations:
             cid = obs.get("_collector_id") or obs.get("collector_id", "")
-            if cid != "active-port-surface":
-                continue
 
-            payload = obs.get("structured_payload", obs)
-            open_ports: list[int] = payload.get("open_ports", [])
-            if not open_ports:
-                continue
+            if cid == "active-port-surface":
+                payload = obs.get("structured_payload", obs)
+                open_ports: list[int] = payload.get("open_ports", [])
+                if not open_ports:
+                    continue
 
-            port_set = frozenset(open_ports)
+                port_set = frozenset(open_ports)
 
-            if port_set & LeadScoringEngine._HIGH_RISK_PORTS:
-                hit = sorted(port_set & LeadScoringEngine._HIGH_RISK_PORTS)
-                return [
-                    ScoringSignal(
-                        signal_name="open_port_risk",
-                        points=20,
-                        evidence=f"High-risk ports open: {', '.join(str(p) for p in hit)}",
-                        source_module="port_surface",
-                    )
-                ]
+                if port_set & LeadScoringEngine._HIGH_RISK_PORTS:
+                    hit = sorted(port_set & LeadScoringEngine._HIGH_RISK_PORTS)
+                    return [
+                        ScoringSignal(
+                            signal_name="open_port_risk",
+                            points=20,
+                            evidence=f"High-risk ports open: {', '.join(str(p) for p in hit)}",
+                            source_module="port_surface",
+                        )
+                    ]
 
-            if port_set & LeadScoringEngine._MEDIUM_RISK_PORTS:
-                hit = sorted(port_set & LeadScoringEngine._MEDIUM_RISK_PORTS)
-                return [
-                    ScoringSignal(
-                        signal_name="open_port_risk",
-                        points=10,
-                        evidence=f"Medium-risk ports open: {', '.join(str(p) for p in hit)}",
-                        source_module="port_surface",
-                    )
-                ]
+                if port_set & LeadScoringEngine._MEDIUM_RISK_PORTS:
+                    hit = sorted(port_set & LeadScoringEngine._MEDIUM_RISK_PORTS)
+                    return [
+                        ScoringSignal(
+                            signal_name="open_port_risk",
+                            points=10,
+                            evidence=f"Medium-risk ports open: {', '.join(str(p) for p in hit)}",
+                            source_module="port_surface",
+                        )
+                    ]
 
-            if port_set <= LeadScoringEngine._WEB_PORTS:
+                if port_set <= LeadScoringEngine._WEB_PORTS:
+                    return [
+                        ScoringSignal(
+                            signal_name="open_port_risk",
+                            points=5,
+                            evidence="Only web ports open",
+                            source_module="port_surface",
+                        )
+                    ]
+
+            elif cid in LeadScoringEngine._PASSIVE_SCANNER_IDS:
+                payload = obs.get("structured_payload", obs)
+                raw_ports: list[int] = payload.get("ports", [])
+                single_port = payload.get("port")
+                if single_port is not None and isinstance(single_port, int) and not raw_ports:
+                    raw_ports = [single_port]
+                if not raw_ports:
+                    continue
+
+                port_set = frozenset(raw_ports)
+
+                if port_set & LeadScoringEngine._PASSIVE_HIGH_RISK_PORTS:
+                    hit = sorted(port_set & LeadScoringEngine._PASSIVE_HIGH_RISK_PORTS)
+                    return [
+                        ScoringSignal(
+                            signal_name="open_port_risk",
+                            points=15,
+                            evidence=f"High-risk ports observed ({cid}): {', '.join(str(p) for p in hit)}",
+                            source_module="port_surface",
+                        )
+                    ]
+
+                if port_set & LeadScoringEngine._PASSIVE_MEDIUM_RISK_PORTS:
+                    hit = sorted(port_set & LeadScoringEngine._PASSIVE_MEDIUM_RISK_PORTS)
+                    return [
+                        ScoringSignal(
+                            signal_name="open_port_risk",
+                            points=10,
+                            evidence=f"Medium-risk ports observed ({cid}): {', '.join(str(p) for p in hit)}",
+                            source_module="port_surface",
+                        )
+                    ]
+
                 return [
                     ScoringSignal(
                         signal_name="open_port_risk",
                         points=5,
-                        evidence="Only web ports open",
+                        evidence=f"Ports observed ({cid}): {', '.join(str(p) for p in sorted(port_set))}",
                         source_module="port_surface",
                     )
                 ]
@@ -363,38 +426,56 @@ class LeadScoringEngine:
         but the method returns at most one signal (the higher-scoring one)
         to avoid double-counting with the existing ``_check_weak_cert``.
         """
+        _DEPRECATED = {"TLSv1", "TLSv1.0", "TLSv1.1", "SSLv2", "SSLv3"}
+
         for obs in observations:
             cid = obs.get("_collector_id") or obs.get("collector_id", "")
-            if cid != "active-tls-handshake":
-                continue
 
-            payload = obs.get("structured_payload", obs)
-            tls_version: str = payload.get("tls_version") or ""
-            cipher_suite: str = payload.get("cipher_suite") or ""
+            if cid == "active-tls-handshake":
+                payload = obs.get("structured_payload", obs)
+                tls_version: str = payload.get("tls_version") or ""
+                cipher_suite: str = payload.get("cipher_suite") or ""
 
-            # Deprecated protocol version.
-            if tls_version in ("TLSv1", "TLSv1.0", "TLSv1.1"):
-                return [
-                    ScoringSignal(
-                        signal_name="deprecated_tls",
-                        points=15,
-                        evidence=f"Deprecated TLS version: {tls_version}",
-                        source_module="tls_handshake",
-                    )
-                ]
-
-            # Weak cipher suite.
-            cipher_upper = cipher_suite.upper()
-            for kw in LeadScoringEngine._WEAK_CIPHER_KEYWORDS:
-                if kw in cipher_upper:
+                if tls_version in _DEPRECATED:
                     return [
                         ScoringSignal(
                             signal_name="deprecated_tls",
-                            points=10,
-                            evidence=f"Weak cipher suite: {cipher_suite}",
+                            points=15,
+                            evidence=f"Deprecated TLS version: {tls_version}",
                             source_module="tls_handshake",
                         )
                     ]
+
+                cipher_upper = cipher_suite.upper()
+                for kw in LeadScoringEngine._WEAK_CIPHER_KEYWORDS:
+                    if kw in cipher_upper:
+                        return [
+                            ScoringSignal(
+                                signal_name="deprecated_tls",
+                                points=10,
+                                evidence=f"Weak cipher suite: {cipher_suite}",
+                                source_module="tls_handshake",
+                            )
+                        ]
+
+            elif cid in LeadScoringEngine._PASSIVE_SCANNER_IDS:
+                payload = obs.get("structured_payload", obs)
+                ssl_obj: dict[str, Any] = payload.get("ssl") or {}
+                if not ssl_obj:
+                    continue
+
+                versions: list[str] = ssl_obj.get("versions") or []
+                for ver in versions:
+                    normalized = ver.lstrip("-")
+                    if normalized in _DEPRECATED:
+                        return [
+                            ScoringSignal(
+                                signal_name="deprecated_tls",
+                                points=15,
+                                evidence=f"Deprecated TLS version via {cid}: {normalized}",
+                                source_module="tls_handshake",
+                            )
+                        ]
 
         return []
 
@@ -405,43 +486,80 @@ class LeadScoringEngine:
         """Self-signed or near-expiry certificate -> +5-10 points."""
         for obs in observations:
             cid = obs.get("_collector_id") or obs.get("collector_id", "")
-            if cid != "active-tls-handshake":
-                continue
 
-            payload = obs.get("structured_payload", obs)
-            subject_cn = payload.get("cert_subject_cn") or ""
-            issuer_cn = payload.get("cert_issuer_cn") or ""
+            if cid == "active-tls-handshake":
+                payload = obs.get("structured_payload", obs)
+                subject_cn = payload.get("cert_subject_cn") or ""
+                issuer_cn = payload.get("cert_issuer_cn") or ""
 
-            # Self-signed: subject CN == issuer CN.
-            if subject_cn and issuer_cn and subject_cn == issuer_cn:
-                return [
-                    ScoringSignal(
-                        signal_name="weak_certificate",
-                        points=10,
-                        evidence=f"Self-signed certificate: subject=issuer={subject_cn}",
-                        source_module="tls_handshake",
-                    )
-                ]
+                if subject_cn and issuer_cn and subject_cn == issuer_cn:
+                    return [
+                        ScoringSignal(
+                            signal_name="weak_certificate",
+                            points=10,
+                            evidence=f"Self-signed certificate: subject=issuer={subject_cn}",
+                            source_module="tls_handshake",
+                        )
+                    ]
 
-            # Near-expiry: less than 30 days remaining.
-            not_after = payload.get("cert_not_after")
-            if not_after and isinstance(not_after, str):
-                try:
-                    expiry = datetime.fromisoformat(not_after.replace("Z", "+00:00"))
-                    if expiry.tzinfo is None:
-                        expiry = expiry.replace(tzinfo=UTC)
-                    days_remaining = (expiry - datetime.now(tz=UTC)).days
-                    if days_remaining < 30:  # noqa: PLR2004
-                        return [
-                            ScoringSignal(
-                                signal_name="weak_certificate",
-                                points=5,
-                                evidence=f"Certificate expires in {days_remaining} days",
-                                source_module="tls_handshake",
-                            )
-                        ]
-                except (ValueError, TypeError):
-                    pass
+                not_after = payload.get("cert_not_after")
+                if not_after and isinstance(not_after, str):
+                    try:
+                        expiry = datetime.fromisoformat(not_after.replace("Z", "+00:00"))
+                        if expiry.tzinfo is None:
+                            expiry = expiry.replace(tzinfo=UTC)
+                        days_remaining = (expiry - datetime.now(tz=UTC)).days
+                        if days_remaining < 30:  # noqa: PLR2004
+                            return [
+                                ScoringSignal(
+                                    signal_name="weak_certificate",
+                                    points=5,
+                                    evidence=f"Certificate expires in {days_remaining} days",
+                                    source_module="tls_handshake",
+                                )
+                            ]
+                    except (ValueError, TypeError):
+                        pass
+
+            elif cid in LeadScoringEngine._PASSIVE_SCANNER_IDS:
+                payload = obs.get("structured_payload", obs)
+                ssl_obj: dict[str, Any] = payload.get("ssl") or {}
+                if not ssl_obj:
+                    continue
+
+                subject_dict: dict[str, str] = ssl_obj.get("subject") or {}
+                issuer_dict: dict[str, str] = ssl_obj.get("issuer") or {}
+                subject_cn = subject_dict.get("CN") or ""
+                issuer_cn = issuer_dict.get("CN") or ""
+
+                if subject_cn and issuer_cn and subject_cn == issuer_cn:
+                    return [
+                        ScoringSignal(
+                            signal_name="weak_certificate",
+                            points=10,
+                            evidence=f"Self-signed certificate via {cid}: subject=issuer={subject_cn}",
+                            source_module="tls_handshake",
+                        )
+                    ]
+
+                expires_raw = ssl_obj.get("expires") or ""
+                if expires_raw and isinstance(expires_raw, str):
+                    try:
+                        expiry = datetime.fromisoformat(expires_raw.replace("Z", "+00:00"))
+                        if expiry.tzinfo is None:
+                            expiry = expiry.replace(tzinfo=UTC)
+                        days_remaining = (expiry - datetime.now(tz=UTC)).days
+                        if days_remaining < 30:  # noqa: PLR2004
+                            return [
+                                ScoringSignal(
+                                    signal_name="weak_certificate",
+                                    points=5,
+                                    evidence=f"Certificate expires in {days_remaining} days ({cid})",
+                                    source_module="tls_handshake",
+                                )
+                            ]
+                    except (ValueError, TypeError):
+                        pass
 
         return []
 
@@ -450,13 +568,17 @@ class LeadScoringEngine:
         observations: list[dict[str, Any]],
     ) -> list[ScoringSignal]:
         """Missing HSTS or CSP headers -> +5 points."""
+        _HEADER_COLLECTOR_IDS = {"active-http-fingerprint", "scan-censys"}
+
         for obs in observations:
             cid = obs.get("_collector_id") or obs.get("collector_id", "")
-            if cid != "active-http-fingerprint":
+            if cid not in _HEADER_COLLECTOR_IDS:
                 continue
 
             payload = obs.get("structured_payload", obs)
             headers: dict[str, str] = payload.get("headers", {})
+            if not isinstance(headers, dict):
+                continue
 
             missing = []
             if "strict-transport-security" not in headers:
@@ -474,6 +596,96 @@ class LeadScoringEngine:
                     )
                 ]
         return []
+
+    _BREACHED_REGISTRARS: dict[str, int] = {
+        "godaddy": 15,
+        "go daddy": 15,
+        "wild west domains": 15,
+        "namecheap": 10,
+        "enom": 10,
+        "network solutions": 10,
+        "register.com": 10,
+        "name.com": 8,
+        "epik": 8,
+        "tucows": 8,
+        "hover": 8,
+    }
+
+    _REGISTRAR_NS_PATTERNS: dict[str, str] = {
+        "domaincontrol.com": "GoDaddy",
+        "registrar-servers.com": "Namecheap",
+        "name-services.com": "Enom",
+        "worldnic.com": "Network Solutions",
+        "epik.com": "Epik",
+        "hover.com": "Hover",
+    }
+
+    @staticmethod
+    def _check_registrar_risk(
+        entity_properties: dict[str, Any],
+    ) -> list[ScoringSignal]:
+        """Registrar / nameserver supply chain risk -> +5-15 points.
+
+        Examines entity properties set by the RDAP/WHOIS collector for
+        known-breached registrars, single-registrar nameserver dependency,
+        and missing DNSSEC.
+        """
+        signals: list[ScoringSignal] = []
+        if not entity_properties:
+            return signals
+
+        registrar: str = entity_properties.get("registrar") or ""
+        nameservers: list[str] = entity_properties.get("nameservers") or []
+        dnssec = entity_properties.get("dnssec")
+
+        registrar_lower = registrar.lower()
+        for keyword, points in LeadScoringEngine._BREACHED_REGISTRARS.items():
+            if keyword in registrar_lower:
+                signals.append(
+                    ScoringSignal(
+                        signal_name="registrar_breach_history",
+                        points=points,
+                        evidence=f"Registrar '{registrar}' has known breach history",
+                        source_module="rdap_whois",
+                    )
+                )
+                break
+
+        if len(nameservers) >= 2:  # noqa: PLR2004
+            providers: set[str] = set()
+            for ns in nameservers:
+                ns_lower = ns.lower()
+                matched = False
+                for domain, provider in LeadScoringEngine._REGISTRAR_NS_PATTERNS.items():
+                    if ns_lower.endswith(domain) or ns_lower.endswith(domain + "."):
+                        providers.add(provider)
+                        matched = True
+                        break
+                if not matched:
+                    parts = ns_lower.rstrip(".").rsplit(".", 2)
+                    if len(parts) >= 2:  # noqa: PLR2004
+                        providers.add(".".join(parts[-2:]))
+            if len(providers) == 1:
+                signals.append(
+                    ScoringSignal(
+                        signal_name="single_registrar_dependency",
+                        points=10,
+                        evidence=f"All {len(nameservers)} nameservers from {next(iter(providers))}",
+                        source_module="rdap_whois",
+                    )
+                )
+
+        if dnssec is not None and not dnssec:
+            signals.append(
+                ScoringSignal(
+                    signal_name="no_dnssec",
+                    points=5,
+                    evidence="DNSSEC not enabled for domain",
+                    source_module="rdap_whois",
+                )
+            )
+
+        return signals
 
 
 __all__ = [

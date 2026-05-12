@@ -478,6 +478,18 @@ _DATABASE_PORTS: frozenset[int] = frozenset({
     3306, 5432, 1433, 1521, 27017, 6379, 9042, 5984, 8529,
 })
 
+# Internal hostname patterns that should never appear in public-facing data
+_INTERNAL_HOSTNAME_MARKERS: tuple[str, ...] = (
+    ".int.", ".internal.", ".local.", ".corp.", ".priv.", ".lan.",
+)
+
+# DNS record names that indicate direct residential IP risk when pointing
+# at an IP without CDN/proxy protection
+_SENSITIVE_SERVICE_PREFIXES: tuple[str, ...] = (
+    "vpn.", "mail.", "smtp.", "imap.", "pop.", "owa.", "autodiscover.",
+    "remote.", "rdp.", "ssh.",
+)
+
 # ============================================================================
 # Vendor DNA knowledge bases
 # ============================================================================
@@ -1730,6 +1742,154 @@ class CisoReportGenerator:
                     f"The organization has {len(entities)} externally visible "
                     f"entities. A large surface increases the probability of "
                     f"unmanaged or shadow IT assets."
+                ),
+            ))
+
+        # Finding: internal hostname leakage in public data
+        leaked_internal: list[str] = []
+        for entity in entities:
+            identifier = entity.get("canonical_identifier", "").lower()
+            for marker in _INTERNAL_HOSTNAME_MARKERS:
+                if marker in identifier:
+                    leaked_internal.append(
+                        entity.get("canonical_identifier", identifier),
+                    )
+                    break
+        if leaked_internal:
+            examples = ", ".join(leaked_internal[:5])
+            suffix = (
+                f" (and {len(leaked_internal) - 5} more)"
+                if len(leaked_internal) > 5  # noqa: PLR2004
+                else ""
+            )
+            findings.append(KeyFinding(
+                title="Internal hostnames exposed in public data",
+                severity="high",
+                description=(
+                    f"{len(leaked_internal)} internal hostname(s) appeared in "
+                    f"publicly visible records (CT logs, DNS, WHOIS): "
+                    f"{examples}{suffix}. Internal naming conventions leak "
+                    f"network topology and make targeted attacks easier."
+                ),
+            ))
+
+        # Finding: direct residential IP exposure
+        exposed_ips: list[str] = []
+        for entity in entities:
+            if entity.get("entity_type") != "ip_address":
+                continue
+            props = entity.get("properties", {})
+            relationships = entity.get("relationships", [])
+            dns_names: list[str] = []
+            for rel in relationships:
+                rel_target = str(rel.get("target", "")).lower()
+                for prefix in _SENSITIVE_SERVICE_PREFIXES:
+                    if rel_target.startswith(prefix):
+                        dns_names.append(rel_target)
+                        break
+            if not dns_names:
+                dns_records = props.get("dns_records", [])
+                for rec in dns_records:
+                    name = str(rec if isinstance(rec, str) else
+                               rec.get("name", "")).lower()
+                    for prefix in _SENSITIVE_SERVICE_PREFIXES:
+                        if name.startswith(prefix):
+                            dns_names.append(name)
+                            break
+            has_cdn = props.get("cdn_provider") or props.get("is_cdn")
+            has_proxy = props.get("is_proxied") or props.get("waf_detected")
+            if dns_names and not has_cdn and not has_proxy:
+                exposed_ips.append(
+                    f"{entity.get('canonical_identifier', '?')} "
+                    f"({', '.join(dns_names[:3])})",
+                )
+        if exposed_ips:
+            findings.append(KeyFinding(
+                title="Sensitive services on unprotected IP address",
+                severity="medium",
+                description=(
+                    f"{len(exposed_ips)} IP address(es) host sensitive services "
+                    f"(VPN, mail, remote access) with no CDN or proxy "
+                    f"protection: {'; '.join(exposed_ips[:3])}. Direct IP "
+                    f"exposure to residential or unshielded addresses enables "
+                    f"targeted scanning and DDoS."
+                ),
+            ))
+
+        # Finding: no HTTPS on primary (apex) domain
+        domains = [
+            e for e in entities
+            if e.get("entity_type") == "domain"
+        ]
+        if domains:
+            apex_candidates = [
+                e for e in domains
+                if e.get("canonical_identifier", "").count(".") == 1
+            ]
+            for apex in apex_candidates:
+                props = apex.get("properties", {})
+                has_tls = bool(
+                    props.get("tls_version")
+                    or props.get("certificate")
+                    or props.get("ssl_cert")
+                )
+                has_cert_obs = False
+                for obs in apex.get("observations", []):
+                    obs_type = str(
+                        obs.get("observation_type", obs.get("type", "")),
+                    ).lower()
+                    if "tls" in obs_type or "certificate" in obs_type:
+                        has_cert_obs = True
+                        break
+                cert_entities = [
+                    e for e in entities
+                    if e.get("entity_type") == "certificate"
+                    and apex.get("canonical_identifier", "").lower()
+                    in str(e.get("canonical_identifier", "")).lower()
+                ]
+                if not has_tls and not has_cert_obs and not cert_entities:
+                    findings.append(KeyFinding(
+                        title=(
+                            f"No HTTPS detected on "
+                            f"{apex.get('canonical_identifier', 'apex domain')}"
+                        ),
+                        severity="medium",
+                        description=(
+                            f"The primary domain "
+                            f"{apex.get('canonical_identifier', '')} has no "
+                            f"TLS certificate or HTTPS configuration detected. "
+                            f"All public-facing domains should enforce HTTPS to "
+                            f"protect visitor traffic and prevent downgrade "
+                            f"attacks."
+                        ),
+                    ))
+
+        # Finding: single registrar dependency
+        registrars: set[str] = set()
+        domain_count = 0
+        for entity in entities:
+            if entity.get("entity_type") != "domain":
+                continue
+            props = entity.get("properties", {})
+            registrar = (
+                props.get("registrar")
+                or props.get("registrar_name")
+                or props.get("rdap_registrar")
+            )
+            if registrar:
+                registrars.add(str(registrar).strip().lower())
+                domain_count += 1
+        if len(registrars) == 1 and domain_count >= 2:  # noqa: PLR2004
+            registrar_name = next(iter(registrars)).title()
+            findings.append(KeyFinding(
+                title="Single registrar dependency",
+                severity="low",
+                description=(
+                    f"All {domain_count} domains with registrar data use the "
+                    f"same provider ({registrar_name}). A single registrar "
+                    f"compromise or account takeover could affect all domains "
+                    f"simultaneously. Consider distributing critical domains "
+                    f"across multiple registrars."
                 ),
             ))
 

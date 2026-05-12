@@ -339,6 +339,79 @@ class EntityRepository:
 
             updates.append((entity_id, new_status, Decimal(new_confidence)))
 
+        # --- Second pass: parent-domain attribution inheritance --------
+        # Subdomains seen by only one collector stay ``unattributed`` after
+        # the collector-count pass above.  If the parent (apex) domain has
+        # ``medium`` or higher attribution, the subdomain should inherit at
+        # least ``medium`` (confidence 0.400) as a secondary signal.
+        #
+        # Build the set of entity IDs that the collector-count pass already
+        # plans to update so we don't overwrite them.
+        updated_ids: set[UUID] = {eid for eid, _, _ in updates}
+
+        # Collect all domain entities for this tenant so we can match
+        # subdomains to their apex parent.
+        domain_stmt = select(
+            Entity.id,
+            Entity.canonical_identifier,
+            Entity.attribution_status,
+        ).where(
+            Entity.tenant_id == tenant_id,
+            Entity.entity_type == "domain",
+        )
+        domain_result = await self._session.execute(domain_stmt)
+        domain_rows = list(domain_result.all())
+
+        # Map canonical_identifier -> attribution_status for domains that
+        # already have ``medium`` or better (either from the DB or from
+        # the collector-count updates we just computed).
+        _INHERITABLE_STATUSES = {"medium", "high", "confirmed"}
+
+        # Start with the DB-stored status, then overlay any collector-count
+        # updates that are about to be flushed.
+        domain_status: dict[str, str] = {
+            cid: status for _, cid, status in domain_rows
+        }
+        for eid, new_status, _ in updates:
+            # Find the canonical_identifier for this entity id
+            for did, cid, _ in domain_rows:
+                if did == eid:
+                    domain_status[cid] = new_status
+                    break
+
+        # Set of apex domains with inheritable attribution
+        attributed_apex: set[str] = {
+            cid
+            for cid, status in domain_status.items()
+            if status in _INHERITABLE_STATUSES
+        }
+
+        # For every unattributed domain, check if it's a subdomain of an
+        # attributed apex domain and promote it.
+        _INHERIT_STATUS = "medium"
+        _INHERIT_CONFIDENCE = Decimal("0.400")
+
+        for entity_id, cid, current_status in domain_rows:
+            # Skip entities already handled by the collector-count pass
+            if entity_id in updated_ids:
+                continue
+            # Only promote unattributed entities
+            if current_status != _DEFAULT_STATUS:
+                continue
+            # Walk up the label hierarchy to find an attributed parent.
+            # e.g. "www.korlogos.com" -> check "korlogos.com"
+            #      "a.b.korlogos.com" -> check "b.korlogos.com", then "korlogos.com"
+            parts = cid.split(".")
+            for i in range(1, len(parts)):
+                parent = ".".join(parts[i:])
+                if parent in attributed_apex:
+                    updates.append(
+                        (entity_id, _INHERIT_STATUS, _INHERIT_CONFIDENCE)
+                    )
+                    # Mark so we don't double-add
+                    updated_ids.add(entity_id)
+                    break
+
         if not updates:
             return 0
 

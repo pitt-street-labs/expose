@@ -1358,7 +1358,6 @@ class TestSignalPhraseCoverage:
         """Every signal name emitted by _check_* methods must be in _SIGNAL_PHRASES."""
         from expose.pipeline.lead_scoring import _SIGNAL_PHRASES
 
-        # Known signal names from all _check_* methods.
         expected_names = {
             "non_production_exposed",
             "no_waf_protection",
@@ -1379,6 +1378,9 @@ class TestSignalPhraseCoverage:
             "predicted_rce",
             "active_exploitation",
             "slow_patch_velocity",
+            "registrar_breach_history",
+            "single_registrar_dependency",
+            "no_dnssec",
         }
         for name in expected_names:
             assert name in _SIGNAL_PHRASES, f"Missing phrase for signal: {name}"
@@ -1407,6 +1409,9 @@ class TestSignalPhraseCoverage:
             "predicted_rce",
             "active_exploitation",
             "slow_patch_velocity",
+            "registrar_breach_history",
+            "single_registrar_dependency",
+            "no_dnssec",
         }
         for name in _SIGNAL_PHRASES:
             assert name in expected_names, f"Orphan phrase for unknown signal: {name}"
@@ -1922,3 +1927,429 @@ class TestVendorSignalPhraseCoverage:
             assert sig.signal_name
             assert sig.evidence
             assert sig.source_module == "vendor_cve_history"
+
+
+# ===========================================================================
+# Registrar / nameserver supply chain risk signal tests
+# ===========================================================================
+
+
+class TestRegistrarBreachHistorySignal:
+    """Known-breached registrar -> +8-15 points."""
+
+    def test_godaddy_registrar_adds_15(self) -> None:
+        props = {"registrar": "GoDaddy.com, LLC", "nameservers": [], "dnssec": None}
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name == "registrar_breach_history"
+        ]
+        assert len(sigs) == 1
+        assert sigs[0].points == 15
+        assert "GoDaddy" in sigs[0].evidence
+
+    def test_godaddy_case_insensitive(self) -> None:
+        props = {"registrar": "GODADDY.COM, LLC"}
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name == "registrar_breach_history"
+        ]
+        assert len(sigs) == 1
+        assert sigs[0].points == 15
+
+    def test_wild_west_domains_adds_15(self) -> None:
+        props = {"registrar": "Wild West Domains, LLC"}
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name == "registrar_breach_history"
+        ]
+        assert len(sigs) == 1
+        assert sigs[0].points == 15
+
+    def test_namecheap_registrar_adds_10(self) -> None:
+        props = {"registrar": "Namecheap, Inc."}
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name == "registrar_breach_history"
+        ]
+        assert len(sigs) == 1
+        assert sigs[0].points == 10
+
+    def test_enom_registrar_adds_10(self) -> None:
+        props = {"registrar": "eNom, LLC"}
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name == "registrar_breach_history"
+        ]
+        assert sigs[0].points == 10
+
+    def test_network_solutions_adds_10(self) -> None:
+        props = {"registrar": "Network Solutions, LLC"}
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name == "registrar_breach_history"
+        ]
+        assert sigs[0].points == 10
+
+    def test_epik_adds_8(self) -> None:
+        props = {"registrar": "Epik, Inc."}
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name == "registrar_breach_history"
+        ]
+        assert sigs[0].points == 8
+
+    def test_unknown_registrar_no_signal(self) -> None:
+        props = {"registrar": "Cloudflare, Inc."}
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name == "registrar_breach_history"
+        ]
+        assert len(sigs) == 0
+
+    def test_empty_registrar_no_signal(self) -> None:
+        props = {"registrar": ""}
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name == "registrar_breach_history"
+        ]
+        assert len(sigs) == 0
+
+    def test_missing_registrar_no_signal(self) -> None:
+        props = {"nameservers": ["ns1.example.com"]}
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name == "registrar_breach_history"
+        ]
+        assert len(sigs) == 0
+
+    def test_signal_source_module(self) -> None:
+        props = {"registrar": "GoDaddy.com, LLC"}
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name == "registrar_breach_history"
+        ]
+        assert sigs[0].source_module == "rdap_whois"
+
+
+class TestSingleRegistrarDependencySignal:
+    """All nameservers from same provider -> +10 points."""
+
+    def test_godaddy_ns_pair_adds_10(self) -> None:
+        props = {
+            "nameservers": [
+                "ns71.domaincontrol.com",
+                "ns72.domaincontrol.com",
+            ],
+        }
+        result = _ENGINE.score_entity(
+            entity_identifier="korlogos.com", entity_properties=props
+        )
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name == "single_registrar_dependency"
+        ]
+        assert len(sigs) == 1
+        assert sigs[0].points == 10
+        assert "GoDaddy" in sigs[0].evidence
+        assert "2" in sigs[0].evidence
+
+    def test_namecheap_ns_pair_adds_10(self) -> None:
+        props = {
+            "nameservers": [
+                "dns1.registrar-servers.com",
+                "dns2.registrar-servers.com",
+            ],
+        }
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name == "single_registrar_dependency"
+        ]
+        assert len(sigs) == 1
+        assert "Namecheap" in sigs[0].evidence
+
+    def test_mixed_providers_no_signal(self) -> None:
+        props = {
+            "nameservers": [
+                "ns71.domaincontrol.com",
+                "dns1.registrar-servers.com",
+            ],
+        }
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name == "single_registrar_dependency"
+        ]
+        assert len(sigs) == 0
+
+    def test_single_ns_no_signal(self) -> None:
+        props = {"nameservers": ["ns1.domaincontrol.com"]}
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name == "single_registrar_dependency"
+        ]
+        assert len(sigs) == 0
+
+    def test_empty_ns_no_signal(self) -> None:
+        props = {"nameservers": []}
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name == "single_registrar_dependency"
+        ]
+        assert len(sigs) == 0
+
+    def test_trailing_dot_handled(self) -> None:
+        props = {
+            "nameservers": [
+                "ns71.domaincontrol.com.",
+                "ns72.domaincontrol.com.",
+            ],
+        }
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name == "single_registrar_dependency"
+        ]
+        assert len(sigs) == 1
+        assert "GoDaddy" in sigs[0].evidence
+
+    def test_unrecognized_same_domain_adds_10(self) -> None:
+        props = {
+            "nameservers": [
+                "ns1.customdns.net",
+                "ns2.customdns.net",
+            ],
+        }
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name == "single_registrar_dependency"
+        ]
+        assert len(sigs) == 1
+        assert sigs[0].points == 10
+
+    def test_unrecognized_different_domains_no_signal(self) -> None:
+        props = {
+            "nameservers": [
+                "ns1.customdns.net",
+                "ns1.otherdns.org",
+            ],
+        }
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name == "single_registrar_dependency"
+        ]
+        assert len(sigs) == 0
+
+    def test_signal_source_module(self) -> None:
+        props = {
+            "nameservers": [
+                "ns71.domaincontrol.com",
+                "ns72.domaincontrol.com",
+            ],
+        }
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name == "single_registrar_dependency"
+        ]
+        assert sigs[0].source_module == "rdap_whois"
+
+
+class TestNoDnssecSignal:
+    """DNSSEC not enabled -> +5 points."""
+
+    def test_dnssec_false_adds_5(self) -> None:
+        props = {"dnssec": False}
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [s for s in result.contributing_signals if s.signal_name == "no_dnssec"]
+        assert len(sigs) == 1
+        assert sigs[0].points == 5
+        assert "DNSSEC" in sigs[0].evidence
+
+    def test_dnssec_true_no_signal(self) -> None:
+        props = {"dnssec": True}
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [s for s in result.contributing_signals if s.signal_name == "no_dnssec"]
+        assert len(sigs) == 0
+
+    def test_dnssec_none_no_signal(self) -> None:
+        props = {"dnssec": None}
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [s for s in result.contributing_signals if s.signal_name == "no_dnssec"]
+        assert len(sigs) == 0
+
+    def test_dnssec_absent_no_signal(self) -> None:
+        props = {"registrar": "SomeRegistrar"}
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [s for s in result.contributing_signals if s.signal_name == "no_dnssec"]
+        assert len(sigs) == 0
+
+    def test_signal_source_module(self) -> None:
+        props = {"dnssec": False}
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        sigs = [s for s in result.contributing_signals if s.signal_name == "no_dnssec"]
+        assert sigs[0].source_module == "rdap_whois"
+
+
+class TestRegistrarRiskCombined:
+    """Composite tests for all three registrar risk signals."""
+
+    def test_all_three_signals_fire_together(self) -> None:
+        props = {
+            "registrar": "GoDaddy.com, LLC",
+            "nameservers": [
+                "ns71.domaincontrol.com",
+                "ns72.domaincontrol.com",
+            ],
+            "dnssec": False,
+        }
+        result = _ENGINE.score_entity(
+            entity_identifier="korlogos.com", entity_properties=props
+        )
+        signal_names = {s.signal_name for s in result.contributing_signals}
+        assert "registrar_breach_history" in signal_names
+        assert "single_registrar_dependency" in signal_names
+        assert "no_dnssec" in signal_names
+
+    def test_korlogos_scenario_total_points(self) -> None:
+        props = {
+            "registrar": "GoDaddy.com, LLC",
+            "nameservers": [
+                "ns71.domaincontrol.com",
+                "ns72.domaincontrol.com",
+            ],
+            "dnssec": False,
+        }
+        result = _ENGINE.score_entity(
+            entity_identifier="korlogos.com", entity_properties=props
+        )
+        registrar_signal_names = {
+            "registrar_breach_history",
+            "single_registrar_dependency",
+            "no_dnssec",
+        }
+        registrar_points = sum(
+            s.points for s in result.contributing_signals
+            if s.signal_name in registrar_signal_names
+        )
+        assert registrar_points == 30
+
+    def test_no_entity_properties_no_signals(self) -> None:
+        result = _ENGINE.score_entity(entity_identifier="example.com")
+        registrar_signal_names = {
+            "registrar_breach_history",
+            "single_registrar_dependency",
+            "no_dnssec",
+        }
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name in registrar_signal_names
+        ]
+        assert len(sigs) == 0
+
+    def test_empty_entity_properties_no_signals(self) -> None:
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties={}
+        )
+        registrar_signal_names = {
+            "registrar_breach_history",
+            "single_registrar_dependency",
+            "no_dnssec",
+        }
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name in registrar_signal_names
+        ]
+        assert len(sigs) == 0
+
+    def test_registrar_signals_models_valid(self) -> None:
+        props = {
+            "registrar": "GoDaddy.com, LLC",
+            "nameservers": [
+                "ns71.domaincontrol.com",
+                "ns72.domaincontrol.com",
+            ],
+            "dnssec": False,
+        }
+        result = _ENGINE.score_entity(
+            entity_identifier="example.com", entity_properties=props
+        )
+        registrar_signal_names = {
+            "registrar_breach_history",
+            "single_registrar_dependency",
+            "no_dnssec",
+        }
+        sigs = [
+            s for s in result.contributing_signals
+            if s.signal_name in registrar_signal_names
+        ]
+        assert len(sigs) == 3
+        for sig in sigs:
+            assert isinstance(sig, ScoringSignal)
+            assert 0 <= sig.points <= 100
+            assert sig.signal_name
+            assert sig.evidence
+            assert sig.source_module == "rdap_whois"
