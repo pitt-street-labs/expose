@@ -337,6 +337,12 @@ class EntityRepository:
             ):
                 continue
 
+            # Never downgrade: if entity already has medium+ attribution
+            # (e.g., seed entities), don't overwrite with a weaker tier.
+            _STATUS_RANK = {"confirmed": 4, "high": 3, "medium": 2, "unattributed": 0}
+            if _STATUS_RANK.get(current_status, 0) > _STATUS_RANK.get(new_status, 0):
+                continue
+
             updates.append((entity_id, new_status, Decimal(new_confidence)))
 
         # --- Second pass: parent-domain attribution inheritance --------

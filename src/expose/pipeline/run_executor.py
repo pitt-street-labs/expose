@@ -1187,6 +1187,7 @@ class RunExecutor:
                             scoring_kwargs["is_transitive_ma"] = True
                             break
 
+                    scoring_kwargs["entity_properties"] = dict(entity.properties or {})
                     score_result = scorer.score_entity(**scoring_kwargs)
                     updated_props = dict(entity.properties or {})
                     updated_props["_lead_score"] = score_result.score
